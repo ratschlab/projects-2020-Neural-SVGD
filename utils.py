@@ -6,6 +6,7 @@ from jax.ops import index_update, index
 ############ Kernel
 @jit
 def normsq(x):
+    assert x.ndim == 1
     x = np.array(x)
     return np.vdot(x, x)
 
@@ -13,13 +14,13 @@ def normsq(x):
 def single_rbf(x, y, h):
     """
     x and y are d-dimensional arrays
-    h is a scalar parameter
+    h is a scalar parameter, h > 0
     """
     assert x.ndim == 1 and y.ndim == 1
-    return np.exp(- normsq(x - y) / (2 * h**2))
+    return np.exp(- normsq(x - y) / (2 * h))
 
 batched_rbf = vmap(single_rbf, (0, 0, None), 0)
-batched_normsq = vmap(normsq) # outputs vector of diffs
+batched_normsq = vmap(normsq) # outputs vector of norms
 
 ### distances, norm
 
