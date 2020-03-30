@@ -52,7 +52,7 @@ def squared_distance_matrix(x):
     """
     n = x.shape[0]
     if x.ndim == 1:
-        x = np.reshape(x, (n, 1))
+        x = np.reshape(x, (n, 1)) # add dummy dimension
     xx = np.tile(x, (n, 1, 1)) # shape (n, n, d)
     diff = xx - xx.transpose((1, 0, 2))
     return vv_normsq(diff)

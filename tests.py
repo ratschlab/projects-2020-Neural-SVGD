@@ -20,3 +20,5 @@ x2 = random.normal(key, shape=(30, 1))
 for x in [x1, x2]:
     assert np.all(np.absolute(squareform(pdist(x)**2) - (squared_distance_matrix(x))) < 0.01)
 
+assert np.all(np.absolute(squareform(pdist(x2)**2) - (squared_distance_matrix(x2[:, 0]))) < 0.01)
+print("squared_distance_matrix: check.")

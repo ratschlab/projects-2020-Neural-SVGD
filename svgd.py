@@ -97,10 +97,14 @@ def svgd(x, logp, stepsize, L, kernel_param, kernel_param_update_rule=None):
 @jit
 def kernel_param_update_rule(x):
     """
-    IN: np array of shape (n,): set of 1-dim particles
+    IN: np array of shape (n,) or (n,d): set of particles
     OUT: scalar: Updated bandwidth parameter for RBF kernel, based on update rule from the SVGD paper.
     """
-    assert x.ndim == 1 or x.ndim == 2 # TODO remove one of these, best the latter
-    n = x.shape[0]
-    h = np.median(squared_distance_matrix(x)) / np.log(n)
-    return h
+    if x.ndim == 2:
+        return vmap(kernel_param_update_rule, 1)(x)
+    elif x.ndim == 1:
+        n = x.shape[0]
+        h = np.median(squared_distance_matrix(x)) / np.log(n)
+        return h
+    else:
+        raise ValueError("Shape of x has to be either (n,) or (n, d)")
