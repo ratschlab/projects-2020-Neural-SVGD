@@ -1,33 +1,32 @@
 import jax.numpy as np
 from jax import grad, jit, vmap
 from jax import random
-import matplotlib.pyplot as plt
 
-from utils import normsq, single_rbf, pairwise_distances
+from utils import ard, squared_distance_matrix
 
 def phi_j(x, y, logp, kernel):
     """
     IN:
-    x and y are arrays of length d
-    kernel is a callable that computes the kernel k(x, y, kernel_params)
-    logp is the log of a differentiable pdf p
+    * x, y: np arrays of shape (d,)
+    * kernel: callable, computes the kernel k(x, y)
+    * logp: callable, computes log of a differentiable pdf p(x) given input value x
 
     OUT:
-    \nabla_x log(p(x)) * k(x, y) + \nabla_x k(x, y)
-    that is, phi(x_i) = \sum_j phi_j(x_j, x_i)
+    * np array of shape (d,):
+    \nabla_x log(p(x)) * k(x, y) + \nabla_x k(x, y).
+    This means that phi(x_i) = \sum_j phi_j(x_j, x_i)
     """
     assert x.ndim == 1 and y.ndim == 1
     return grad(logp)(x) * kernel(x, y) + grad(kernel)(x, y)
-
 phi_j_batched = vmap(phi_j, (0, 0, None, None), 0)
 
 def update(x, logp, stepsize, kernel_params):
     """
     IN:
-    x is an np array of shape n x d
-    logp is the log of a differentiable pdf p
-    stepsize is a float
-    kernel_params are a set of parameters for the kernel
+    * x: np array of shape n x d
+    * logp: callable, log of a differentiable pdf p
+    * stepsize: scalar > 0
+    * kernel_params: np array (or dict?) fed to kernel(x, y, kernel_params)
 
     OUT:
     xnew = x + stepsize * \phi^*(x)
@@ -36,9 +35,7 @@ def update(x, logp, stepsize, kernel_params):
     note that this is an inefficient way to do things, since we're computing k(x, y) twice for each x, y combination.
     """
     assert x.ndim == 2
-    kernel = lambda x, y: single_rbf(x, y, kernel_params)
-#     kerneltest = lambda x, y: np.exp(- normsq(x - y) / (2 * kernel_params ** 2))
-#     assert kerneltest(x[0], x[1]) == kernel(x[0], x[1])
+    kernel = lambda x, y: ard(x, y, kernel_params)
 
     xnew = []
     n = x.shape[0]
@@ -50,38 +47,60 @@ def update(x, logp, stepsize, kernel_params):
 
     return xnew
 
-update = jit(update, static_argnums=(1,)) # logp is static
+update = jit(update, static_argnums=(1,)) # logp is static. When logp changes, jit recompiles.
 
 
-def svgd(x, logp, stepsize, kernel_params, L, update_kernel_params=False, kernel_param_update_rule=None):
+def svgd(x, logp, stepsize, L, kernel_param, kernel_param_update_rule=None):
     """
-    x is an np array of shape n x d
-    logp is the log of a differentiable pdf p (callable)
-    stepsize is a float
-    kernel is a differentiable function k(x, y, h) that computes the rbf kernel (callable)
-    L is an integer (number of iterations)
-
-    if update_kernel_params is True, then kernel_param_update_rule must be given.
-    kernel_param_update_rule is a callable that takes xnew as input and outputs an updated set of kernel parameters.
+    IN:
+    * x is an np array of shape n x d
+    * logp is the log of a differentiable pdf p (callable)
+    * stepsize is a float
+    * kernel_param is a positive scalar: bandwidth parameter for RBF kernel
+    * L is an integer (number of iterations)
+    * kernel_param_update_rule is a callable that takes the updated particles as input and outputs an updated set of kernel parameters. If supplied, the argument kernel_param will be ignored.
 
     OUT:
-    Updated particles x (np array of shape n x d) after L steps of SVGD
+    * Updated particles x (np array of shape n x d) after L steps of SVGD
+    * dictionary with logs
     """
     assert x.ndim == 2
+    if kernel_param_update_rule is not None and kernel_param is not None:
+        raise ValueError("When kernel_param_update_rule is supplied, kernel_param should be None (as it's not used in that case).")
+    elif kernel_param_update_rule is None and kernel_param is None:
+        raise ValueError("When kernel_param_updater_rule is None, you need to supply a value for the kernel parameter.")
+    else:
+        pass
+
     log = {
-        "kernel_params": [kernel_params],
-        "particle_mean": [np.mean(x)],
-        "particle_var": [np.var(x)]
+        "kernel_params": [],
+        "particle_mean": [np.mean(x, axis=0)],
+        "particle_var": [np.var(x, axis=0)]
     }
 
     for i in range(L):
-        x = update(x, logp, stepsize, kernel_params)
-        log["particle_mean"].append(np.mean(x))
-        log["particle_var"].append(np.var(x))
+        if kernel_param_update_rule is not None:
+            kernel_param = kernel_param_update_rule(x)
+            log["kernel_params"].append(kernel_param)
+        else:
+            pass
+
+        x = update(x, logp, stepsize, kernel_param)
+        log["particle_mean"].append(np.mean(x, axis=0))
+        log["particle_var"].append(np.var(x, axis=0))
 
         if np.any(np.isnan(x)):
-            raise ValueError(f"NaN produced at iteration {i}")
-        if update_kernel_params:
-            kernel_params = kernel_param_update_rule(x)
-            log["kernel_params"].append(kernel_params)
+            log["errors"] = f"NaN produced at iteration {i}"
+            break
     return x, log
+
+@jit
+def kernel_param_update_rule(x):
+    """
+    IN: np array of shape (n,): set of 1-dim particles
+    OUT: scalar: Updated bandwidth parameter for RBF kernel, based on update rule from the SVGD paper.
+    """
+    assert x.ndim == 1 or x.ndim == 2 # TODO remove one of these, best the latter
+    n = x.shape[0]
+    h = np.median(squared_distance_matrix(x)) / np.log(n)
+    return h

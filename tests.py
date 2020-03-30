@@ -1,75 +1,22 @@
+######### TESTS
+## this script throws assertion errors if something weird is going on.
+## TODO: read up on best practices for unit testing
+
+
 import jax.numpy as np
-from jax import grad, jit, vmap
-from jax import random
-
-from utils import normsq, rbf, single_rbf
+from jax import grad, jit, vmap, random
 
 
-# kernel sanity check:
+#################################
+##### pairwise distances
+from scipy.spatial.distance import pdist, squareform
+from utils import squared_distance_matrix
+
 key = random.PRNGKey(0)
-x = random.normal(key, (10,2))
-h = 1
+x1 = random.normal(key, shape=(20, 5))
+key = random.PRNGKey(1)
+x2 = random.normal(key, shape=(30, 1))
 
-a = rbf(x, h)[0]
-
-for i in range(10):
-    assert (single_rbf(x[0], x[i], h) == a[i])
-
-
-##############################
-## update function testing
-##########################
-# experiment 1
-from jax.scipy.stats import multivariate_normal
-x = np.array([0., 1.])
-
-def kernel(x, y):
-    return single_rbf(x, y, h = 1)
-
-def p(x):
-    x = np.array(x)
-    if len(x.shape) == 0:
-        n = 1
-    else:
-        n = x.shape[0]
-    return multivariate_normal.pdf(x, mean=np.zeros(n), cov=np.identity(n))
-
-def logp(x):
-    return np.log(p(x))
-
-stepsize = 1
-
-# compute update
-xnew = update(x, logp, stepsize, kernel)
-
-
-# check
-check = np.array([- 2 / np.sqrt(np.e)]) # dunno what the second thing is
-assert check[0] == xnew[0]
-
-# experiment 2
-x = np.array([1.])
-stepsize = 0.5
-
-xnew = update(x, logp, stepsize, kernel)
-check = np.array([0.5])
-
-assert xnew[0] == check[0]
-
-# experiment 3 (just check convergence)
-x = np.array([[0., 1.], [1, 1], [0, 0], [4, 5]])
-stepsize = 0.1
-x
-
-for _ in range(20):
-    xnew = update(x, logp, stepsize, kernel)
-    diff = normsq(x - xnew)
-    x = xnew
-
-print(diff)
-assert diff < 0.1
-
-
-
-
+for x in [x1, x2]:
+    assert np.all(np.absolute(squareform(pdist(x)**2) - (squared_distance_matrix(x))) < 0.01)
 
