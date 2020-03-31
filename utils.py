@@ -29,7 +29,7 @@ def ard(x, y, h):
     x, y, h: np arrays of shape (d,)
 
     OUT:
-    scalar kernel(x, y, h)
+    scalar kernel(x, y, h).
     """
     assert x.ndim == 1
     assert y.ndim == 1
@@ -37,7 +37,7 @@ def ard(x, y, h):
     assert x.shape == y.shape
     if h.ndim == 1:
         assert x.shape == h.shape
-    return np.exp(- np.sum((x - y)**2 / h**2 / 2))
+    return np.exp(- np.sum((x - y)**2 / h**2) / 2)
 
 #############################
 ### better pairwise distances

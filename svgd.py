@@ -92,6 +92,10 @@ def svgd(x, logp, stepsize, L, kernel_param, kernel_param_update_rule=None):
         if np.any(np.isnan(x)):
             log["errors"] = f"NaN produced at iteration {i}"
             break
+
+    log["particle_mean"] = np.array(log["particle_mean"])
+    log["particle_var"] = np.array(log["particle_var"])
+    log["kernel_params"] = np.array(log["kernel_params"])
     return x, log
 
 @jit
