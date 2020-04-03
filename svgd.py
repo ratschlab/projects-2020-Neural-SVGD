@@ -1,8 +1,8 @@
 import jax.numpy as np
-from jax import grad, jit, vmap
-from jax import random
-
+from jax import grad, jit, vmap, random
+from jax.lax import fori_loop
 from utils import ard, squared_distance_matrix
+from jax.ops import index, index_add, index_update
 
 def phi_j(x, y, logp, kernel):
     """
@@ -50,7 +50,7 @@ def update(x, logp, stepsize, kernel_params):
 update = jit(update, static_argnums=(1,)) # logp is static. When logp changes, jit recompiles.
 
 
-def svgd(x, logp, stepsize, L, kernel_param, kernel_param_update_rule=None):
+def svgd(x, logp, stepsize, L, kernel_param_update_rule):
     """
     IN:
     * x is an np array of shape n x d
@@ -64,39 +64,51 @@ def svgd(x, logp, stepsize, L, kernel_param, kernel_param_update_rule=None):
     * Updated particles x (np array of shape n x d) after L steps of SVGD
     * dictionary with logs
     """
-    assert x.ndim == 2
-    if kernel_param_update_rule is not None and kernel_param is not None:
-        raise ValueError("When kernel_param_update_rule is supplied, kernel_param should be None (as it's not used in that case).")
-    elif kernel_param_update_rule is None and kernel_param is None:
-        raise ValueError("When kernel_param_updater_rule is None, you need to supply a value for the kernel parameter.")
+    if kernel_param_update_rule is None:
+        kernel_param_update_rule = lambda x: 1
     else:
         pass
+    assert x.ndim == 2
 
+    d = x.shape[1]
     log = {
-        "kernel_params": [],
-        "particle_mean": [np.mean(x, axis=0)],
-        "particle_var": [np.var(x, axis=0)]
+        "kernel_param": np.empty(shape=(L, d)),
+        "particle_mean": np.empty(shape=(L, d)),
+        "particle_var": np.empty(shape=(L, d))
     }
 
-    for i in range(L):
-        if kernel_param_update_rule is not None:
-            kernel_param = kernel_param_update_rule(x)
-            log["kernel_params"].append(kernel_param)
-        else:
-            pass
+    def update_fun(i, u):
+        """
+        1) compute kernel_param from x
+        2) compute updated x,
+        3) log everything
 
+        Parameters:
+        * i: iteration counter (unused)
+        * u = [x, log]
+        """
+        x, log = u
+        previous_param = log["kernel_param"][i-1, :]
+        kernel_param = kernel_param_update_rule(x)
         x = update(x, logp, stepsize, kernel_param)
-        log["particle_mean"].append(np.mean(x, axis=0))
-        log["particle_var"].append(np.var(x, axis=0))
 
-        if np.any(np.isnan(x)):
-            log["errors"] = f"NaN produced at iteration {i}"
-            break
+        update_dict = {
+            "kernel_param": kernel_param,
+            "particle_mean": np.mean(x, axis=0),
+            "particle_var": np.var(x, axis=0)
+        }
 
-    log["particle_mean"] = np.array(log["particle_mean"])
-    log["particle_var"] = np.array(log["particle_var"])
-    log["kernel_params"] = np.array(log["kernel_params"])
-    return x#, log
+        for key in log.keys():
+            log[key] = index_update(log[key], index[i, :], update_dict[key])
+
+        return [x, log]
+
+    x, log = fori_loop(0, L, update_fun, [x, log])
+
+    return x, log
+
+svgd = jit(svgd, static_argnums=(1, 3, 4))
+
 
 @jit
 def kernel_param_update_rule(x):
