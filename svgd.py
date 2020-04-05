@@ -49,116 +49,6 @@ def update(x, logp, stepsize, kernel_params):
 
 update = jit(update, static_argnums=(1,)) # logp is static. When logp changes, jit recompiles.
 
-
-def svgd(x, logp, stepsize, L, kernel_param_update_rule):
-    """
-    IN:
-    * x is an np array of shape n x d
-    * logp is the log of a differentiable pdf p (callable)
-    * stepsize is a float
-    * kernel_param is a positive scalar: bandwidth parameter for RBF kernel
-    * L is an integer (number of iterations)
-    * kernel_param_update_rule is a callable that takes the updated particles as input and outputs an updated set of kernel parameters. If supplied, the argument kernel_param will be ignored.
-
-    OUT:
-    * Updated particles x (np array of shape n x d) after L steps of SVGD
-    * dictionary with logs
-    """
-    if kernel_param_update_rule is None:
-        kernel_param_update_rule = lambda x: 1
-    else:
-        pass
-    assert x.ndim == 2
-
-    d = x.shape[1]
-    log = {
-        "kernel_param": np.empty(shape=(L, d)),
-        "particle_mean": np.empty(shape=(L, d)),
-        "particle_var": np.empty(shape=(L, d))
-    }
-
-    def update_fun(i, u):
-        """
-        1) compute kernel_param from x
-        2) compute updated x,
-        3) log everything
-
-        Parameters:
-        * i: iteration counter (unused)
-        * u = [x, log]
-        """
-        x, log = u
-        kernel_param = kernel_param_update_rule(x)
-        x = update(x, logp, stepsize, kernel_param)
-
-        update_dict = {
-            "kernel_param": kernel_param,
-            "particle_mean": np.mean(x, axis=0),
-            "particle_var": np.var(x, axis=0)
-        }
-
-        for key in log.keys():
-            log[key] = index_update(log[key], index[i, :], update_dict[key])
-
-        return [x, log]
-
-    x, log = fori_loop(0, L, update_fun, [x, log])
-
-    return x#, log
-
-svgd = jit(svgd, static_argnums=(1, 3, 4))
-
-
-def fixed_param_svgd(x, logp, stepsize, L, kernel_param):
-    """
-    IN:
-    * x is an np array of shape n x d
-    * logp is the log of a differentiable pdf p (callable)
-    * stepsize is a float
-    * L is an integer (number of iterations)
-    * kernel_param is a positive scalar: bandwidth parameter for RBF kernel
-
-    OUT:
-    * Updated particles x (np array of shape n x d) after L steps of SVGD
-    * dictionary with logs
-    """
-    assert x.ndim == 2
-
-    d = x.shape[1]
-    log = {
-        "particle_mean": np.empty(shape=(L, d)),
-        "particle_var": np.empty(shape=(L, d))
-    }
-
-    def update_fun(i, u):
-        """
-        1) compute kernel_param from x
-        2) compute updated x,
-        3) log everything
-
-        Parameters:
-        * i: iteration counter (unused)
-        * u = [x, log]
-        """
-        x, log = u
-        x = update(x, logp, stepsize, kernel_param)
-
-        update_dict = {
-            "particle_mean": np.mean(x, axis=0),
-            "particle_var": np.var(x, axis=0)
-        }
-
-        for key in log.keys():
-            log[key] = index_update(log[key], index[i, :], update_dict[key])
-
-        return [x, log]
-
-    x, log = fori_loop(0, L, update_fun, [x, log])
-
-    return x#, log
-
-fixed_param_svgd = jit(fixed_param_svgd, static_argnums=(1, 3))
-
 @jit
 def kernel_param_update_rule(x):
     """
@@ -173,3 +63,117 @@ def kernel_param_update_rule(x):
         return h
     else:
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
+
+
+class SVGD():
+    def __init__(self):
+        pass
+
+    kernel_param_update_rule = kernel_param_update_rule
+
+    def fixed_param_svgd(self, x, logp, stepsize, L, bandwidth):
+        """
+        IN:
+        * x is an np array of shape n x d
+        * logp is the log of a differentiable pdf p (callable)
+        * stepsize is a float
+        * L is an integer (number of iterations)
+        * bandwidth is a positive scalar: bandwidth parameter for RBF kernel
+
+        OUT:
+        * Updated particles x (np array of shape n x d) after L steps of SVGD
+        * dictionary with logs
+        """
+        assert x.ndim == 2
+
+        d = x.shape[1]
+        log = {
+            "particle_mean": np.empty(shape=(L, d)),
+
+            "particle_var": np.empty(shape=(L, d))
+        }
+
+        def update_fun(i, u):
+            """
+            1) compute updated x,
+            2) log mean and var
+
+            Parameters:
+            * i: iteration counter (unused)
+            * u = [x, log]
+
+            Returns:
+            [updated_x, log]
+            """
+            x, log = u
+            x = update(x, logp, stepsize, bandwidth)
+
+            update_dict = {
+                "particle_mean": np.mean(x, axis=0),
+                "particle_var": np.var(x, axis=0)
+            }
+
+            for key in log.keys():
+                log[key] = index_update(log[key], index[i, :], update_dict[key])
+
+            return [x, log]
+
+        x, log = fori_loop(0, L, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
+
+        return x, log
+
+    fixed_param_svgd = jit(fixed_param_svgd, static_argnums=(0, 2, 4))
+
+    def adaptive_param_svgd(self, x, logp, stepsize, L):
+        """
+        IN:
+        * x is an np array of shape n x d
+        * logp is the log of a differentiable pdf p (callable)
+        * stepsize is a float
+        * L is an integer (number of iterations)
+
+        OUT:
+        * Updated particles x (np array of shape n x d) after L steps of SVGD
+        * dictionary with logs
+        """
+        assert x.ndim == 2
+
+        d = x.shape[1]
+        log = {
+            "kernel_param": np.empty(shape=(L, d)),
+            "particle_mean": np.empty(shape=(L, d)),
+            "particle_var": np.empty(shape=(L, d))
+        }
+
+        def update_fun(i, u):
+            """
+            1) compute kernel_param from x
+            2) compute updated x,
+            3) log everything
+
+            Parameters:
+            * i: iteration counter (unused)
+            * u = [x, log]
+            """
+            x, log = u
+            kernel_param = kernel_param_update_rule(x)
+            x = update(x, logp, stepsize, kernel_param)
+
+            update_dict = {
+                "kernel_param": kernel_param,
+                "particle_mean": np.mean(x, axis=0),
+                "particle_var": np.var(x, axis=0)
+            }
+
+            for key in log.keys():
+                log[key] = index_update(log[key], index[i, :], update_dict[key])
+
+            return [x, log]
+
+        x, log = fori_loop(0, L, update_fun, [x, log])
+
+        return x, log
+
+    adaptive_param_svgd = jit(adaptive_param_svgd, static_argnums=(0, 2, 4))
+
+
