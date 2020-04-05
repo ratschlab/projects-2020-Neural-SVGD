@@ -47,7 +47,7 @@ def update(x, logp, stepsize, kernel_params):
 
     return xnew
 
-update = jit(update, static_argnums=(1,)) # logp is static. When logp changes, jit recompiles.
+# update = jit(update, static_argnums=(1,)) # logp is static. When logp changes, jit recompiles.
 
 @jit
 def kernel_param_update_rule(x):

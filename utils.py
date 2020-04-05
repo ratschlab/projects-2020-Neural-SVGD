@@ -4,7 +4,7 @@ from jax import random
 from jax.ops import index_update, index
 
 ############ Kernel
-@jit
+# @jit
 def normsq(x):
     assert x.ndim == 1
     x = np.array(x)
@@ -22,7 +22,7 @@ def single_rbf(x, y, h):
     assert y.ndim == 1
     return np.exp(- normsq(x - y) / (2 * h))
 
-@jit
+# @jit
 def ard(x, y, h):
     """
     IN:
@@ -41,7 +41,7 @@ def ard(x, y, h):
 
 #############################
 ### better pairwise distances
-@jit
+# @jit
 def squared_distance_matrix(x):
     """
     Parameters:
@@ -68,7 +68,7 @@ def getn(l):
     assert l < n**2 - n / 2 + 0.1 and l > n**2 - n / 2 - 0.1 # just to be safe
     return int(n)
 
-@jit
+# @jit
 def squareform(distances):
     """
     IN: output from `pairwise_distances`, an array of length l = n^2 - n / 2 with entries d(x1, x2, d(x1, 3), ..., d(xn-1 xn)).
@@ -86,7 +86,7 @@ def squareform(distances):
 
 #########################33
 ### Gaussian mixture pdf
-@jit
+# @jit
 def log_gaussian_mixture(x, means, variances, weights):
     """
     IN:
@@ -115,7 +115,7 @@ def log_gaussian_mixture(x, means, variances, weights):
 ## multidim standard gaussian pdf
 from jax.scipy.stats import norm
 
-@jit
+# @jit
 def standard_normal_logpdf(x):
     """
     Parameters:
@@ -132,7 +132,7 @@ def standard_normal_logpdf(x):
 ##########################33
 ### cartesian product
 from jax.ops import index_update, index
-@jit
+# @jit
 def cartesian_product(*arrays):
     """
     IN: any number of np arrays of same length
