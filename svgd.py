@@ -59,7 +59,8 @@ def get_bandwidth(x):
         return vmap(get_bandwidth, 1)(x)
     elif x.ndim == 1:
         n = x.shape[0]
-        h = np.median(squared_distance_matrix(x)) / np.log(n)
+        medsq = np.median(squared_distance_matrix(x))
+        h = np.sqrt(medsq / np.log(n) / 2)
         return h
     else:
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
@@ -80,9 +81,9 @@ class SVGD():
     def svgd(self, x, stepsize, bandwidth=1):
         """
         IN:
-        * x is an np array of shape n x d
+        * x is an np array of shape n x d (n particles of dimension d)
         * stepsize is a float
-        * bandwidth is a positive scalar: bandwidth parameter for RBF kernel
+        * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
 
         OUT:
         * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
@@ -101,12 +102,12 @@ class SVGD():
 
         def update_fun(i, u):
             """
-            1) if adaptive_kernel, compute bandwidth from x
+            1) if self.adaptive_kernel, compute bandwidth from x
             2) compute updated x,
             3) log mean and var (and bandwidth)
 
             Parameters:
-            * i: iteration counter (unused)
+            * i: iteration counter (used to update log)
             * u = [x, log]
 
             Returns:
@@ -136,57 +137,3 @@ class SVGD():
         return x, log
 
     svgd = jit(svgd, static_argnums=0)
-
-#    def adaptive_param_svgd(self, x, logp, stepsize, L):
-#        """
-#        IN:
-#        * x is an np array of shape n x d
-#        * logp is the log of a differentiable pdf p (callable)
-#        * stepsize is a float
-#        * L is an integer (number of iterations)
-#
-#        OUT:
-#        * Updated particles x (np array of shape n x d) after L steps of SVGD
-#        * dictionary with logs
-#        """
-#        assert x.ndim == 2
-#
-#        d = x.shape[1]
-#        log = {
-#            "kernel_param": np.empty(shape=(L, d)),
-#            "particle_mean": np.empty(shape=(L, d)),
-#            "particle_var": np.empty(shape=(L, d))
-#        }
-#
-#        def update_fun(i, u):
-#            """
-#            1) compute kernel_param from x
-#            2) compute updated x,
-#            3) log everything
-#
-#            Parameters:
-#            * i: iteration counter (unused)
-#            * u = [x, log]
-#            """
-#            x, log = u
-#            kernel_param = get_bandwidth(x)
-#            x = update(x, logp, stepsize, kernel_param)
-#
-#            update_dict = {
-#                "kernel_param": kernel_param,
-#                "particle_mean": np.mean(x, axis=0),
-#                "particle_var": np.var(x, axis=0)
-#            }
-#
-#            for key in log.keys():
-#                log[key] = index_update(log[key], index[i, :], update_dict[key])
-#
-#            return [x, log]
-#
-#        x, log = fori_loop(0, L, update_fun, [x, log])
-#
-#        return x, log
-#
-#    adaptive_param_svgd = jit(adaptive_param_svgd, static_argnums=(0, 2, 4))
-
-

@@ -145,3 +145,38 @@ def cartesian_product(*arrays):
 #         arr[...,i] = a
         arr = index_update(arr, index[..., i], a)
     return arr.reshape(-1, la)
+
+def dict_concatenate(dict_list):
+    """
+    Arguments:
+    * dict_list: a list of dictionaries with the same keys. All values must be numeric.
+
+    Returns:
+    * a dictionary with the same keys as the input dictionaries. The values are np
+    arrays consisting of the concatenation of the values in the input dictionaries.
+    """
+    assert all([dict_list[i].keys() == dict_list[i+1].keys() for i in range(len(dict_list)-1)])
+
+    keys = dict_list[0].keys()
+    out = {key: [d[key] for d in dict_list] for key in keys}
+
+    for k, v in out.items():
+        out[k] = np.array(v)
+
+    return out
+
+def dict_mean(dict_list):
+    """
+    Arguments:
+    * dict_list: a list of dictionaries with the same keys. All values must be numeric.
+
+    Returns:
+    * a dictionary with the same keys as the input dictionaries. The values are np
+    arrays consisting of the mean of the values in the input dictionaries.
+    """
+    out = dict_concatenate(dict_list)
+    for k, v in out.items():
+        out[k] = np.mean(v, axis = 0)
+        assert out[k].shape == dict_list[0][k].shape
+
+    return out
