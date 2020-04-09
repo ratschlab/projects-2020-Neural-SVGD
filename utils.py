@@ -2,6 +2,7 @@ import jax.numpy as np
 from jax import grad, jit, vmap
 from jax import random
 from jax.ops import index_update, index
+from jax.scipy.special import logsumexp
 
 ############ Kernel
 # @jit
@@ -101,14 +102,11 @@ def log_gaussian_mixture(x, means, variances, weights):
     x = np.array(x)
     means, variances, weights = np.array([means, variances, weights])
     exponents = - (x - means)**2 / 2
-    c = np.min(exponents)
     norm_consts = 1 / np.sqrt(2 * np.pi * variances) # alternatively, leave this out (not
                                                      # necessary, no need to normalize)
 
-    # normalize smallest element to 0 to avoid underflow errors
-    weights = weights * norm_consts
-    expout = np.vdot(weights, np.exp(exponents - c))
-    out = np.log(expout) + c
+    expout = np.vdot(weights, np.exp(exponents))
+    out = logsumexp(expout)
 
     return np.squeeze(out)
 
