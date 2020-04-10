@@ -27,13 +27,16 @@ def single_rbf(x, y, h):
 def ard(x, y, h):
     """
     IN:
-    x, y, h: np arrays of shape (d,)
+    * x, y: np arrays of shape (d,)
+    * h: np array of shape (d,), or scalar
 
     OUT:
     scalar kernel(x, y, h).
     """
     assert x.ndim == 1
     assert y.ndim == 1
+
+    h = np.array(h)
     assert h.ndim == 1 or h.ndim == 0
     assert x.shape == y.shape
     if h.ndim == 1:
@@ -65,9 +68,10 @@ def getn(l):
     """
     n = (1 + np.sqrt(1 + 8*l)) / 2
     assert np.equal(np.mod(n, 1), 0) # make sure n is an integer
-    assert l == n**2 - n / 2 # is this assertion too strong? cause n is float
-    assert l < n**2 - n / 2 + 0.1 and l > n**2 - n / 2 - 0.1 # just to be safe
-    return int(n)
+
+    n = int(n)
+    assert l == n**2 - n / 2
+    return n
 
 # @jit
 def squareform(distances):
@@ -100,13 +104,14 @@ def log_gaussian_mixture(x, means, variances, weights):
     scalar, value of log(p(x)), where p is the mixture pdf.
     """
     x = np.array(x)
+    assert x.ndim == 1 or x.shape[1] == 1
     means, variances, weights = np.array([means, variances, weights])
     exponents = - (x - means)**2 / 2
     norm_consts = 1 / np.sqrt(2 * np.pi * variances) # alternatively, leave this out (not
                                                      # necessary, no need to normalize)
-
-    expout = np.vdot(weights, np.exp(exponents))
-    out = logsumexp(expout)
+    weights = np.vdot(weights, norm_consts)
+    exponents = exponents + np.log(weights)
+    out = logsumexp(exponents)
 
     return np.squeeze(out)
 

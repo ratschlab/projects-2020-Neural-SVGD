@@ -67,18 +67,18 @@ def get_bandwidth(x):
 
 
 class SVGD():
-    def __init__(self, logp, n_iter, adaptive_kernel=False, get_bandwidth=None):
+    def __init__(self, logp, n_iter_max, adaptive_kernel=False, get_bandwidth=None):
         if adaptive_kernel:
             assert get_bandwidth is not None
         else:
             assert get_bandwidth is None
 
         self.logp = logp
-        self.n_iter = n_iter
+        self.n_iter_max = n_iter_max
         self.adaptive_kernel = adaptive_kernel
         self.get_bandwidth = get_bandwidth
 
-    def svgd(self, x, stepsize, bandwidth=1):
+    def svgd(self, x, stepsize, bandwidth, n_iter):
         """
         IN:
         * x is an np array of shape n x d (n particles of dimension d)
@@ -86,19 +86,19 @@ class SVGD():
         * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
 
         OUT:
-        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
+        * Updated particles x (np array of shape n x d) after self.n_iter_max steps of SVGD
         * dictionary with logs
         """
         assert x.ndim == 2
 
         d = x.shape[1]
         log = {
-            "particle_mean": np.empty(shape=(self.n_iter, d)),
-            "particle_var":  np.empty(shape=(self.n_iter, d))
+            "particle_mean": np.zeros(shape=(self.n_iter_max, d)),
+            "particle_var":  np.zeros(shape=(self.n_iter_max, d))
         }
 
         if self.adaptive_kernel:
-            log["bandwidth"] = np.empty(shape=(self.n_iter, d))
+            log["bandwidth"] = np.zeros(shape=(self.n_iter_max, d))
 
         def update_fun(i, u):
             """
@@ -132,8 +132,10 @@ class SVGD():
 
             return [x, log]
 
-        x, log = fori_loop(0, self.n_iter, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
+        x, log = fori_loop(0, n_iter, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
 
+#        for k, v in log.items():
+#            log[k] = v[:n_iter]
         return x, log
 
     svgd = jit(svgd, static_argnums=0)
