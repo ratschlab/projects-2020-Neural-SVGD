@@ -57,7 +57,7 @@ class SVGD():
         self.adaptive_kernel = adaptive_kernel
         self.get_bandwidth = get_bandwidth
 
-    def svgd(self, x, stepsize, bandwidth, n_iter):
+    def unjitted_svgd(self, x, stepsize, bandwidth, n_iter):
         """
         IN:
         * x is an np array of shape n x d (n particles of dimension d)
@@ -69,7 +69,6 @@ class SVGD():
         * dictionary with logs
         """
         assert x.ndim == 2
-
         d = x.shape[1]
         log = {
             "particle_mean": np.zeros(shape=(self.n_iter_max, d)),
@@ -117,4 +116,8 @@ class SVGD():
 #            log[k] = v[:n_iter]
         return x, log
 
+    # this way we only print "COMPILING" when we're actually compiling
+    def svgd(self, x, stepsize, bandwidth, n_iter):
+        print("COMPILING")
+        return self.unjitted_svgd(x, stepsize,bandwidth, n_iter)
     svgd = jit(svgd, static_argnums=0)

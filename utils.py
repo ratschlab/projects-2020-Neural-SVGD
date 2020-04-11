@@ -112,7 +112,7 @@ def log_gaussian_mixture(x, means, variances, weights):
     exponents = - (x - means)**2 / 2
     norm_consts = 1 / np.sqrt(2 * np.pi * variances) # alternatively, leave this out (not
                                                      # necessary, no need to normalize)
-    weights = np.vdot(weights, norm_consts)
+    weights = weights * norm_consts
     exponents = exponents + np.log(weights)
     out = logsumexp(exponents)
 
