@@ -95,7 +95,7 @@ def squareform(distances):
 def log_gaussian_mixture(x, means, variances, weights):
     """
     IN:
-    * x: scalar
+    * x: scalar or array of length n
     * mean: np array of means
     * variances: np array
     * weights: np array of weights, same length as the mean and varance arrays
@@ -104,7 +104,10 @@ def log_gaussian_mixture(x, means, variances, weights):
     scalar, value of log(p(x)), where p is the mixture pdf.
     """
     x = np.array(x)
-    assert x.ndim == 1 or x.shape[1] == 1
+    if x.ndim == 2:
+        assert x.shape[1] == 1
+    else:
+        assert x.ndim <= 1
     means, variances, weights = np.array([means, variances, weights])
     exponents = - (x - means)**2 / 2
     norm_consts = 1 / np.sqrt(2 * np.pi * variances) # alternatively, leave this out (not

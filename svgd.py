@@ -1,55 +1,34 @@
 import jax.numpy as np
-from jax import grad, jit, vmap, random
+from jax import grad, jit, vmap, random, jacfwd
 from jax.lax import fori_loop
 from utils import ard, squared_distance_matrix
 from jax.ops import index, index_add, index_update
 
-def phi_j(x, y, logp, kernel):
-    """
-    IN:
-    * x, y: np arrays of shape (d,)
-    * kernel: callable, computes the kernel k(x, y)
-    * logp: callable, computes log of a differentiable pdf p(x) given input value x
 
-    OUT:
-    * np array of shape (d,):
-    \nabla_x log(p(x)) * k(x, y) + \nabla_x k(x, y).
-    This means that phi(x_i) = \sum_j phi_j(x_j, x_i)
+def ard_matrix(x, bandwidth):
     """
-    assert x.ndim == 1 and y.ndim == 1
-    return grad(logp)(x) * kernel(x, y) + grad(kernel)(x, y)
-phi_j_batched = vmap(phi_j, (0, 0, None, None), 0)
+    Arguments:
+    * x, np array of shape (n, d)
+    * kernel bandwidth, np array of shape (d,) or one-dimensional float
+
+    Returns:
+    * np array of shape (n, n) containing values k(xi, xj) for xi = x[i, :].
+    """
+    bandwidth = np.array(bandwidth)
+    dsquared = vmap(squared_distance_matrix, 1)(x) # shape (d, n, n)
+    if bandwidth.ndim > 0 and bandwidth.shape[0] > 1:
+        bandwidth = bandwidth[:, np.newaxis, np.newaxis] # reshape bandwidth to have same shape as dsquared
+    return np.exp(np.sum(- dsquared / bandwidth**2 / 2, axis=0)) # shape (n, n)
 
 def update(x, logp, stepsize, bandwidth):
-    """
-    IN:
-    * x: np array of shape n x d
-    * logp: callable, log of a differentiable pdf p
-    * stepsize: scalar > 0
-    * bandwidth: np array (or dict?) fed to kernel(x, y, bandwidth)
+    km = lambda x: ard_matrix(x, bandwidth)
+    kxy = km(x)
+    dkxy = jacfwd(km)(x) # (n, n, n, d)
+    dkxy = dkxy.diagonal(axis1=1, axis2=2) # (n, d, n)
+    dlogp = vmap(grad(logp))(x)
 
-    OUT:
-    xnew = x + stepsize * \phi^*(x)
-    that is, xnew is an array of shape n x d. The entries of x are the updated particles.
+    return x + stepsize * (np.einsum("il,ij->jl", dlogp, kxy) + np.sum(dkxy, axis=2))
 
-    note that this is an inefficient way to do things, since we're computing k(x, y) twice for each x, y combination.
-    """
-    assert x.ndim == 2
-    kernel = lambda x, y: ard(x, y, bandwidth)
-
-    xnew = []
-    n = x.shape[0]
-    for i, xi in enumerate(x):
-        repeated = np.tile(xi, (n, 1))
-        xnew.append(stepsize * np.sum(phi_j_batched(x, repeated, logp, kernel), axis = 0))
-    xnew = np.array(xnew)
-    xnew += x
-
-    return xnew
-
-# update = jit(update, static_argnums=(1,)) # logp is static. When logp changes, jit recompiles.
-
-# @jit
 def get_bandwidth(x):
     """
     IN: np array of shape (n,) or (n,d): set of particles
