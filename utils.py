@@ -1,8 +1,27 @@
 import jax.numpy as np
-from jax import grad, jit, vmap
-from jax import random
+from jax import grad, jit, vmap, random
 from jax.ops import index_update, index
 from jax.scipy.special import logsumexp
+from jax import lax
+
+## fori_loop implementation in terms of lax.scan taken from here https://github.com/google/jax/issues/1112
+def fori_loop(lower, upper, body_fun, init_val):
+  f = lambda x, i: (body_fun(i, x), ())
+  result, _ = lax.scan(f, init_val, np.arange(lower, upper))
+  return result
+
+# this one from here https://github.com/google/jax/issues/650
+def fori_loop(_, num_iters, fun, init): # added the dummy _
+  dummy_inputs = np.zeros((num_iters, 0))
+  out, _ = lax.scan(lambda x, dummy: (fun(x), dummy), init, dummy_inputs)
+  return out
+
+
+
+
+
+
+
 
 ############ Kernel
 # @jit
@@ -19,6 +38,7 @@ def single_rbf(x, y, h):
     x and y are d-dimensional arrays
     h is a scalar parameter, h > 0
     """
+    x, y = np.array([x, y])
     assert x.ndim == 1
     assert y.ndim == 1
     return np.exp(- normsq(x - y) / (2 * h))
@@ -33,8 +53,9 @@ def ard(x, y, h):
     OUT:
     scalar kernel(x, y, h).
     """
-    assert x.ndim == 1
-    assert y.ndim == 1
+    x, y = np.array([x, y])
+    assert x.ndim <= 1
+    assert y.ndim <= 1
 
     h = np.array(h)
     assert h.ndim == 1 or h.ndim == 0
