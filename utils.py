@@ -6,17 +6,22 @@ from jax import lax
 
 ## fori_loop implementation in terms of lax.scan taken from here https://github.com/google/jax/issues/1112
 def fori_loop(lower, upper, body_fun, init_val):
-  f = lambda x, i: (body_fun(i, x), ())
-  result, _ = lax.scan(f, init_val, np.arange(lower, upper))
-  return result
+    f = lambda x, i: (body_fun(i, x), ())
+    result, _ = lax.scan(f, init_val, np.arange(lower, upper))
+    return result
 
 # this one from here https://github.com/google/jax/issues/650
-def fori_loop(_, num_iters, fun, init): # added the dummy _
-  dummy_inputs = np.zeros((num_iters, 0))
-  out, _ = lax.scan(lambda x, dummy: (fun(x), dummy), init, dummy_inputs)
-  return out
+# def fori_loop(_, num_iters, fun, init): # added the dummy _
+#     dummy_inputs = np.zeros((num_iters, 0))
+#     out, _ = lax.scan(lambda x, dummy: (fun(x), dummy), init, dummy_inputs)
+#     return out
 
-
+# this is the python equivalent given in the documentation https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.fori_loop.html
+def python_fori_loop(lower, upper, body_fun, init_val):
+    val = init_val
+    for i in range(lower, upper):
+        val = body_fun(i, val)
+    return val
 
 
 

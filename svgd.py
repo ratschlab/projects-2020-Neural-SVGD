@@ -1,9 +1,12 @@
 import jax.numpy as np
 from jax import grad, jit, vmap, random, jacfwd
-from jax.lax import fori_loop
+from jax import lax
 from jax.ops import index, index_add, index_update
-from utils import ard, squared_distance_matrix
+
+import time
+
 import utils
+from utils import ard, squared_distance_matrix
 from metrics import ksd
 
 def phistar_j(x, y, logp, bandwidth):
@@ -35,7 +38,6 @@ def phistar_i(xi, x, logp, bandwidth):
     return np.sum(vmap(phistar_j, (0, 0, None, None))(x, xi_rep, logp, bandwidth), axis=0)
 
 phistar = lambda x, logp, bandwidth: vmap(phistar_i, (0, None, None, None))(x, x, logp, bandwidth)
-
 
 def ard_matrix(x, bandwidth):
     """
@@ -91,31 +93,52 @@ def get_bandwidth(x):
 
 
 class SVGD():
-    def __init__(self, logp, n_iter_max, adaptive_kernel=False, get_bandwidth=None):
+    def __init__(self, logp, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=(100, 1)):
+        """
+        Arguments:
+        * logp: callable
+        * n_iter_max: integer
+        * adaptive_kernel: bool
+        * get_bandwidth: callable or None
+        """
         if adaptive_kernel:
             assert get_bandwidth is not None
         else:
             assert get_bandwidth is None
+        assert len(particle_shape) > 1
 
         self.logp = logp
         self.n_iter_max = n_iter_max
         self.adaptive_kernel = adaptive_kernel
         self.get_bandwidth = get_bandwidth
-        self.ksd_kernel_range = np.logspace(-1, 2, num=4, base=10)
+        self.ksd_kernel_range = np.logspace(-1, 2, num=4, base=10) # for metrics
+        self.particle_shape = particle_shape
 
-    def unjitted_svgd(self, x, stepsize, bandwidth, n_iter):
+        # these don't need recompilation:
+        self.rkey = random.PRNGKey(0)
+
+    def newkey(self):
+        """Not pure"""
+        self.rkey = random.split(self.rkey)[0]
+
+    def initialize(self, rkey):
+        """Initialize particles distributed as N(-10, 1)."""
+        return random.normal(rkey, shape=self.particle_shape) - 10
+
+    def unjitted_svgd(self, rkey, stepsize, bandwidth, n_iter):
         """
         IN:
-        * x is an np array of shape n x d (n particles of dimension d)
+        * rkey: random seed
         * stepsize is a float
         * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
+        * n_iter: integer, has to be less than self.n_iter_max
 
         OUT:
-        * Updated particles x (np array of shape n x d) after self.n_iter_max steps of SVGD
+        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
         * dictionary with logs
         """
-        assert x.ndim == 2
-        d = x.shape[1]
+        x = self.initialize(rkey)
+        d = self.particle_shape[1]
         log = {
             "particle_mean": np.zeros(shape=(self.n_iter_max, d)),
             "particle_var":  np.zeros(shape=(self.n_iter_max, d)),
@@ -165,14 +188,19 @@ class SVGD():
 
             return [x, log]
 
-        x, log = fori_loop(0, n_iter, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
+        x, log = lax.fori_loop(0, n_iter, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
 
 #        for k, v in log.items():
-#            log[k] = v[:n_iter]
+#            log[k] = lax.dynamic_slice(v, (0, 0), (n_iter, v.shape[1])) # drop zeros from end of array
         return x, log
 
     # this way we only print "COMPILING" when we're actually compiling
-    def svgd(self, x, stepsize, bandwidth, n_iter):
-        print("COMPILING")
-        return self.unjitted_svgd(x, stepsize, bandwidth, n_iter)
-    svgd = jit(svgd, static_argnums=(0,)) # TODO: determine whether setting the argument n_iter to be static is really necessary
+    def svgd(self, rkey, stepsize, bandwidth, n_iter):
+        compile_start = time.time()
+        print("JIT COMPILING...")
+        out = self.unjitted_svgd(rkey, stepsize, bandwidth, n_iter)
+        compile_end = time.time()
+        print(f"Done compiling in {compile_end - compile_start} seconds.")
+        return out
+
+    svgd = jit(svgd, static_argnums=0)
