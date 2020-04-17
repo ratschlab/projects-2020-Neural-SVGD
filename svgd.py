@@ -188,7 +188,7 @@ class SVGD():
 
             return [x, log]
 
-        x, log = lax.fori_loop(0, n_iter, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
+        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
 
 #        for k, v in log.items():
 #            log[k] = lax.dynamic_slice(v, (0, 0), (n_iter, v.shape[1])) # drop zeros from end of array
