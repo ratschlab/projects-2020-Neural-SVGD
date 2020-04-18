@@ -2,12 +2,13 @@ import jax.numpy as np
 from jax import grad, jit, vmap, random, jacfwd
 from jax import lax
 from jax.ops import index, index_add, index_update
-
+from jax.experimental import optimizers
 import time
 
 import utils
 from utils import ard, squared_distance_matrix
-from metrics import ksd
+from metrics import ksd, initialize_log, update_log
+from tqdm import tqdm
 
 def phistar_j(x, y, logp, bandwidth):
     """Individual summand needed to compute phi^*. That is, phistar_i = \sum_j phistar_j(xj, xi, logp, bandwidth)"""
@@ -37,7 +38,11 @@ def phistar_i(xi, x, logp, bandwidth):
     xi_rep = np.repeat(xi, n,axis=0)
     return np.sum(vmap(phistar_j, (0, 0, None, None))(x, xi_rep, logp, bandwidth), axis=0)
 
-phistar = lambda x, logp, bandwidth: vmap(phistar_i, (0, None, None, None))(x, x, logp, bandwidth)
+def phistar(x, logp, bandwidth):
+    """
+    Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
+    """
+    return vmap(phistar_i, (0, None, None, None))(x, x, logp, bandwidth)
 
 def ard_matrix(x, bandwidth):
     """
@@ -53,18 +58,6 @@ def ard_matrix(x, bandwidth):
     if bandwidth.ndim > 0 and bandwidth.shape[0] > 1:
         bandwidth = bandwidth[:, np.newaxis, np.newaxis] # reshape bandwidth to have same shape as dsquared
     return np.exp(np.sum(- dsquared / bandwidth**2 / 2, axis=0)) # shape (n, n)
-
-def old_phistar(x, logp, bandwidth):
-    """
-    Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
-    """
-    km = lambda x: ard_matrix(x, bandwidth)
-    kxy = km(x)
-    dkxy = jacfwd(km)(x) # (n, n, n, d)
-    dkxy = dkxy.diagonal(axis1=1, axis2=2) # (n, d, n)
-    dlogp = vmap(grad(logp))(x)
-
-    return np.einsum("il,ij->jl", dlogp, kxy) + np.sum(dkxy, axis=2)
 
 def update(x, logp, stepsize, bandwidth):
     """SVGD update step
@@ -107,15 +100,19 @@ class SVGD():
             assert get_bandwidth is None
         assert len(particle_shape) > 1
 
+        # changing these triggers recompile of method svgd
         self.logp = logp
         self.n_iter_max = n_iter_max
         self.adaptive_kernel = adaptive_kernel
         self.get_bandwidth = get_bandwidth
-        self.ksd_kernel_range = np.logspace(-1, 2, num=4, base=10) # for metrics
+
         self.particle_shape = particle_shape
 
-        # these don't need recompilation:
+        # these don't trigger recompilation:
         self.rkey = random.PRNGKey(0)
+
+        # these don't trigger recompilation, but also the compiled method doesn't noticed they changed.
+        self.ksd_kernel_range = np.logspace(-1, 2, num=4, base=10) # for metrics
 
     def newkey(self):
         """Not pure"""
@@ -139,63 +136,27 @@ class SVGD():
         """
         x = self.initialize(rkey)
         d = self.particle_shape[1]
-        log = {
-            "particle_mean": np.zeros(shape=(self.n_iter_max, d)),
-            "particle_var":  np.zeros(shape=(self.n_iter_max, d)),
-            "ksd": np.zeros(shape=(self.n_iter_max, 1))
-        }
-
-        for h in self.ksd_kernel_range:
-            log[f"ksd{h}"] = np.zeros(shape=(self.n_iter_max, 1))
-
-        if self.adaptive_kernel:
-            log["bandwidth"] = np.zeros(shape=(self.n_iter_max, d))
+        log = initialize_log(self)
 
         def update_fun(i, u):
-            """
-            1) if self.adaptive_kernel, compute bandwidth from x
-            2) compute updated x,
-            3) log mean and var (and bandwidth)
-
-            Parameters:
-            * i: iteration counter (used to update log)
-            * u = [x, log]
-
-            Returns:
-            [updated_x, log]
-            """
+            """Compute updated particles and log metrics."""
             x, log = u
+            adaptive_bandwidth = None
             if self.adaptive_kernel:
                 adaptive_bandwidth = get_bandwidth(x)
                 x = update(x, self.logp, stepsize, adaptive_bandwidth)
             else:
                 x = update(x, self.logp, stepsize, bandwidth)
 
-            ### Log updates
-            update_dict = {
-                "particle_mean": np.mean(x, axis=0),
-                "particle_var": np.var(x, axis=0)
-            }
-            if self.adaptive_kernel:
-                update_dict["bandwidth"] = adaptive_bandwidth
-
-            update_dict["ksd"] = ksd(x, self.logp, adaptive_bandwidth if self.adaptive_kernel else bandwidth)
-            for h in self.ksd_kernel_range:
-                update_dict[f"ksd{h}"] = ksd(x, self.logp, h)
-
-            for key in log.keys():
-                log[key] = index_update(log[key], index[i, :], update_dict[key])
-
+            log = update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
             return [x, log]
 
-        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log]) # when I wanna do grad(svgd), I need to reimplement fori_loop using scan (which is differentiable).
-
-#        for k, v in log.items():
-#            log[k] = lax.dynamic_slice(v, (0, 0), (n_iter, v.shape[1])) # drop zeros from end of array
+        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log]) 
         return x, log
 
     # this way we only print "COMPILING" when we're actually compiling
     def svgd(self, rkey, stepsize, bandwidth, n_iter):
+        """Forward pass."""
         compile_start = time.time()
         print("JIT COMPILING...")
         out = self.unjitted_svgd(rkey, stepsize, bandwidth, n_iter)
@@ -204,3 +165,37 @@ class SVGD():
         return out
 
     svgd = jit(svgd, static_argnums=0)
+
+    def loss(self, rkey, bandwidth, ksd_bandwidth=1, svgd_stepsize=0.01):
+        """Backward pass.
+        Sample particles, perform SVGD, and output estimated KSD between target p and particles xout."""
+        xout, _ = self.svgd(rkey, svgd_stepsize, bandwidth, self.n_iter_max)
+        return ksd(xout, self.logp, ksd_bandwidth)
+
+    def step(self, rkey, bandwidth, stepsize, ksd_bandwidth=1, gradient_clip_threshold=10):
+        """SGD update step"""
+        bandwidth = np.array(bandwidth, dtype=np.float32)
+        gradient = jacfwd(self.loss, argnums=1)(rkey, bandwidth, ksd_bandwidth)
+        return bandwidth - stepsize * optimizers.clip_grads(gradient, gradient_clip_threshold)
+    step = jit(step, static_argnums=0)
+
+    def optimize_bandwidth(self, bandwidth, stepsize, n_steps, sample_every_step=True, gradient_clip_threshold=10):
+        """Find optimal bandwidth using SGD.
+        Not pure (mutates self.rkey)"""
+        if self.adaptive_kernel:
+            raise ValueError("This SVGD instance uses an adaptive bandwidth parameter.")
+        log = [bandwidth]
+        for _ in tqdm(range(n_steps)):
+            if sample_every_step:
+                self.newkey()
+            else:
+                pass
+            bandwidth = self.step(self.rkey, bandwidth, stepsize, gradient_clip_threshold=gradient_clip_threshold)
+            if np.any(np.isnan(bandwidth)):
+                raise Exception(f"Gradient is NaN. Last non-NaN value of bandwidth was {log[-1]}")
+            elif np.any(bandwidth < 0):
+                print(f"Note: some entries are below zero. Bandwidth = {bandwidth}.")
+            else:
+                pass
+            log.append(bandwidth)
+        return bandwidth, log

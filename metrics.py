@@ -45,3 +45,43 @@ def get_metrics(xout, logp):
     for ksd_bandwidth in [0.1, 1, 10]:
         metrics.append(ksd(xout, logp, ksd_bandwidth))
     return metrics
+
+
+
+########################
+### metrics to log while running SVGD
+def initialize_log(self):
+    d = self.particle_shape[1]
+    log = {
+        "particle_mean": np.zeros(shape=(self.n_iter_max, d)),
+        "particle_var":  np.zeros(shape=(self.n_iter_max, d)),
+        "ksd": np.zeros(shape=(self.n_iter_max, 1))
+    }
+
+    for h in self.ksd_kernel_range:
+        log[f"ksd{h}"] = np.zeros(shape=(self.n_iter_max, 1))
+
+    if self.adaptive_kernel:
+        log["bandwidth"] = np.zeros(shape=(self.n_iter_max, d))
+    return log
+
+
+def update_log(self, i, x, log, bandwidth, adaptive_bandwidth):
+    """
+    1) create dict of updates
+    2) 'append' dict of updates to log dict
+    """
+    update_dict = {
+        "particle_mean": np.mean(x, axis=0),
+        "particle_var": np.var(x, axis=0)
+    }
+    if self.adaptive_kernel:
+        update_dict["bandwidth"] = adaptive_bandwidth
+
+    update_dict["ksd"] = ksd(x, self.logp, adaptive_bandwidth if self.adaptive_kernel else bandwidth)
+    for h in self.ksd_kernel_range:
+        update_dict[f"ksd{h}"] = ksd(x, self.logp, h)
+
+    for key in log.keys():
+        log[key] = index_update(log[key], index[i, :], update_dict[key])
+    return log

@@ -4,6 +4,22 @@ from jax.ops import index_update, index
 from jax.scipy.special import logsumexp
 from jax import lax
 
+def clip(gradient, threshold):
+    r = np.linalg.norm(gradient)
+    if r > threshold:
+        return gradient * threshold / r
+    else:
+        return gradient
+
+def is_pd(x):
+    """check if matrix is positive defininite"""
+    import numpy as onp
+    try:
+        onp.linalg.cholesky(x)
+        return True
+    except onp.linalg.linalg.LinAlgError as err:
+        return False
+
 ## fori_loop implementation in terms of lax.scan taken from here https://github.com/google/jax/issues/1112
 def fori_loop(lower, upper, body_fun, init_val):
     f = lambda x, i: (body_fun(i, x), ())
@@ -212,3 +228,7 @@ def dict_mean(dict_list):
         assert out[k].shape == dict_list[0][k].shape
 
     return out
+
+
+#########################
+## distributions
