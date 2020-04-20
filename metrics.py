@@ -30,9 +30,7 @@ def mses(xout):
     mse2 = (np.mean(xout**2) - 5)**2
     return mse1, mse2
 
-
-metric_names = ["MSE X", "MSE X^2", "KSD 0.1", "KSD 1", "KSD 10"]
-def get_metrics(xout, logp):
+def get_metrics(xout, logp, ksd_bandwidths):
     """
     Compute metrics. One-dim case. Target p is gaussian mixture.
     """
@@ -42,10 +40,9 @@ def get_metrics(xout, logp):
 
     metrics = []
     metrics.extend(mses(xout))
-    for ksd_bandwidth in [0.1, 1, 10]:
+    for ksd_bandwidth in ksd_bandwidths:
         metrics.append(ksd(xout, logp, ksd_bandwidth))
     return metrics
-
 
 
 ########################
@@ -59,7 +56,7 @@ def initialize_log(self):
     }
 
     for h in self.ksd_kernel_range:
-        log[f"ksd{h}"] = np.zeros(shape=(self.n_iter_max, 1))
+        log[f"ksd {h}"] = np.zeros(shape=(self.n_iter_max, 1))
 
     if self.adaptive_kernel:
         log["bandwidth"] = np.zeros(shape=(self.n_iter_max, d))
@@ -80,7 +77,7 @@ def update_log(self, i, x, log, bandwidth, adaptive_bandwidth):
 
     update_dict["ksd"] = ksd(x, self.logp, adaptive_bandwidth if self.adaptive_kernel else bandwidth)
     for h in self.ksd_kernel_range:
-        update_dict[f"ksd{h}"] = ksd(x, self.logp, h)
+        update_dict[f"ksd {h}"] = ksd(x, self.logp, h)
 
     for key in log.keys():
         log[key] = index_update(log[key], index[i, :], update_dict[key])

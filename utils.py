@@ -3,13 +3,71 @@ from jax import grad, jit, vmap, random
 from jax.ops import index_update, index
 from jax.scipy.special import logsumexp
 from jax import lax
+import time
+from functools import wraps
+
+
+def sweep(rkey, grid, sample_each_time=False, joint_param=False, average_over=1):
+    """Sweep a grid of bandwidth values and output corresponding metrics.
+    Arguments:
+    * average_over: integer, compute average over m random seeds
+    * metrics: callable, takes bandwidth h as only input and oututs a either a scalar or an np.array of shape (k,)
+    """
+    if average_over == 1:
+        sweep_results = []
+        if sample_each_time:
+            rkeys = random.split(svgd_fix.rkey, len(grid))
+        else:
+            rkeys = [rkey] * len(grid)
+
+        for rkey, h in tqdm(zip(rkeys, grid)):
+            if joint_param:
+                res = metrics(h)
+            else:
+                res = metrics(h)
+            sweep_results.append(res)
+
+        sweep_results = np.array(sweep_results)
+    else:
+        ress = []
+        for _ in range(average_over):
+            rkey = random.split(rkey)[0]
+            res = sweep(rkey, grid, sample_each_time=False, joint_param=joint_param, average_over=1)
+            ress.append(res)
+        ress = np.array(ress)
+        sweep_results = np.mean(ress, axis=0)
+    if np.any(np.isnan(sweep_results)): print("NaNs detected!")
+    return sweep_results
+
+
+def get_ada_loss(m):
+    ksd_ada = []
+    for _ in tqdm(range(m)):
+        svgd_ada.newkey()
+        xout_ada, _ = svgd_ada.svgd(svgd_ada.rkey, svgd_stepsize, bandwidth=0, n_iter=n_iter_max)
+        ksd_ada.append(ksd(xout_ada, logp, bandwidth=1))
+    ksd_ada = np.array(ksd_ada)
+    print("variance", np.var(ksd_ada))
+    ksd_ada = np.mean(ksd_ada)
+    return ksd_ada
+
+
+
+# wrapper that prints when the function compiles 
+def verbose_jit(fun, static_argnums=None):
+    """Does same thing as jax.jit, only that it also inserts a print statement."""
+    @wraps(fun)
+    def verbose_fun(*args, **kwargs):
+        print(f"JIT COMPILING {fun.__name__}...")
+        st = time.time()
+        out = fun(*args, **kwargs)
+        end = time.time()
+        print(f"...done compiling {fun.__name__} after {end-st} seconds.")
+        return out
+    return jit(verbose_fun, static_argnums)
 
 def clip(gradient, threshold):
-    r = np.linalg.norm(gradient)
-    if r > threshold:
-        return gradient * threshold / r
-    else:
-        return gradient
+    r = np.l
 
 def is_pd(x):
     """check if matrix is positive defininite"""
