@@ -3,16 +3,16 @@ from jax import grad, jit, vmap, random, jacfwd
 from jax import lax
 from jax.ops import index, index_add, index_update
 from jax.experimental import optimizers
+
 import time
+from tqdm import tqdm
 
 import utils
-from utils import ard, squared_distance_matrix
-from metrics import ksd, initialize_log, update_log
-from tqdm import tqdm
+import metrics
 
 def phistar_j(x, y, logp, bandwidth):
     """Individual summand needed to compute phi^*. That is, phistar_i = \sum_j phistar_j(xj, xi, logp, bandwidth)"""
-    kernel = lambda x, y: ard(x, y, bandwidth)
+    kernel = lambda x, y: utils.ard(x, y, bandwidth)
     return grad(logp)(x) * kernel(x, y) + grad(kernel)(x, y)
 
 def phistar_i(xi, x, logp, bandwidth):
@@ -45,14 +45,13 @@ def phistar(x, logp, bandwidth):
     return vmap(phistar_i, (0, None, None, None))(x, x, logp, bandwidth)
 
 def update(x, logp, stepsize, bandwidth):
-    """SVGD update step
-    Arguments:
-    * x is an np.array of shape (n, d)
-    * logp: callable, differentiable, computes log p(x)
-    * stepsize: scalar
-    * bandwidth: either a scalar or an np.array of shape (d,)
-    """
+    """SVGD update step"""
     return x + stepsize * phistar(x, logp, bandwidth)
+
+def update_T(T, x0, logp, stepsize, bandwidth):
+    """update trafo T = x - x0"""
+    x = x0 + T
+    return T + stepsize * phistar(x, logp, bandwidth)
 
 def get_bandwidth(x):
     """
@@ -63,12 +62,11 @@ def get_bandwidth(x):
         return vmap(get_bandwidth, 1)(x)
     elif x.ndim == 1:
         n = x.shape[0]
-        medsq = np.median(squared_distance_matrix(x))
+        medsq = np.median(utils.squared_distance_matrix(x))
         h = np.sqrt(medsq / np.log(n) / 2)
         return h
     else:
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
-
 
 class SVGD():
     def __init__(self, logp, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=(100, 1)):
@@ -107,6 +105,38 @@ class SVGD():
         """Initialize particles distributed as N(-10, 1)."""
         return random.normal(rkey, shape=self.particle_shape) - 10
 
+
+
+
+    def svgd_sample_every_step(self, rkey, stepsize, bandwidth, n_iter):
+        x0 = self.initialize(rkey)
+        T = np.zeros(shape=self.particle_shape)
+        x = x0
+
+        log = metrics.initialize_log(self)
+
+        def update_fun(i, u):
+            """Compute updated particles and log metrics."""
+            T, log, rkey = u
+            rkey = random.split(rkey)[0]
+            x0 = self.initialize(rkey)
+            x = x0 + T
+            adaptive_bandwidth = None
+            if self.adaptive_kernel:
+                adaptive_bandwidth = get_bandwidth(x)
+                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                T = update_T(T, x0, self.logp, stepsize, adaptive_bandwidth)
+            else:
+                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                T = update_T(T, x0, self.logp, stepsize, bandwidth)
+
+            return [T, log, rkey]
+
+        T, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, [T, log, rkey])
+        return T, log
+
+    svgd = utils.verbose_jit(svgd_sample_every_step, static_argnums=0)
+
     def svgd(self, rkey, stepsize, bandwidth, n_iter):
         """
         IN:
@@ -119,9 +149,9 @@ class SVGD():
         * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
         * dictionary with logs
         """
-        x = self.initialize(rkey)
-        d = self.particle_shape[1]
-        log = initialize_log(self)
+        x0 = self.initialize(rkey)
+        x = x0
+        log = metrics.initialize_log(self)
 
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
@@ -129,15 +159,16 @@ class SVGD():
             adaptive_bandwidth = None
             if self.adaptive_kernel:
                 adaptive_bandwidth = get_bandwidth(x)
-                log = update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
                 x = update(x, self.logp, stepsize, adaptive_bandwidth)
             else:
-                log = update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
                 x = update(x, self.logp, stepsize, bandwidth)
 
             return [x, log]
 
         x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log]) 
+        log["x0"] = x0
         return x, log
 
     # this way we only print "COMPILING" when we're actually compiling
@@ -147,7 +178,7 @@ class SVGD():
         """Backward pass.
         Sample particles, perform SVGD, and output estimated KSD between target p and particles xout."""
         xout, _ = self.svgd(rkey, svgd_stepsize, bandwidth, self.n_iter_max)
-        return ksd(xout, self.logp, ksd_bandwidth)
+        return metrics.ksd(xout, self.logp, ksd_bandwidth)
 
     def step(self, rkey, bandwidth, stepsize, ksd_bandwidth=1, gradient_clip_threshold=10):
         """SGD update step"""
