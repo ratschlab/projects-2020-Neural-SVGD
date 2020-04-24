@@ -4,8 +4,8 @@ from jax.ops import index_update, index
 from jax.scipy.special import logsumexp
 from jax import lax
 import time
+from tqdm import tqdm
 from functools import wraps
-
 
 def sweep(rkey, grid, sample_each_time=False, joint_param=False, average_over=1):
     """Sweep a grid of bandwidth values and output corresponding metrics.
@@ -190,50 +190,6 @@ def squareform(distances):
 
 
 #########################33
-### Gaussian mixture pdf
-# @jit
-def log_gaussian_mixture(x, means, variances, weights):
-    """
-    IN:
-    * x: scalar or array of length n
-    * mean: np array of means
-    * variances: np array
-    * weights: np array of weights, same length as the mean and varance arrays
-
-    OUT:
-    scalar, value of log(p(x)), where p is the mixture pdf.
-    """
-    x = np.array(x)
-    if x.ndim == 2:
-        assert x.shape[1] == 1
-    else:
-        assert x.ndim <= 1
-    means, variances, weights = np.array([means, variances, weights])
-    exponents = - (x - means)**2 / 2
-    norm_consts = 1 / np.sqrt(2 * np.pi * variances) # alternatively, leave this out (not
-                                                     # necessary, no need to normalize)
-    weights = weights * norm_consts
-    exponents = exponents + np.log(weights)
-    out = logsumexp(exponents)
-
-    return np.squeeze(out)
-
-## multidim standard gaussian pdf
-from jax.scipy.stats import norm
-
-# @jit
-def standard_normal_logpdf(x):
-    """
-    Parameters:
-    * x: np array of shape (d,)
-
-    Returns:
-    * scalar log(p(x)), where p(x) is multidim gaussian
-    """
-    assert x.ndim == 1
-    out = norm.logpdf(x, loc=0, scale=1)
-    out = np.prod(out)
-    return np.squeeze(out) # to be able to take a gradient, output must be scalar
 
 ##########################33
 ### cartesian product

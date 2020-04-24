@@ -18,7 +18,7 @@ def phistar_j(x, y, logp, bandwidth):
 def phistar_i(xi, x, logp, bandwidth):
     """
     Arguments:
-    * xi: np.array of shape (1, d), meant to be a row element of x
+    * xi: np.array of shape (1, d), usually a row element of x
     * x: np.array of shape (n, d)
     * logp: callable
     * bandwidth: scalar or np.array of shape (d,)
@@ -38,20 +38,19 @@ def phistar_i(xi, x, logp, bandwidth):
     xi_rep = np.repeat(xi, n,axis=0)
     return np.sum(vmap(phistar_j, (0, 0, None, None))(x, xi_rep, logp, bandwidth), axis=0)
 
-def phistar(x, logp, bandwidth):
+def phistar(x, logp, bandwidth, xest=None):
     """
     Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
+    Optionally, supply an array xest of the same shape. This array will be used to estimate phistar; the trafo will then be applied to x.
     """
-    return vmap(phistar_i, (0, None, None, None))(x, x, logp, bandwidth)
+    if xest is None:
+        return vmap(phistar_i, (0, None, None, None))(x, x, logp, bandwidth)
+    else:
+        return vmap(phistar_i, (0, None, None, None))(x, xest, logp, bandwidth)
 
-def update(x, logp, stepsize, bandwidth):
+def update(x, logp, stepsize, bandwidth, xest=None):
     """SVGD update step"""
-    return x + stepsize * phistar(x, logp, bandwidth)
-
-def update_T(T, x0, logp, stepsize, bandwidth):
-    """update trafo T = x - x0"""
-    x = x0 + T
-    return T + stepsize * phistar(x, logp, bandwidth)
+    return x + stepsize * phistar(x, logp, bandwidth, xest)
 
 def get_bandwidth(x):
     """
@@ -88,7 +87,6 @@ class SVGD():
         self.n_iter_max = n_iter_max
         self.adaptive_kernel = adaptive_kernel
         self.get_bandwidth = get_bandwidth
-
         self.particle_shape = particle_shape
 
         # these don't trigger recompilation:
@@ -105,37 +103,46 @@ class SVGD():
         """Initialize particles distributed as N(-10, 1)."""
         return random.normal(rkey, shape=self.particle_shape) - 10
 
+    def svgd_twotrack(self, rkey, stepsize, bandwidth, n_iter):
+        """
+        IN:
+        * rkey: random seed
+        * stepsize is a float
+        * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
+        * n_iter: integer, has to be less than self.n_iter_max
 
-
-
-    def svgd_sample_every_step(self, rkey, stepsize, bandwidth, n_iter):
+        OUT:
+        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
+        * dictionary with logs
+        """
         x0 = self.initialize(rkey)
-        T = np.zeros(shape=self.particle_shape)
         x = x0
+        rkey = random.split(rkey)[0]
+        xest = self.initialize(rkey)
 
         log = metrics.initialize_log(self)
 
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
-            T, log, rkey = u
-            rkey = random.split(rkey)[0]
-            x0 = self.initialize(rkey)
-            x = x0 + T
+            x, xest, log = u
             adaptive_bandwidth = None
             if self.adaptive_kernel:
                 adaptive_bandwidth = get_bandwidth(x)
                 log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
-                T = update_T(T, x0, self.logp, stepsize, adaptive_bandwidth)
+                x = update(x, self.logp, stepsize, adaptive_bandwidth, xest)
+                xest = update(xest, self.logp, stepsize, adaptive_bandwidth)
             else:
                 log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
-                T = update_T(T, x0, self.logp, stepsize, bandwidth)
+                x = update(x, self.logp, stepsize, bandwidth, xest)
+                xest = update(xest, self.logp, stepsize, bandwidth)
 
-            return [T, log, rkey]
+            return [x, xest, log]
 
-        T, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, [T, log, rkey])
-        return T, log
+        x, xest, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, xest, log])
+        log["x0"] = x0
+        return x, xest, log
 
-    svgd = utils.verbose_jit(svgd_sample_every_step, static_argnums=0)
+    svgd_twotrack = utils.verbose_jit(svgd_twotrack, static_argnums=0)
 
     def svgd(self, rkey, stepsize, bandwidth, n_iter):
         """
