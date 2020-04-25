@@ -116,6 +116,119 @@ class SVGD():
         """Initialize particles distributed as N(-10, 1)."""
         return random.normal(rkey, shape=self.particle_shape) - 10
 
+
+    def svgd(self, rkey, stepsize, bandwidth, n_iter):
+        """
+        IN:
+        * rkey: random seed
+        * stepsize is a float
+        * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
+        * n_iter: integer, has to be less than self.n_iter_max
+
+        OUT:
+        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
+        * dictionary with logs
+        """
+        x0 = self.initialize(rkey)
+        x = x0
+        log = metrics.initialize_log(self)
+
+        def update_fun(i, u):
+            """Compute updated particles and log metrics."""
+            x, log = u
+            if self.adaptive_kernel:
+                adaptive_bandwidth = get_bandwidth(x)
+                log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
+                x = update(x, self.logp, stepsize, adaptive_bandwidth)
+            else:
+                log = metrics.update_log(self, i, x, log, bandwidth)
+                x = update(x, self.logp, stepsize, bandwidth)
+
+            return [x, log]
+
+        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log])
+        log["x0"] = x0
+        return x, log
+
+    # this way we only print "COMPILING" when we're actually compiling
+    svgd = utils.verbose_jit(svgd, static_argnums=0)
+
+    def step(self, x, bandwidth, meta_stepsize, svgd_stepsize, ksd_bandwidth=1, gradient_clip_threshold=100):
+        """SGD update step
+        1) compute SVGD step (forward)
+        2) compute Loss (backward)
+        3) update bandwidth via SGD"""
+        if ksd_bandwidth is None:
+            ksd_bandwidth = bandwidth
+
+        def loss(bandwidth):
+            xout = update(x, self.logp, svgd_stepsize, bandwidth)
+            return metrics.ksd(xout, self.logp, ksd_bandwidth)
+
+        current_loss = loss(bandwidth)
+        gradient = jacfwd(loss)(bandwidth)
+
+        log = {
+            "loss": current_loss,
+        }
+        updated_bandwidth = bandwidth - meta_stepsize * optimizers.clip_grads(gradient, gradient_clip_threshold)
+        return updated_bandwidth, log
+
+    step = utils.verbose_jit(step, static_argnums=0)
+
+    def train(self, rkey, bandwidth, meta_stepsize, svgd_stepsize, n_steps):
+        bandwidth = np.array(bandwidth, dtype=np.float32) # cast to float so it works with jacfwd
+        x = self.initialize(rkey)
+        log = metrics.initialize_log(self)
+        log["x0"] = x
+        log["loss"] = []
+
+        for i in range(n_steps):
+            log = metrics.update_log(self, i, x, log, bandwidth)
+
+            # take "dream" step, compute loss and update bandwidth
+            bandwidth, steplog = self.step(x, bandwidth, meta_stepsize, svgd_stepsize)
+            log["loss"].append(steplog["loss"])
+
+            # using updated bandwidth, take actual step
+            x = update(x, self.logp, svgd_stepsize, bandwidth)
+
+        return x, log
+
+
+
+
+
+
+    def optimize_bandwidth(self, bandwidth, stepsize, n_steps, ksd_bandwidth=1, sample_every_step=True, gradient_clip_threshold=10):
+        """Find optimal bandwidth using SGD.
+        Not pure (mutates self.rkey)"""
+        if self.adaptive_kernel:
+            raise ValueError("This SVGD instance uses an adaptive bandwidth parameter.")
+        if ksd_bandwidth is None:
+            vary_ksd_bandwidth = True
+        else:
+            vary_ksd_bandwidth = False
+
+        log = [bandwidth]
+        for _ in tqdm(range(n_steps)):
+            if sample_every_step:
+                self.newkey()
+            if vary_ksd_bandwidth:
+                ksd_bandwidth = bandwidth
+            bandwidth = self.step(self.rkey, bandwidth, stepsize, ksd_bandwidth=ksd_bandwidth, gradient_clip_threshold=gradient_clip_threshold)
+            if np.any(np.isnan(bandwidth)):
+                raise Exception(f"Gradient is NaN. Last non-NaN value of bandwidth was {log[-1]}")
+            elif np.any(bandwidth < 0):
+                print(f"Note: some entries are below zero. Bandwidth = {bandwidth}.")
+            else:
+                pass
+            log.append(bandwidth)
+        return bandwidth, log
+
+
+
+
     def svgd_twotrack(self, rkey, stepsize, bandwidth, n_iter):
         """
         IN:
@@ -155,119 +268,3 @@ class SVGD():
         return x, xest, log
 
     svgd_twotrack = utils.verbose_jit(svgd_twotrack, static_argnums=0)
-
-    def svgd(self, rkey, stepsize, bandwidth, n_iter):
-        """
-        IN:
-        * rkey: random seed
-        * stepsize is a float
-        * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
-        * n_iter: integer, has to be less than self.n_iter_max
-
-        OUT:
-        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
-        * dictionary with logs
-        """
-        x0 = self.initialize(rkey)
-        x = x0
-        log = metrics.initialize_log(self)
-
-        def update_fun(i, u):
-            """Compute updated particles and log metrics."""
-            x, log = u
-            if self.adaptive_kernel:
-                adaptive_bandwidth = get_bandwidth(x)
-                log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
-                x = update(x, self.logp, stepsize, adaptive_bandwidth)
-            else:
-                log = metrics.update_log(self, i, x, log, bandwidth)
-                x = update(x, self.logp, stepsize, bandwidth)
-
-            return [x, log]
-
-        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log])
-        log["x0"] = x0
-        return x, log
-
-    # this way we only print "COMPILING" when we're actually compiling
-    svgd = utils.verbose_jit(svgd, static_argnums=0)
-
-    def loss(self, x, bandwidth, ksd_bandwidth=1):
-        """Backward pass.
-        KSD between target p and empirical distribution of particles x."""
-        if ksd_bandwidth is None:
-            ksd_bandwidth = bandwidth
-        return metrics.ksd(x, self.logp, ksd_bandwidth)
-
-    def step(self, x, bandwidth, meta_stepsize, svgd_stepsize, ksd_bandwidth=1, gradient_clip_threshold=100):
-        """SGD update step
-        1) compute SVGD step (forward)
-        2) compute Loss (backward)
-        3) update bandwidth via SGD"""
-        bandwidth = np.array(bandwidth, dtype=np.float32)
-        xout = update(x, self.logp, svgd_stepsize, bandwidth)
-        loss = self.loss(xout, bandwidth, ksd_bandwidth) # for logging
-        gradient = jacfwd(self.loss, argnums=1)(xout, bandwidth, ksd_bandwidth)
-
-        log = {
-            "loss": loss,
-        }
-        updated_bandwidth = bandwidth - meta_stepsize * optimizers.clip_grads(gradient, gradient_clip_threshold)
-        return xout, updated_bandwidth, log
-
-    step = utils.verbose_jit(step, static_argnums=0)
-
-    def train(self, rkey, bandwidth, meta_stepsize, svgd_stepsize, n_steps):
-        """
-        IN:
-        * rkey: random seed
-        * stepsize is a float
-        * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
-        * n_iter: integer, has to be less than self.n_iter_max
-
-        OUT:
-        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
-        * dictionary with logs
-        """
-        x = self.initialize(rkey)
-        log = metrics.initialize_log(self)
-        log["x0"] = x
-        log["loss"] = []
-
-        for i in range(n_steps):
-            log = metrics.update_log(self, i, x, log, bandwidth)
-            x, bandwidth, steplog = self.step(x, bandwidth, meta_stepsize, svgd_stepsize)
-            log["loss"].append(steplog["loss"])
-
-        return x, log
-
-
-
-
-
-
-    def optimize_bandwidth(self, bandwidth, stepsize, n_steps, ksd_bandwidth=1, sample_every_step=True, gradient_clip_threshold=10):
-        """Find optimal bandwidth using SGD.
-        Not pure (mutates self.rkey)"""
-        if self.adaptive_kernel:
-            raise ValueError("This SVGD instance uses an adaptive bandwidth parameter.")
-        if ksd_bandwidth is None:
-            vary_ksd_bandwidth = True
-        else:
-            vary_ksd_bandwidth = False
-
-        log = [bandwidth]
-        for _ in tqdm(range(n_steps)):
-            if sample_every_step:
-                self.newkey()
-            if vary_ksd_bandwidth:
-                ksd_bandwidth = bandwidth
-            bandwidth = self.step(self.rkey, bandwidth, stepsize, ksd_bandwidth=ksd_bandwidth, gradient_clip_threshold=gradient_clip_threshold)
-            if np.any(np.isnan(bandwidth)):
-                raise Exception(f"Gradient is NaN. Last non-NaN value of bandwidth was {log[-1]}")
-            elif np.any(bandwidth < 0):
-                print(f"Note: some entries are below zero. Bandwidth = {bandwidth}.")
-            else:
-                pass
-            log.append(bandwidth)
-        return bandwidth, log
