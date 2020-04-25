@@ -3,6 +3,10 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from scipy.ndimage.filters import gaussian_filter
 
+import jax.numpy as np
+
+import metrics
+
 ## plotting utilities
 def equalize_axes(ax):
     ylim = ax.get_ylim()
@@ -46,23 +50,46 @@ def bivariate_hist(xout):
 #        ax.set_aspect("equal")
     plt.show()
 
-def svgd_log(log, xout=None):
+
+def plotobject(data, colors=None, titles=None, yscale="linear"):
+    """
+    * if data is a dict, plot every value.
+    * if data is an array, iterate over first axis and plot
+    """
+    assert type(data) is dict or data.ndim <= 3
+    if colors is None:
+        colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    sq = int(np.sqrt(len(data)))
+    w = sq + 3
+    h = sq
+    plt.figure(figsize = [6*w, 2.5*h + 0.2*(h-1)]) # 0.2 = hspace
+#    plt.subplots_adjust(hspace=0.8)
+    if type(data) is dict:
+        for i, (k, v) in enumerate(data.items()):
+            plt.subplot(f"{h}{w}{i+1}")
+            plt.plot(v, color=colors[i])
+            plt.title(k)
+    else:
+        for i, v in enumerate(data):
+            plt.subplot(f"{h}{w}{i+1}")
+            plt.plot(v, color=colors[i])
+            if titles is not None:
+                plt.title(titles[i])
+            plt.yscale(yscale)
+
+def svgd_log(log):
     """plot metrics logged during SVGD run and histogram of output."""
-    plt.figure(1, figsize = [20, 10])
-    plt.subplots_adjust(hspace=0.8)
+    # plot mean and var
+    titles = metrics.Distribution.metric_names
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    colors = colors + colors + colors # avoid index out of bound
+    for key, dic in log.items():
+        if key == "desc":
+            plotobject(dic, colors)
+            colors = colors[len(dic):]
 
-    l = len(log)
-    k = l // 2
-    print(l, k)
-    for i, key in enumerate(log.keys()):
-        plt.subplot(f"{k}{l-k}{i+1}") # 2 plots on 0th axis, 1 plot on 1th axis, plot nr 1 --> 211
-        plt.plot(log[key], color=colors[i])
-        plt.title(key)
-        plt.xlabel("step")
-        if "ksd" in key:
-            plt.yscale("log")
-
-    if xout is not None:
-        plt.figure(2)
-        _ = plt.hist(xout[:, 0], density=True, bins=25)
+        elif key == "metrics":
+            for k, v in dic.items():
+                v = np.moveaxis(v, 0, 1)
+                plotobject(v, colors, titles[k], yscale="log") # moveaxis swaps axes 0 and 1
+                colors = colors[len(v):]

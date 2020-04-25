@@ -6,6 +6,7 @@ from jax.experimental import optimizers
 
 import time
 from tqdm import tqdm
+import warnings
 
 import utils
 import metrics
@@ -49,8 +50,9 @@ def phistar(x, logp, bandwidth, xest=None):
         return vmap(phistar_i, (0, None, None, None))(x, xest, logp, bandwidth)
 
 def update(x, logp, stepsize, bandwidth, xest=None):
-    """SVGD update step"""
+    """SVGD update step / forward pass"""
     return x + stepsize * phistar(x, logp, bandwidth, xest)
+update = jit(update, static_argnums=1)
 
 def get_bandwidth(x):
     """
@@ -68,10 +70,10 @@ def get_bandwidth(x):
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
 
 class SVGD():
-    def __init__(self, logp, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=(100, 1)):
+    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=None):
         """
         Arguments:
-        * logp: callable
+        * dist: instance of class metrics.Distribution. Alternatively, a callable that computes log(p(x))
         * n_iter_max: integer
         * adaptive_kernel: bool
         * get_bandwidth: callable or None
@@ -80,14 +82,25 @@ class SVGD():
             assert get_bandwidth is not None
         else:
             assert get_bandwidth is None
-        assert len(particle_shape) > 1
 
         # changing these triggers recompile of method svgd
-        self.logp = logp
+        if isinstance(dist, metrics.Distribution):
+            self.logp = dist.logpdf
+            self.dist = dist
+            if particle_shape is None:
+                self.particle_shape = (100, dist.d) # default nr of particles
+            else:
+                if particle_shape[1] != dist.d: raise ValueError()
+                self.particle_shape = particle_shape
+        elif callable(dist):
+            self.logp = dist
+            warnings.warn("No dist instance supplied. This means you won't have access to the SVGD.dist.compute_metrics method, which computes the metrics logged during calls to SVGD.svgd and SVGD.step.")
+            self.dist = None
+        else:
+            raise ValueError()
         self.n_iter_max = n_iter_max
         self.adaptive_kernel = adaptive_kernel
         self.get_bandwidth = get_bandwidth
-        self.particle_shape = particle_shape
 
         # these don't trigger recompilation:
         self.rkey = random.PRNGKey(0)
@@ -125,14 +138,13 @@ class SVGD():
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
             x, xest, log = u
-            adaptive_bandwidth = None
             if self.adaptive_kernel:
                 adaptive_bandwidth = get_bandwidth(x)
-                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
                 x = update(x, self.logp, stepsize, adaptive_bandwidth, xest)
                 xest = update(xest, self.logp, stepsize, adaptive_bandwidth)
             else:
-                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                log = metrics.update_log(self, i, x, log, bandwidth)
                 x = update(x, self.logp, stepsize, bandwidth, xest)
                 xest = update(xest, self.logp, stepsize, bandwidth)
 
@@ -163,37 +175,76 @@ class SVGD():
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
             x, log = u
-            adaptive_bandwidth = None
             if self.adaptive_kernel:
                 adaptive_bandwidth = get_bandwidth(x)
-                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
                 x = update(x, self.logp, stepsize, adaptive_bandwidth)
             else:
-                log = metrics.update_log(self, i, x, log, bandwidth, adaptive_bandwidth)
+                log = metrics.update_log(self, i, x, log, bandwidth)
                 x = update(x, self.logp, stepsize, bandwidth)
 
             return [x, log]
 
-        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log]) 
+        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log])
         log["x0"] = x0
         return x, log
 
     # this way we only print "COMPILING" when we're actually compiling
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
-    def loss(self, rkey, bandwidth, ksd_bandwidth=1, svgd_stepsize=0.01):
+    def loss(self, x, bandwidth, ksd_bandwidth=1):
         """Backward pass.
-        Sample particles, perform SVGD, and output estimated KSD between target p and particles xout."""
-        xout, _ = self.svgd(rkey, svgd_stepsize, bandwidth, self.n_iter_max)
-        return metrics.ksd(xout, self.logp, ksd_bandwidth)
+        KSD between target p and empirical distribution of particles x."""
+        if ksd_bandwidth is None:
+            ksd_bandwidth = bandwidth
+        return metrics.ksd(x, self.logp, ksd_bandwidth)
 
-    def step(self, rkey, bandwidth, stepsize, ksd_bandwidth=1, gradient_clip_threshold=10):
-        """SGD update step"""
+    def step(self, x, bandwidth, meta_stepsize, svgd_stepsize, ksd_bandwidth=1, gradient_clip_threshold=100):
+        """SGD update step
+        1) compute SVGD step (forward)
+        2) compute Loss (backward)
+        3) update bandwidth via SGD"""
         bandwidth = np.array(bandwidth, dtype=np.float32)
-        gradient = jacfwd(self.loss, argnums=1)(rkey, bandwidth, ksd_bandwidth)
-        return bandwidth - stepsize * optimizers.clip_grads(gradient, gradient_clip_threshold)
+        xout = update(x, self.logp, svgd_stepsize, bandwidth)
+        loss = self.loss(xout, bandwidth, ksd_bandwidth) # for logging
+        gradient = jacfwd(self.loss, argnums=1)(xout, bandwidth, ksd_bandwidth)
+
+        log = {
+            "loss": loss,
+        }
+        updated_bandwidth = bandwidth - meta_stepsize * optimizers.clip_grads(gradient, gradient_clip_threshold)
+        return xout, updated_bandwidth, log
 
     step = utils.verbose_jit(step, static_argnums=0)
+
+    def train(self, rkey, bandwidth, meta_stepsize, svgd_stepsize, n_steps):
+        """
+        IN:
+        * rkey: random seed
+        * stepsize is a float
+        * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
+        * n_iter: integer, has to be less than self.n_iter_max
+
+        OUT:
+        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
+        * dictionary with logs
+        """
+        x = self.initialize(rkey)
+        log = metrics.initialize_log(self)
+        log["x0"] = x
+        log["loss"] = []
+
+        for i in range(n_steps):
+            log = metrics.update_log(self, i, x, log, bandwidth)
+            x, bandwidth, steplog = self.step(x, bandwidth, meta_stepsize, svgd_stepsize)
+            log["loss"].append(steplog["loss"])
+
+        return x, log
+
+
+
+
+
 
     def optimize_bandwidth(self, bandwidth, stepsize, n_steps, ksd_bandwidth=1, sample_every_step=True, gradient_clip_threshold=10):
         """Find optimal bandwidth using SGD.
