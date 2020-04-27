@@ -49,10 +49,22 @@ def phistar(x, logp, bandwidth, xest=None):
     else:
         return vmap(phistar_i, (0, None, None, None))(x, xest, logp, bandwidth)
 
-def update(x, logp, stepsize, bandwidth, xest=None):
-    """SVGD update step / forward pass"""
-    return x + stepsize * phistar(x, logp, bandwidth, xest)
-update = jit(update, static_argnums=1)
+# adagrad params (fixed):
+alpha = 0.9
+fudge_factor = 1e-6
+def update(x, logp, stepsize, bandwidth, xest=None, adagrad=False, historical_grad=None):
+    """SVGD update step / forward pass
+    If xest is passed, update is computed using particles xest, but is still applied to x.
+    """
+    if adagrad:
+        phi = phistar(x, logp, bandwidth, xest)
+        historical_grad = alpha * historical_grad + (1 - alpha) * (phi ** 2)
+        phi_adj = np.divide(phi, fudge_factor+np.sqrt(historical_grad))
+        x = x + stepsize * phi_adj
+    else:
+        x = x + stepsize * phistar(x, logp, bandwidth, xest)
+    return x
+# update = jit(update, static_argnums=1)
 
 def get_bandwidth(x):
     """
@@ -70,7 +82,7 @@ def get_bandwidth(x):
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
 
 class SVGD():
-    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=None):
+    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_dim=None, adagrad=False):
         """
         Arguments:
         * dist: instance of class metrics.Distribution. Alternatively, a callable that computes log(p(x))
@@ -87,11 +99,11 @@ class SVGD():
         if isinstance(dist, metrics.Distribution):
             self.logp = dist.logpdf
             self.dist = dist
-            if particle_shape is None:
-                self.particle_shape = (100, dist.d) # default nr of particles
+            if particle_dim is None:
+                self.particle_dim = dist.d # default nr of particles
             else:
-                if particle_shape[1] != dist.d: raise ValueError()
-                self.particle_shape = particle_shape
+                if particle_dim != dist.d: raise ValueError()
+                self.particle_dim = particle_dim
         elif callable(dist):
             self.logp = dist
             warnings.warn("No dist instance supplied. This means you won't have access to the SVGD.dist.compute_metrics method, which computes the metrics logged during calls to SVGD.svgd and SVGD.step.")
@@ -101,6 +113,7 @@ class SVGD():
         self.n_iter_max = n_iter_max
         self.adaptive_kernel = adaptive_kernel
         self.get_bandwidth = get_bandwidth
+        self.adagrad = adagrad
 
         # these don't trigger recompilation:
         self.rkey = random.PRNGKey(0)
@@ -112,48 +125,50 @@ class SVGD():
         """Not pure"""
         self.rkey = random.split(self.rkey)[0]
 
-    def initialize(self, rkey):
+    def initialize(self, rkey, n):
         """Initialize particles distributed as N(-10, 1)."""
-        return random.normal(rkey, shape=self.particle_shape) - 10
+        return random.normal(rkey, shape=(n, self.particle_dim)) - 10
 
 
-    def svgd(self, rkey, stepsize, bandwidth, n_iter):
+    def svgd(self, x0, stepsize, bandwidth, n_iter, n=100):
         """
         IN:
         * rkey: random seed
         * stepsize is a float
         * bandwidth is an np array of length d: bandwidth parameter for RBF kernel
         * n_iter: integer, has to be less than self.n_iter_max
+        * n: integer, number of particles
 
         OUT:
         * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
         * dictionary with logs
         """
-        x0 = self.initialize(rkey)
+#        x0 = self.initialize(rkey, n)
         x = x0
         log = metrics.initialize_log(self)
-
+        particle_shape = x.shape
+#        particle_shape = (n, self.particle_dim)
+        historical_grad = np.zeros(shape=particle_shape)
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
-            x, log = u
+            x, log, historical_grad = u
             if self.adaptive_kernel:
-                adaptive_bandwidth = get_bandwidth(x)
-                log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
-                x = update(x, self.logp, stepsize, adaptive_bandwidth)
+                _bandwidth = get_bandwidth(x)
             else:
-                log = metrics.update_log(self, i, x, log, bandwidth)
-                x = update(x, self.logp, stepsize, bandwidth)
+                _bandwidth = bandwidth
 
-            return [x, log]
+            log = metrics.update_log(self, i, x, log, _bandwidth)
+            x = update(x, self.logp, stepsize, _bandwidth, adagrad=self.adagrad, historical_grad=historical_grad)
 
-        x, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log])
-        log["x0"] = x0
+            return [x, log, historical_grad]
+
+        x, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log, historical_grad])
         return x, log
 
     # this way we only print "COMPILING" when we're actually compiling
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
-    def step(self, x, bandwidth, meta_stepsize, svgd_stepsize, ksd_bandwidth=1, gradient_clip_threshold=100):
+    def step(self, x, bandwidth, lr, svgd_stepsize, ksd_bandwidth=1, gradient_clip_threshold=100):
         """SGD update step
         1) compute SVGD step (forward)
         2) compute Loss (backward)
@@ -171,23 +186,24 @@ class SVGD():
         log = {
             "loss": current_loss,
         }
-        updated_bandwidth = bandwidth - meta_stepsize * optimizers.clip_grads(gradient, gradient_clip_threshold)
+        updated_bandwidth = bandwidth - lr * optimizers.clip_grads(gradient, gradient_clip_threshold)
         return updated_bandwidth, log
 
     step = utils.verbose_jit(step, static_argnums=0)
 
-    def train(self, rkey, bandwidth, meta_stepsize, svgd_stepsize, n_steps):
+    def train(self, rkey, bandwidth, lr, svgd_stepsize, n_steps):
         bandwidth = np.array(bandwidth, dtype=np.float32) # cast to float so it works with jacfwd
         x = self.initialize(rkey)
         log = metrics.initialize_log(self)
         log["x0"] = x
         log["loss"] = []
 
+
         for i in range(n_steps):
             log = metrics.update_log(self, i, x, log, bandwidth)
 
             # take "dream" step, compute loss and update bandwidth
-            bandwidth, steplog = self.step(x, bandwidth, meta_stepsize, svgd_stepsize)
+            bandwidth, steplog = self.step(x, bandwidth, lr, svgd_stepsize)
             log["loss"].append(steplog["loss"])
 
             # using updated bandwidth, take actual step

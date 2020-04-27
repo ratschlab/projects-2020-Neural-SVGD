@@ -180,7 +180,7 @@ ksd = jit(ksd, static_argnums=1)
 ########################
 ### metrics to log while running SVGD
 def initialize_log(self):
-    d = self.particle_shape[1]
+    d = self.particle_dim
     log = {
         "desc": dict(),
         "metrics": dict()
