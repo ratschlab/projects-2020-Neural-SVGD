@@ -66,13 +66,13 @@ def update(x, logp, stepsize, bandwidth, xest=None, adagrad=False, historical_gr
     return x
 # update = jit(update, static_argnums=1)
 
-def get_bandwidth(x):
+def median_heuristic(x):
     """
     IN: np array of shape (n,) or (n,d): set of particles
-    OUT: scalar: Updated bandwidth parameter for RBF kernel, based on update rule from the SVGD paper.
+    OUT: scalar: bandwidth parameter for RBF kernel, based on the heuristic from the SVGD paper.
     """
     if x.ndim == 2:
-        return vmap(get_bandwidth, 1)(x)
+        return vmap(median_heuristic, 1)(x)
     elif x.ndim == 1:
         n = x.shape[0]
         medsq = np.median(utils.squared_distance_matrix(x))
@@ -91,7 +91,8 @@ class SVGD():
         * get_bandwidth: callable or None
         """
         if adaptive_kernel:
-            assert get_bandwidth is not None
+            if get_bandwidth is None:
+                self.get_bandwidth = median_heuristic
         else:
             assert get_bandwidth is None
 
@@ -102,7 +103,7 @@ class SVGD():
             if particle_dim is None:
                 self.particle_dim = dist.d # default nr of particles
             else:
-                if particle_dim != dist.d: raise ValueError()
+                if particle_dim != dist.d: raise ValueError(f"Distribution is defined on R^{dist.d}, but particle dim was given as {particle_dim}. If particle_dim is given, these values need to be equal.")
                 self.particle_dim = particle_dim
         elif callable(dist):
             self.logp = dist
@@ -112,7 +113,6 @@ class SVGD():
             raise ValueError()
         self.n_iter_max = n_iter_max
         self.adaptive_kernel = adaptive_kernel
-        self.get_bandwidth = get_bandwidth
         self.adagrad = adagrad
 
         # these don't trigger recompilation:
@@ -125,12 +125,16 @@ class SVGD():
         """Not pure"""
         self.rkey = random.split(self.rkey)[0]
 
-    def initialize(self, rkey, n):
+    def initialize(self, rkey=None, n=100):
         """Initialize particles distributed as N(-10, 1)."""
-        return random.normal(rkey, shape=(n, self.particle_dim)) - 10
+        if rkey is None:
+            sample = random.normal(self.rkey, shape=(n, self.particle_dim)) - 10
+            self.newkey()
+        else:
+            return random.normal(rkey, shape=(n, self.particle_dim)) - 10
 
 
-    def svgd(self, x0, stepsize, bandwidth, n_iter, n=100):
+    def svgd(self, x0, stepsize, bandwidth, n_iter):
         """
         IN:
         * rkey: random seed
@@ -153,7 +157,7 @@ class SVGD():
             """Compute updated particles and log metrics."""
             x, log, historical_grad = u
             if self.adaptive_kernel:
-                _bandwidth = get_bandwidth(x)
+                _bandwidth = self.get_bandwidth(x)
             else:
                 _bandwidth = bandwidth
 
@@ -268,7 +272,7 @@ class SVGD():
             """Compute updated particles and log metrics."""
             x, xest, log = u
             if self.adaptive_kernel:
-                adaptive_bandwidth = get_bandwidth(x)
+                adaptive_bandwidth = self.get_bandwidth(x)
                 log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
                 x = update(x, self.logp, stepsize, adaptive_bandwidth, xest)
                 xest = update(xest, self.logp, stepsize, adaptive_bandwidth)

@@ -1,9 +1,11 @@
 import numpy as onp
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
+from matplotlib import cm
 from scipy.ndimage.filters import gaussian_filter
+# from mpl_toolkits.mplot3d import Axes3D
 
 import jax.numpy as np
+from jax import vmap
 
 import metrics
 
@@ -77,6 +79,7 @@ def plotobject(data, colors=None, titles=None, yscale="linear", style="-"):
                 plt.title(titles[i])
             plt.yscale(yscale)
 
+
 def svgd_log(log, style="-"):
     """plot metrics logged during SVGD run and histogram of output."""
     # plot mean and var
@@ -93,3 +96,36 @@ def svgd_log(log, style="-"):
                 v = np.moveaxis(v, 0, 1)
                 plotobject(v, colors, titles[k], yscale="log", style=style) # moveaxis swaps axes 0 and 1
                 colors = colors[len(v):]
+
+
+def make_meshgrid(func, lims, num=100):
+    """
+    Arguments:
+    * func: callable. Takes an np.array of shape (d,) as only input, and outputs a scalar.
+    """
+    x = y = np.linspace(*lims, num)
+    xx, yy = np.meshgrid(x, y)
+
+    grid = np.stack([xx, yy]) # shape (2, r, r)
+    zz = vmap(vmap(func, 1), 2)(grid)
+
+    #zz = np.exp(zz)
+    return xx, yy, zz
+
+
+def plot_3d(x, y, z):
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.gca(projection='3d')
+    ax.plot_surface(x, y, z,
+                  cmap=cm.coolwarm,
+                  linewidth=0,
+                  antialiased=True)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z');
+    plt.show()
+    if ax is None: print("huh?")
+    return ax
+
+def plot_pdf(pdf, lims):
+    return plot_3d(*make_meshgrid(pdf, lims, num=150))

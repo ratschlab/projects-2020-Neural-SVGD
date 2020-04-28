@@ -89,7 +89,6 @@ class Gaussian(Distribution):
         return stats.multivariate_normal.logpdf(x, self.mean, self.cov)
 
 class GaussianMixture(Distribution):
-    """TODO fix computation of self.cov"""
     def __init__(self, means, covs, weights):
         """means, covs are np arrays or lists of length k, with entries of shape (d,) and (d, d) respectively.
         self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)"""
@@ -146,9 +145,11 @@ class GaussianMixture(Distribution):
         self.newkey()
         return out.reshape(shape + (self.d,)) if self.d > 1 else out.reshape(shape)
 
-    def logpdf(self, x):
+    def _logpdf(self, x):
         """unnormalized"""
         x = np.array(x)
+        if x.shape != (self.d,):
+            raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
 
         def exponent(x, mean, cov):
             sigmax = np.dot(np.linalg.inv(cov), (x - mean))
@@ -158,6 +159,20 @@ class GaussianMixture(Distribution):
         out = special.logsumexp(exponents)
         return np.squeeze(out)
 
+    def logpdf(self, x):
+        x = np.array(x)
+        if x.shape != (self.d,):
+            raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
+
+        pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
+        return np.log(np.vdot(pdfs, self.weights))
+
+    def pdf(self, x):
+        x = np.array(x)
+        if x.shape != (self.d,):
+            raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
+        pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
+        return np.vdot(pdfs, self.weights)
 
 ######################################
 # Kernelized Stein Discrepancy
