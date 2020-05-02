@@ -1,4 +1,5 @@
 import jax.numpy as np
+import jax
 from jax import grad, jit, vmap, random
 from jax.ops import index_update, index
 from jax.scipy.special import logsumexp
@@ -66,8 +67,29 @@ def verbose_jit(fun, static_argnums=None):
         return out
     return jit(verbose_fun, static_argnums)
 
-def clip(gradient, threshold):
-    r = np.l
+def check_for_nans(thing):
+    """not supposed to end up inside jit ofc"""
+    if type(thing) is jax.interpreters.xla.DeviceArray:
+        if np.isnan(thing):
+            warnings.warn("Detected NaNs in output.", RuntimeWarning)
+    elif type(thing) is tuple or type(thing) is list:
+        for el in thing:
+            check_for_nans(el)
+    elif type(thing) is dict:
+        for k, v in thing.items():
+            check_for_nans(v)
+    else:
+        pass
+    return None
+
+# wrapper that checks output for NaNs and returns a warning if isnan
+def check_for_nans(fun):
+    @wraps(fun)
+    def checked_fun(*args, **kwargs):
+        out = fun(*args, **kwargs)
+        check_for_nans(out)
+        return out
+    return checked_fun
 
 def is_pd(x):
     """check if matrix is positive defininite"""
@@ -242,7 +264,3 @@ def dict_mean(dict_list):
         assert out[k].shape == dict_list[0][k].shape
 
     return out
-
-
-#########################
-## distributions

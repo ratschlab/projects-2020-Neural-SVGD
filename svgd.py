@@ -64,7 +64,7 @@ def update(x, logp, stepsize, bandwidth, xest=None, adagrad=False, historical_gr
     else:
         x = x + stepsize * phistar(x, logp, bandwidth, xest)
     return x
-# update = jit(update, static_argnums=1)
+update = jit(update, static_argnums=(1, 5))
 
 def median_heuristic(x):
     """
@@ -82,7 +82,7 @@ def median_heuristic(x):
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
 
 class SVGD():
-    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_dim=None, adagrad=False):
+    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=None, adagrad=False):
         """
         Arguments:
         * dist: instance of class metrics.Distribution. Alternatively, a callable that computes log(p(x))
@@ -100,11 +100,11 @@ class SVGD():
         if isinstance(dist, metrics.Distribution):
             self.logp = dist.logpdf
             self.dist = dist
-            if particle_dim is None:
-                self.particle_dim = dist.d # default nr of particles
+            if particle_shape is None:
+                self.particle_shape = (100, dist.d) # default nr of particles
             else:
-                if particle_dim != dist.d: raise ValueError(f"Distribution is defined on R^{dist.d}, but particle dim was given as {particle_dim}. If particle_dim is given, these values need to be equal.")
-                self.particle_dim = particle_dim
+                if particle_shape[1] != dist.d: raise ValueError(f"Distribution is defined on R^{dist.d}, but particle dim was given as {particle_shape[1]}. If particle_shape is given, these values need to be equal.")
+                self.particle_shape = particle_shape
         elif callable(dist):
             self.logp = dist
             warnings.warn("No dist instance supplied. This means you won't have access to the SVGD.dist.compute_metrics method, which computes the metrics logged during calls to SVGD.svgd and SVGD.step.")
@@ -125,13 +125,12 @@ class SVGD():
         """Not pure"""
         self.rkey = random.split(self.rkey)[0]
 
-    def initialize(self, rkey=None, n=100):
+    def initialize(self, rkey=None):
         """Initialize particles distributed as N(-10, 1)."""
         if rkey is None:
-            sample = random.normal(self.rkey, shape=(n, self.particle_dim)) - 10
+            rkey = self.rkey
             self.newkey()
-        else:
-            return random.normal(rkey, shape=(n, self.particle_dim)) - 10
+        return random.normal(rkey, shape=self.particle_shape) - 10
 
 
     def svgd(self, x0, stepsize, bandwidth, n_iter):
@@ -147,11 +146,9 @@ class SVGD():
         * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
         * dictionary with logs
         """
-#        x0 = self.initialize(rkey, n)
         x = x0
         log = metrics.initialize_log(self)
         particle_shape = x.shape
-#        particle_shape = (n, self.particle_dim)
         historical_grad = np.zeros(shape=particle_shape)
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
@@ -162,14 +159,13 @@ class SVGD():
                 _bandwidth = bandwidth
 
             log = metrics.update_log(self, i, x, log, _bandwidth)
-            x = update(x, self.logp, stepsize, _bandwidth, adagrad=self.adagrad, historical_grad=historical_grad)
+            x = update(x, self.logp, stepsize, _bandwidth, None, self.adagrad, historical_grad)
 
             return [x, log, historical_grad]
 
         x, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log, historical_grad])
         return x, log
 
-    # this way we only print "COMPILING" when we're actually compiling
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
     def step(self, x, bandwidth, lr, svgd_stepsize, ksd_bandwidth=1, gradient_clip_threshold=100):
@@ -181,7 +177,7 @@ class SVGD():
             ksd_bandwidth = bandwidth
 
         def loss(bandwidth):
-            xout = update(x, self.logp, svgd_stepsize, bandwidth)
+            xout = update(x, self.logp, svgd_stepsize, bandwidth, None, False, None)
             return metrics.ksd(xout, self.logp, ksd_bandwidth)
 
         current_loss = loss(bandwidth)
@@ -195,56 +191,61 @@ class SVGD():
 
     step = utils.verbose_jit(step, static_argnums=0)
 
-    def train(self, rkey, bandwidth, lr, svgd_stepsize, n_steps):
+    def train(self, rkey, bandwidth, lr, svgd_stepsize, n_steps, ksd_bandwidth=None, update_after=25):
         bandwidth = np.array(bandwidth, dtype=np.float32) # cast to float so it works with jacfwd
-        x = self.initialize(rkey)
-        log = metrics.initialize_log(self)
-        log["x0"] = x
-        log["loss"] = []
 
+#        x_grad = self.initialize(rkey) # use for computing gradient of kernel param
+#        rkey = random.split(rkey)[0]
+        x_svgd = self.initialize(rkey) # use for computing svgd update
+
+#        log_grad = metrics.initialize_log(self)
+        log_svgd = metrics.initialize_log(self)
+
+        loss = []
+        if ksd_bandwidth is None:
+            concurrent = True
+        else:
+            concurrent = False
 
         for i in range(n_steps):
-            log = metrics.update_log(self, i, x, log, bandwidth)
+            # decide whether to update bandwidth in this iteration
+            update_bandwidth = i > update_after
 
-            # take "dream" step, compute loss and update bandwidth
-            bandwidth, steplog = self.step(x, bandwidth, lr, svgd_stepsize)
-            log["loss"].append(steplog["loss"])
+            if update_bandwidth:
+                # take "dream" step, compute loss and update bandwidth
+                if concurrent:
+                    ksd_bandwidth=bandwidth
+
+                bandwidth, steplog = self.step(x_svgd, bandwidth, lr, svgd_stepsize, ksd_bandwidth)
+                loss.append(steplog["loss"])
+
+            # update log
+#            log_grad = metrics.update_log(self, i, x_grad, log_grad, bandwidth)
+            log_svgd = metrics.update_log(self, i, x_svgd, log_svgd, bandwidth)
 
             # using updated bandwidth, take actual step
-            x = update(x, self.logp, svgd_stepsize, bandwidth)
+#            _x_grad = update(x_grad, self.logp, svgd_stepsize, bandwidth, x_svgd, False, None)
+            x_svgd  = update(x_svgd, self.logp, svgd_stepsize, bandwidth, x_svgd, False, None)
+#            x_grad = _x_grad
 
-        return x, log
-
-
-
-
-
-
-    def optimize_bandwidth(self, bandwidth, stepsize, n_steps, ksd_bandwidth=1, sample_every_step=True, gradient_clip_threshold=10):
-        """Find optimal bandwidth using SGD.
-        Not pure (mutates self.rkey)"""
-        if self.adaptive_kernel:
-            raise ValueError("This SVGD instance uses an adaptive bandwidth parameter.")
-        if ksd_bandwidth is None:
-            vary_ksd_bandwidth = True
-        else:
-            vary_ksd_bandwidth = False
-
-        log = [bandwidth]
-        for _ in tqdm(range(n_steps)):
-            if sample_every_step:
-                self.newkey()
-            if vary_ksd_bandwidth:
-                ksd_bandwidth = bandwidth
-            bandwidth = self.step(self.rkey, bandwidth, stepsize, ksd_bandwidth=ksd_bandwidth, gradient_clip_threshold=gradient_clip_threshold)
             if np.any(np.isnan(bandwidth)):
-                raise Exception(f"Gradient is NaN. Last non-NaN value of bandwidth was {log[-1]}")
-            elif np.any(bandwidth < 0):
-                print(f"Note: some entries are below zero. Bandwidth = {bandwidth}.")
+                warnings.warn(f"NaNs detected in bandwidth at iteration {i}. Training interrupted.", RuntimeWarning)
+                break
+
+            for x in (x_svgd):
+                if np.any(np.isnan(x)):
+                    warnings.warn(f"NaNs detected in x at iteration {i}. Bandwidth is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
+                    break
             else:
-                pass
-            log.append(bandwidth)
-        return bandwidth, log
+                continue
+            break
+
+        return x_svgd, log_svgd, loss #x_grad, x_svgd, log_grad, log_svgd, loss
+
+
+
+
+
 
 
 

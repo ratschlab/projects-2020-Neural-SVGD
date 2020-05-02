@@ -53,7 +53,7 @@ def bivariate_hist(xout):
     plt.show()
 
 
-def plotobject(data, colors=None, titles=None, yscale="linear", style="-"):
+def plotobject(data, colors=None, titles=None, xscale="linear", yscale="linear", xlabel=None, ylabel=None, style="-", xaxis=None, axhlines=None):
     """
     * if data is a dict, plot every value.
     * if data is an array, iterate over first axis and plot
@@ -70,18 +70,27 @@ def plotobject(data, colors=None, titles=None, yscale="linear", style="-"):
         for i, (k, v) in enumerate(data.items()):
             plt.subplot(f"{h}{w}{i+1}")
             plt.plot(v, style, color=colors[i])
+            plt.yscale(yscale)
+            plt.xscale(xscale)
             plt.title(k)
     else:
         for i, v in enumerate(data):
             plt.subplot(f"{h}{w}{i+1}")
-            plt.plot(v, style, color=colors[i])
-            if titles is not None:
-                plt.title(titles[i])
+            if xaxis is None:
+                plt.plot(v, style, color=colors[i])
+            else:
+                plt.plot(xaxis, v, style, color=colors[i])
+            plt.title(titles[i])
             plt.yscale(yscale)
+            plt.xscale(xscale)
+            plt.ylabel(ylabel)
+            plt.xlabel(xlabel)
+            if axhlines is not None:
+                plt.axhline(y=axhlines[i], color="y")
 
 
-def svgd_log(log, style="-"):
-    """plot metrics logged during SVGD run and histogram of output."""
+def svgd_log(log, style="-", full=False):
+    """plot metrics logged during SVGD run."""
     # plot mean and var
     titles = metrics.Distribution.metric_names
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -91,7 +100,7 @@ def svgd_log(log, style="-"):
             plotobject(dic, colors, style=style)
             colors = colors[len(dic):]
 
-        elif key == "metrics":
+        elif key == "metrics" and full:
             for k, v in dic.items():
                 v = np.moveaxis(v, 0, 1)
                 plotobject(v, colors, titles[k], yscale="log", style=style) # moveaxis swaps axes 0 and 1

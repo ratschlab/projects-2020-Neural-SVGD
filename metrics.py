@@ -85,8 +85,13 @@ class Gaussian(Distribution):
 
     def logpdf(self, x):
         x = np.array(x)
-        assert x.ndim == 1
+        assert x.ndim == 1 or (x.ndim == 0 and self.d == 1)
         return stats.multivariate_normal.logpdf(x, self.mean, self.cov)
+
+    def pdf(self, x):
+        x = np.array(x)
+        assert x.ndim == 1 or (x.ndim == 0 and self.d == 1)
+        return stats.multivariate_normal.pdf(x, self.mean, self.cov)
 
 class GaussianMixture(Distribution):
     def __init__(self, means, covs, weights):
@@ -161,15 +166,14 @@ class GaussianMixture(Distribution):
 
     def logpdf(self, x):
         x = np.array(x)
-        if x.shape != (self.d,):
+        if x.shape != (self.d,) and not (self.d == 1 and x.ndim == 0):
             raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
-
         pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
         return np.log(np.vdot(pdfs, self.weights))
 
     def pdf(self, x):
         x = np.array(x)
-        if x.shape != (self.d,):
+        if x.shape != (self.d,) and not (self.d == 1 and x.ndim == 0):
             raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
         pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
         return np.vdot(pdfs, self.weights)
@@ -195,7 +199,7 @@ ksd = jit(ksd, static_argnums=1)
 ########################
 ### metrics to log while running SVGD
 def initialize_log(self):
-    d = self.particle_dim
+    d = self.particle_shape[1]
     log = {
         "desc": dict(),
         "metrics": dict()
