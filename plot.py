@@ -65,9 +65,8 @@ def plotobject(data, colors=None, titles=None, xscale="linear", yscale="linear",
     w = sq + 3
     h = sq
     plt.figure(figsize = [6*w, 2.5*h + 0.2*(h-1)]) # 0.2 = hspace
-#    plt.subplots_adjust(hspace=0.8)
     if type(data) is dict:
-        for i, (k, v) in enumerate(data.items()):
+        for i, (k, v) in enumerate(sorted(data.items())):
             plt.subplot(f"{h}{w}{i+1}")
             plt.plot(v, style, color=colors[i])
             plt.yscale(yscale)

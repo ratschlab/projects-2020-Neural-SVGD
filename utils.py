@@ -55,7 +55,7 @@ def get_ada_loss(m):
 
 
 # wrapper that prints when the function compiles 
-def verbose_jit(fun, static_argnums=None):
+def verbose_jit(fun, *jargs, **jkwargs):
     """Does same thing as jax.jit, only that it also inserts a print statement."""
     @wraps(fun)
     def verbose_fun(*args, **kwargs):
@@ -65,7 +65,7 @@ def verbose_jit(fun, static_argnums=None):
         end = time.time()
         print(f"...done compiling {fun.__name__} after {end-st} seconds.")
         return out
-    return jit(verbose_fun, static_argnums)
+    return jit(verbose_fun, *jargs, **jkwargs)
 
 def check_for_nans(thing):
     """not supposed to end up inside jit ofc"""

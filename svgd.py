@@ -36,7 +36,7 @@ def phistar_i(xi, x, logp, bandwidth):
     assert xi.ndim == 2
 
     n = x.shape[0]
-    xi_rep = np.repeat(xi, n,axis=0)
+    xi_rep = np.repeat(xi, n, axis=0)
     return np.sum(vmap(phistar_j, (0, 0, None, None))(x, xi_rep, logp, bandwidth), axis=0)
 
 def phistar(x, logp, bandwidth, xest=None):
@@ -148,6 +148,7 @@ class SVGD():
         """
         x = x0
         log = metrics.initialize_log(self)
+        log["x0"] = x0
         particle_shape = x.shape
         historical_grad = np.zeros(shape=particle_shape)
         def update_fun(i, u):
@@ -168,73 +169,70 @@ class SVGD():
 
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
-    def step(self, x, bandwidth, lr, svgd_stepsize, ksd_bandwidth=1, gradient_clip_threshold=100):
+    def step(self, x, logh, lr, svgd_stepsize, ksd_logh=1, gradient_clip_threshold=100):
         """SGD update step
         1) compute SVGD step (forward)
         2) compute Loss (backward)
         3) update bandwidth via SGD"""
-        if ksd_bandwidth is None:
-            ksd_bandwidth = bandwidth
+        if ksd_logh is None:
+            ksd_logh = logh
 
-        def loss(bandwidth):
+        def loss(logh): # TODO add ksd_logh as argument, or make sure jax works like this
+            bandwidth = np.exp(logh)
+            ksd_bandwidth = np.exp(ksd_logh)
             xout = update(x, self.logp, svgd_stepsize, bandwidth, None, False, None)
             return metrics.ksd(xout, self.logp, ksd_bandwidth)
 
-        current_loss = loss(bandwidth)
-        gradient = jacfwd(loss)(bandwidth)
+        current_loss = loss(logh)
+        gradient = jacfwd(loss)(logh)
+        gradient = gradient / np.linalg.norm(gradient) # normalize
 
         log = {
             "loss": current_loss,
         }
-        updated_bandwidth = bandwidth - lr * optimizers.clip_grads(gradient, gradient_clip_threshold)
-        return updated_bandwidth, log
+        updated_logh = logh - lr * optimizers.clip_grads(gradient, gradient_clip_threshold)
+        return updated_logh, log
 
     step = utils.verbose_jit(step, static_argnums=0)
 
     def train(self, rkey, bandwidth, lr, svgd_stepsize, n_steps, ksd_bandwidth=None, update_after=25):
         bandwidth = np.array(bandwidth, dtype=np.float32) # cast to float so it works with jacfwd
+        logh = np.log(bandwidth)
+        ksd_logh = np.log(ksd_bandwidth)
 
-#        x_grad = self.initialize(rkey) # use for computing gradient of kernel param
-#        rkey = random.split(rkey)[0]
         x_svgd = self.initialize(rkey) # use for computing svgd update
-
-#        log_grad = metrics.initialize_log(self)
         log_svgd = metrics.initialize_log(self)
-
+        log_svgd["x0"] = x_svgd
         loss = []
-        if ksd_bandwidth is None:
+        if ksd_logh is None:
             concurrent = True
         else:
             concurrent = False
 
+        historical_grad = np.zeros(shape=self.particle_shape)
         for i in range(n_steps):
-            # decide whether to update bandwidth in this iteration
-            update_bandwidth = i > update_after
+            # decide whether to update logh in this iteration
+            update_logh = i > update_after
 
-            if update_bandwidth:
-                # take "dream" step, compute loss and update bandwidth
+            if update_logh:
+                # take "dream" step, compute loss and update logh
                 if concurrent:
-                    ksd_bandwidth=bandwidth
+                    ksd_logh=logh
 
-                bandwidth, steplog = self.step(x_svgd, bandwidth, lr, svgd_stepsize, ksd_bandwidth)
+                logh, steplog = self.step(x_svgd, logh, lr, svgd_stepsize, ksd_logh)
                 loss.append(steplog["loss"])
 
-            # update log
-#            log_grad = metrics.update_log(self, i, x_grad, log_grad, bandwidth)
+            bandwidth = np.exp(logh)
             log_svgd = metrics.update_log(self, i, x_svgd, log_svgd, bandwidth)
+            x_svgd = update(x_svgd, self.logp, svgd_stepsize, bandwidth, x_svgd, self.adagrad, historical_grad)
 
-            # using updated bandwidth, take actual step
-#            _x_grad = update(x_grad, self.logp, svgd_stepsize, bandwidth, x_svgd, False, None)
-            x_svgd  = update(x_svgd, self.logp, svgd_stepsize, bandwidth, x_svgd, False, None)
-#            x_grad = _x_grad
-
-            if np.any(np.isnan(bandwidth)):
-                warnings.warn(f"NaNs detected in bandwidth at iteration {i}. Training interrupted.", RuntimeWarning)
+            if np.any(np.isnan(logh)):
+                warnings.warn(f"NaNs detected in logh at iteration {i}. Training interrupted.", RuntimeWarning)
                 break
 
             for x in (x_svgd):
                 if np.any(np.isnan(x)):
-                    warnings.warn(f"NaNs detected in x at iteration {i}. Bandwidth is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
+                    warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
                     break
             else:
                 continue
@@ -263,6 +261,7 @@ class SVGD():
         * dictionary with logs
         """
         x0 = self.initialize(rkey)
+#        x0 = random.normal(rkey, shape=(100, 1)) - 10
         x = x0
         rkey = random.split(rkey)[0]
         xest = self.initialize(rkey)
@@ -271,20 +270,25 @@ class SVGD():
 
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
-            x, xest, log = u
+            x, xest, log, rkey = u
             if self.adaptive_kernel:
                 adaptive_bandwidth = self.get_bandwidth(x)
                 log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
-                x = update(x, self.logp, stepsize, adaptive_bandwidth, xest)
-                xest = update(xest, self.logp, stepsize, adaptive_bandwidth)
+                x    = update(x,    self.logp, stepsize, adaptive_bandwidth, xest, False, None)
+                xest = update(xest, self.logp, stepsize, adaptive_bandwidth, xest, False, None)
             else:
                 log = metrics.update_log(self, i, x, log, bandwidth)
-                x = update(x, self.logp, stepsize, bandwidth, xest)
-                xest = update(xest, self.logp, stepsize, bandwidth)
+                _x   = update(x,    self.logp, stepsize, bandwidth, xest, False, None)
+                xest = update(xest, self.logp, stepsize, bandwidth, x,    False, None)
+                x = _x
 
-            return [x, xest, log]
 
-        x, xest, log = lax.fori_loop(0, self.n_iter_max, update_fun, [x, xest, log])
+            rkey = random.split(rkey)[0]
+            eps = 10e-2
+            xest, x = [xs + random.normal(rkey, shape=xs.shape) * eps for xs in (xest, x)]
+            return [x, xest, log, rkey]
+        init = [x, xest, log, rkey]
+        x, xest, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, init)
         log["x0"] = x0
         return x, xest, log
 
