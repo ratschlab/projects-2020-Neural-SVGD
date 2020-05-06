@@ -137,3 +137,68 @@ def plot_3d(x, y, z):
 
 def plot_pdf(pdf, lims):
     return plot_3d(*make_meshgrid(pdf, lims, num=150))
+
+
+def make_bar_chart(data, labels=None, figax=None):
+    """
+    Arguments:
+    * data: np.array of shape (2, d), where d is the number of pairs of values.
+    Can also be shape (2,), in which case d is assumed to be 1.
+    Can also be list of length 2.
+
+    * labels is a list of strings of length d.
+    * figax = [fig, ax] objects
+    """
+    assert len(data)==2
+    data = np.array(data)
+    if data.ndim == 1:
+        d = 1
+    elif data.ndim == 2:
+        d = data.shape[1]
+    else:
+        raise ValueError("data must can't have more than 2 dimensions.")
+
+    x = np.arange(d)  # the label locations
+    width = 0.35  # the width of the bars
+
+
+    if figax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig, ax = figax
+    rects1 = ax.bar(x - width/2, data[0], width=width, label='Learned h')
+    rects2 = ax.bar(x + width/2, data[1], width=width, label='Fixed h')
+
+    # Add some text for labels, title and custom x-axis tick labels, etc.
+    # ax.set_ylabel('Scores')
+    ax.set_xticks(x)
+
+    if labels is not None:
+        assert len(labels) == d
+        ax.set_xticklabels(labels)
+
+    if d == 1:
+        ax.set_xlim(-1, 2)
+
+    def autolabel(rects):
+        """Attach a text label above each bar in *rects*, displaying its height."""
+        for rect in rects:
+            height = rect.get_height()
+            if height < 0.01 or height > 10e4:
+                ann = "{:.2E}".format(height)
+            else:
+                ann = '{:.2f}'.format(height)
+            ax.annotate(ann,
+                        xy = (rect.get_x() + rect.get_width() / 2, height),
+                        xytext=(0, 3),  # 3 points vertical offset
+                        textcoords="offset points",
+                        ha='center', va='bottom')
+
+    ax.legend()
+    autolabel(rects1)
+    autolabel(rects2)
+
+    fig.tight_layout()
+
+    if figax is None:
+        return fig, ax

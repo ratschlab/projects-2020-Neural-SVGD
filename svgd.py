@@ -130,8 +130,7 @@ class SVGD():
         if rkey is None:
             rkey = self.rkey
             self.newkey()
-        return random.normal(rkey, shape=self.particle_shape) - 10
-
+        return random.normal(rkey, shape=self.particle_shape) - 5
 
     def svgd(self, x0, stepsize, bandwidth, n_iter):
         """
@@ -151,9 +150,10 @@ class SVGD():
         log["x0"] = x0
         particle_shape = x.shape
         historical_grad = np.zeros(shape=particle_shape)
+        rkey = random.PRNGKey(7)
         def update_fun(i, u):
             """Compute updated particles and log metrics."""
-            x, log, historical_grad = u
+            x, log, historical_grad, rkey = u
             if self.adaptive_kernel:
                 _bandwidth = self.get_bandwidth(x)
             else:
@@ -162,9 +162,13 @@ class SVGD():
             log = metrics.update_log(self, i, x, log, _bandwidth)
             x = update(x, self.logp, stepsize, _bandwidth, None, self.adagrad, historical_grad)
 
-            return [x, log, historical_grad]
+            rkey = random.split(rkey)[0]
+            eps = 10e-3
+            x = x + random.normal(rkey, shape=x.shape) * eps
 
-        x, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log, historical_grad])
+            return [x, log, historical_grad, rkey]
+
+        x, log, *_ = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log, historical_grad, rkey])
         return x, log
 
     svgd = utils.verbose_jit(svgd, static_argnums=0)
@@ -200,9 +204,12 @@ class SVGD():
         logh = np.log(bandwidth)
         ksd_logh = np.log(ksd_bandwidth)
 
-        x_svgd = self.initialize(rkey) # use for computing svgd update
-        log_svgd = metrics.initialize_log(self)
-        log_svgd["x0"] = x_svgd
+        x = self.initialize(rkey)
+        rkey = random.split(rkey)[0]
+        x_step = self.initialize(rkey) # use for computing gradient of h
+
+        log = log_step = metrics.initialize_log(self)
+        log["x0"], log_step["x0"] = x_step, x
         loss = []
         if ksd_logh is None:
             concurrent = True
@@ -210,7 +217,7 @@ class SVGD():
             concurrent = False
 
         historical_grad = np.zeros(shape=self.particle_shape)
-        for i in range(n_steps):
+        for i in tqdm(range(n_steps)):
             # decide whether to update logh in this iteration
             update_logh = i > update_after
 
@@ -219,28 +226,29 @@ class SVGD():
                 if concurrent:
                     ksd_logh=logh
 
-                logh, steplog = self.step(x_svgd, logh, lr, svgd_stepsize, ksd_logh)
-                loss.append(steplog["loss"])
+                logh, loss_log = self.step(x_step, logh, lr, svgd_stepsize, ksd_logh)
+                loss.append(loss_log["loss"])
 
             bandwidth = np.exp(logh)
-            log_svgd = metrics.update_log(self, i, x_svgd, log_svgd, bandwidth)
-            x_svgd = update(x_svgd, self.logp, svgd_stepsize, bandwidth, x_svgd, self.adagrad, historical_grad)
+            log      = metrics.update_log(self, i, x,      log,      bandwidth)
+            log_step = metrics.update_log(self, i, x_step, log_step, bandwidth)
+
+            x      = update(x,      self.logp, svgd_stepsize, bandwidth, x,      self.adagrad, historical_grad)
+            x_step = update(x_step, self.logp, svgd_stepsize, bandwidth, x_step, self.adagrad, historical_grad)
 
             if np.any(np.isnan(logh)):
                 warnings.warn(f"NaNs detected in logh at iteration {i}. Training interrupted.", RuntimeWarning)
                 break
 
-            for x in (x_svgd):
-                if np.any(np.isnan(x)):
+            for xs in (x, x_step):
+                if np.any(np.isnan(xs)):
                     warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
                     break
             else:
                 continue
             break
 
-        return x_svgd, log_svgd, loss #x_grad, x_svgd, log_grad, log_svgd, loss
-
-
+        return x, x_step, log, log_step, loss #x_grad, x_step, log_grad, log_svgd, loss
 
 
 
@@ -272,20 +280,17 @@ class SVGD():
             """Compute updated particles and log metrics."""
             x, xest, log, rkey = u
             if self.adaptive_kernel:
-                adaptive_bandwidth = self.get_bandwidth(x)
-                log = metrics.update_log(self, i, x, log, adaptive_bandwidth)
-                x    = update(x,    self.logp, stepsize, adaptive_bandwidth, xest, False, None)
-                xest = update(xest, self.logp, stepsize, adaptive_bandwidth, xest, False, None)
+                _bandwidth = self.get_bandwidth(x)
             else:
-                log = metrics.update_log(self, i, x, log, bandwidth)
-                _x   = update(x,    self.logp, stepsize, bandwidth, xest, False, None)
-                xest = update(xest, self.logp, stepsize, bandwidth, x,    False, None)
-                x = _x
+                _bandwidth = bandwidth
 
+            log = metrics.update_log(self, i, x, log, _bandwidth)
+            x    = update(x,    self.logp, stepsize, _bandwidth, xest, False, None)
+            xest = update(xest, self.logp, stepsize, _bandwidth, xest, False, None)
 
             rkey = random.split(rkey)[0]
-            eps = 10e-2
-            xest, x = [xs + random.normal(rkey, shape=xs.shape) * eps for xs in (xest, x)]
+#            eps = 10e-2
+#            xest, x = [xs + random.normal(rkey, shape=xs.shape) * eps for xs in (xest, x)]
             return [x, xest, log, rkey]
         init = [x, xest, log, rkey]
         x, xest, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, init)
