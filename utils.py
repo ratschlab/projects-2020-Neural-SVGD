@@ -54,7 +54,7 @@ def get_ada_loss(m):
 
 
 
-# wrapper that prints when the function compiles 
+# wrapper that prints when the function compiles
 def verbose_jit(fun, *jargs, **jkwargs):
     """Does same thing as jax.jit, only that it also inserts a print statement."""
     @wraps(fun)
@@ -154,14 +154,16 @@ def ard(x, y, h):
     OUT:
     scalar kernel(x, y, h).
     """
-    x, y = np.array([x, y])
-    assert x.ndim <= 1
-    assert y.ndim <= 1
+    x, y = np.array(x), np.array(y)
+    if x.shape != y.shape:
+        raise ValueError(f"Shapes of particles x and y need to match. Recieved shapes x: {x.shape}, y: {y.shape}")
+    if x.ndim > 1:
+        raise ValueError(f"Input particles x and y can't have more than one dimension. Instead they have rank {x.ndim}")
 
     h = np.array(h)
-    assert h.ndim == 1 or h.ndim == 0
-    assert x.shape == y.shape
-    if h.ndim == 1:
+    if h.ndim > 1:
+        raise ValueError(f"Bandwidth can't have more than one dimension. Instead h has rank {h.ndim}")
+    elif h.ndim == 1:
         assert x.shape == h.shape
     return np.exp(- np.sum((x - y)**2 / h**2) / 2)
 
@@ -233,19 +235,26 @@ def cartesian_product(*arrays):
 def dict_concatenate(dict_list):
     """
     Arguments:
-    * dict_list: a list of dictionaries with the same keys. All values must be numeric.
+    * dict_list: a list of dictionaries with the same keys. All values must be numeric or a nested dict.
 
     Returns:
     * a dictionary with the same keys as the input dictionaries. The values are np
     arrays consisting of the concatenation of the values in the input dictionaries.
     """
-    assert all([dict_list[i].keys() == dict_list[i+1].keys() for i in range(len(dict_list)-1)])
+    for d in dict_list:
+        if type(d) is not dict:
+            raise TypeError("Input has to be a list consisting of dictionaries.")
+        elif not all([dict_list[i].keys() == dict_list[i+1].keys() for i in range(len(dict_list)-1)]):
+            raise ValueError("The keys of all input dictionaries need to match.")
 
     keys = dict_list[0].keys()
     out = {key: [d[key] for d in dict_list] for key in keys}
 
     for k, v in out.items():
-        out[k] = np.array(v)
+        try:
+            out[k] = np.array(v)
+        except TypeError:
+            out[k] = dict_concatenate(v)
 
     return out
 
@@ -260,7 +269,18 @@ def dict_mean(dict_list):
     """
     out = dict_concatenate(dict_list)
     for k, v in out.items():
-        out[k] = np.mean(v, axis = 0)
-        assert out[k].shape == dict_list[0][k].shape
-
+        try:
+            out[k] = np.mean(v, axis = 0)
+            assert out[k].shape == dict_list[0][k].shape
+        except TypeError:
+            out[k] = dict_mean(v)
     return out
+
+def dict_divide(da, db):
+    """divide numeric dict recursively, a / b."""
+    for (k, a), (k, b) in zip(da.items(), db.items()):
+        try:
+            da[k] = a / b
+        except TypeError:
+            da[k] = dict_divide(a, b)
+    return da

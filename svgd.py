@@ -10,13 +10,40 @@ import warnings
 
 import utils
 import metrics
+import stein
 
 def phistar_j(x, y, logp, bandwidth):
-    """Individual summand needed to compute phi^*. That is, phistar_i = \sum_j phistar_j(xj, xi, logp, bandwidth)"""
+    """Individual summand needed to compute phi^*. That is, phistar_i = \sum_j phistar_j(xj, xi, logp, bandwidth).
+    Arguments:
+    * x, y: np.array of shape (d,) or scalar (if d=1)
+    * logp: callable
+    * bandwidth: scalar or np.array of shape (d,)
+    Returns: np.array of shape (d,) or scalar; same shape as x and y
+    """
+    if x.shape != y.shape:
+        raise ValueError("Shapes of particles x and y need to match.")
     kernel = lambda x, y: utils.ard(x, y, bandwidth)
     return grad(logp)(x) * kernel(x, y) + grad(kernel)(x, y)
 
 def phistar_i(xi, x, logp, bandwidth):
+    """
+    Arguments:
+    * xi: np.array of shape (d,), usually a row element of x
+    * x: np.array of shape (n, d)
+    * logp: callable
+    * bandwidth: scalar or np.array of shape (d,)
+
+    Returns:
+    * \phi^*(xi) estimated using the particles x
+    """
+    if xi.ndim > 1:
+        raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
+    else:
+        pass
+    k = lambda y: utils.ard(y, xi, bandwidth)
+    return stein.stein(k, x, logp)
+
+def _phistar_i(xi, x, logp, bandwidth):
     """
     Arguments:
     * xi: np.array of shape (1, d), usually a row element of x
@@ -37,7 +64,7 @@ def phistar_i(xi, x, logp, bandwidth):
 
     n = x.shape[0]
     xi_rep = np.repeat(xi, n, axis=0)
-    return np.sum(vmap(phistar_j, (0, 0, None, None))(x, xi_rep, logp, bandwidth), axis=0)
+    return np.sum(vmap(phistar_j, (0, 0, None, None))(x, xi_rep, logp, bandwidth), axis=0) # Original state. TODO check what is true and what not.
 
 def phistar(x, logp, bandwidth, xest=None):
     """
@@ -82,13 +109,14 @@ def median_heuristic(x):
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
 
 class SVGD():
-    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=None, adagrad=False):
+    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=None, adagrad=False, noise=0):
         """
         Arguments:
         * dist: instance of class metrics.Distribution. Alternatively, a callable that computes log(p(x))
         * n_iter_max: integer
         * adaptive_kernel: bool
         * get_bandwidth: callable or None
+        * noise: scalar. level of gaussian noise added at each iteration.
         """
         if adaptive_kernel:
             if get_bandwidth is None:
@@ -115,11 +143,12 @@ class SVGD():
         self.adaptive_kernel = adaptive_kernel
         self.adagrad = adagrad
 
-        # these don't trigger recompilation:
+        # these don't trigger recompilation (never used as context in jitted functions)
         self.rkey = random.PRNGKey(0)
 
         # these don't trigger recompilation, but also the compiled method doesn't noticed they changed.
         self.ksd_kernel_range = np.array([0.1, 1, 10])
+        self.noise = noise
 
     def newkey(self):
         """Not pure"""
@@ -163,8 +192,7 @@ class SVGD():
             x = update(x, self.logp, stepsize, _bandwidth, None, self.adagrad, historical_grad)
 
             rkey = random.split(rkey)[0]
-            eps = 10e-3
-            x = x + random.normal(rkey, shape=x.shape) * eps
+            x = x + random.normal(rkey, shape=x.shape) * self.noise
 
             return [x, log, historical_grad, rkey]
 
@@ -173,7 +201,7 @@ class SVGD():
 
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
-    def step(self, x, logh, lr, svgd_stepsize, ksd_logh=1, gradient_clip_threshold=100):
+    def step(self, rkey, x, logh, lr, svgd_stepsize, ksd_logh=1, gradient_clip_threshold=100):
         """SGD update step
         1) compute SVGD step (forward)
         2) compute Loss (backward)
@@ -185,6 +213,7 @@ class SVGD():
             bandwidth = np.exp(logh)
             ksd_bandwidth = np.exp(ksd_logh)
             xout = update(x, self.logp, svgd_stepsize, bandwidth, None, False, None)
+            xout = xout + random.normal(rkey, shape=x.shape) * self.noise
             return metrics.ksd(xout, self.logp, ksd_bandwidth)
 
         current_loss = loss(logh)
@@ -202,23 +231,19 @@ class SVGD():
     def train(self, rkey, bandwidth, lr, svgd_stepsize, n_steps, ksd_bandwidth=None, update_after=25):
         bandwidth = np.array(bandwidth, dtype=np.float32) # cast to float so it works with jacfwd
         logh = np.log(bandwidth)
-        ksd_logh = np.log(ksd_bandwidth)
 
         x = self.initialize(rkey)
-        rkey = random.split(rkey)[0]
-        x_step = self.initialize(rkey) # use for computing gradient of h
-
-        log = log_step = metrics.initialize_log(self)
-        log["x0"], log_step["x0"] = x_step, x
+        log = metrics.initialize_log(self)
+        log["x0"] = x
         loss = []
-        if ksd_logh is None:
+        if ksd_bandwidth is None:
             concurrent = True
         else:
+            ksd_logh = np.log(ksd_bandwidth)
             concurrent = False
 
         historical_grad = np.zeros(shape=self.particle_shape)
         for i in tqdm(range(n_steps)):
-            # decide whether to update logh in this iteration
             update_logh = i > update_after
 
             if update_logh:
@@ -226,31 +251,24 @@ class SVGD():
                 if concurrent:
                     ksd_logh=logh
 
-                logh, loss_log = self.step(x_step, logh, lr, svgd_stepsize, ksd_logh)
+                rkey = random.split(rkey)[0]
+                logh, loss_log = self.step(rkey, x, logh, lr, svgd_stepsize, ksd_logh)
                 loss.append(loss_log["loss"])
 
             bandwidth = np.exp(logh)
-            log      = metrics.update_log(self, i, x,      log,      bandwidth)
-            log_step = metrics.update_log(self, i, x_step, log_step, bandwidth)
+            log = metrics.update_log(self, i, x, log, bandwidth)
 
-            x      = update(x,      self.logp, svgd_stepsize, bandwidth, x,      self.adagrad, historical_grad)
-            x_step = update(x_step, self.logp, svgd_stepsize, bandwidth, x_step, self.adagrad, historical_grad)
+            x = update(x, self.logp, svgd_stepsize, bandwidth, x, self.adagrad, historical_grad)
+            rkey = random.split(rkey)[0]
+            x = x + random.normal(rkey, shape=x.shape) * self.noise
 
             if np.any(np.isnan(logh)):
                 warnings.warn(f"NaNs detected in logh at iteration {i}. Training interrupted.", RuntimeWarning)
                 break
-
-            for xs in (x, x_step):
-                if np.any(np.isnan(xs)):
-                    warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
-                    break
-            else:
-                continue
-            break
-
-        return x, x_step, log, log_step, loss #x_grad, x_step, log_grad, log_svgd, loss
-
-
+            elif np.any(np.isnan(x)):
+                warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
+                break
+        return x, log, loss #x_grad, x, log_grad, log_svgd, loss
 
 
 

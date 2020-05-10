@@ -10,7 +10,8 @@ from jax import vmap
 import metrics
 
 ## plotting utilities
-def equalize_axes(ax):
+def equalize_xy_axes(ax):
+    """input: matplotlib axis object. sets x and y axis to same limits (and returns new limits)."""
     ylim = ax.get_ylim()
     xlim = ax.get_xlim()
 
@@ -19,7 +20,25 @@ def equalize_axes(ax):
     ax.set_xlim(lim)
     return lim
 
+def equalize_axes(axs):
+    """Argument: list of matplotlib axis objects. Sets x resp. y intervals to the maximum along the list."""
+    def transpose_min_max(lims):
+        lims = list(zip(*lims))
+        lim = (min(lims[0]), max(lims[1]))
+        return lim
+    xlims = [ax.get_xlim() for ax in axs]
+    ylims = [ax.get_ylim() for ax in axs]
+    xlim = transpose_min_max(xlims)
+    ylim = transpose_min_max(ylims)
+
+    for ax in axs:
+        ax.set_ylim(ylim)
+        ax.set_xlim(xlim)
+    return xlim, ylim
+
 def bivariate_hist(xout):
+    """argument: np.array of shape (n, 2).
+    plots one scatterplot and two heatmaps of the data in 2 dimensions."""
     def myplot(x, y, s, bins=1000):
         heatmap, xlim, ylim = onp.histogram2d(x, y, bins=bins)
         heatmap = gaussian_filter(heatmap, sigma=s)
@@ -43,12 +62,11 @@ def bivariate_hist(xout):
         if s == 0:
             ax.plot(x, y, 'k.', markersize=5)
             ax.set_title("Scatter plot")
-            equalize_axes(ax)
         else:
             img, extent = myplot(x, y, s)
             ax.imshow(img, extent=extent, origin='lower', cmap=cm.jet)
             ax.set_title("Smoothing with  $\sigma$ = %d" % s)
-        equalize_axes(ax)
+        equalize_xy_axes(ax)
 #        ax.set_aspect("equal")
     plt.show()
 
@@ -108,20 +126,28 @@ def svgd_log(log, style="-", full=False):
 
 def make_meshgrid(func, lims, num=100):
     """
+    Utility to help with plotting a 2d distribution in a 3d plot.
     Arguments:
-    * func: callable. Takes an np.array of shape (d,) as only input, and outputs a scalar.
+    * func: callable. Takes an np.array of shape (2,) as only input, and outputs a scalar.
+    * lims
+    * num
+    Returns:
+    meshgrids xx, yy, f(xx, yy)
     """
     x = y = np.linspace(*lims, num)
     xx, yy = np.meshgrid(x, y)
 
     grid = np.stack([xx, yy]) # shape (2, r, r)
-    zz = vmap(vmap(func, 1), 2)(grid)
+    zz = vmap(vmap(func, 1), 1)(grid)
 
     #zz = np.exp(zz)
     return xx, yy, zz
 
 
 def plot_3d(x, y, z):
+    """makes a 3d plot.
+    Arguments:
+    * x, y, z are np.arrays of shape (k, k). meant to be output of make_meshgrid."""
     fig = plt.figure(figsize=(12, 6))
     ax = fig.gca(projection='3d')
     ax.plot_surface(x, y, z,
@@ -130,16 +156,41 @@ def plot_3d(x, y, z):
                   antialiased=True)
     ax.set_xlabel('x')
     ax.set_ylabel('y')
-    ax.set_zlabel('z');
+    ax.set_zlabel('z')
     plt.show()
     if ax is None: print("huh?")
     return ax
 
-def plot_pdf(pdf, lims):
-    return plot_3d(*make_meshgrid(pdf, lims, num=150))
+def plot_pdf(pdf, lims, type="3d"):
+    """
+    Arguments
+    * pdf: callable, computes a distribution on R2.
+    * lims: list of two floats (limits)
+    * type: string, one of "3d", "contour".
+    """
+    if type=="3d":
+        return plot_3d(*make_meshgrid(pdf, lims, num=150))
+    elif type=="contour":
+        return plt.contour(*make_meshgrid(pdf, lims, num=150))
+    else:
+        raise ValueError("type must be one of '3d' or 'contour'.")
 
 
-def make_bar_chart(data, labels=None, figax=None):
+def autolabel_bar_chart(ax, rects):
+    """Attach a text label above each bar in *rects*, displaying its height."""
+    for rect in rects:
+        height = rect.get_height()
+        if height < 0.01 or height > 10e4:
+            ann = "{:.2E}".format(height)
+        else:
+            ann = '{:.2f}'.format(height)
+        ax.annotate(ann,
+                    xy = (rect.get_x() + rect.get_width() / 2, height),
+                    xytext=(0, 3),  # 3 points vertical offset
+                    textcoords="offset points",
+                    ha='center', va='bottom')
+
+def make_paired_bar_chart(data, labels=None, figax=None):
     """
     Arguments:
     * data: np.array of shape (2, d), where d is the number of pairs of values.
@@ -156,11 +207,10 @@ def make_bar_chart(data, labels=None, figax=None):
     elif data.ndim == 2:
         d = data.shape[1]
     else:
-        raise ValueError("data must can't have more than 2 dimensions.")
+        raise ValueError("Data must can't have more than 2 dimensions.")
 
     x = np.arange(d)  # the label locations
     width = 0.35  # the width of the bars
-
 
     if figax is None:
         fig, ax = plt.subplots()
@@ -180,25 +230,26 @@ def make_bar_chart(data, labels=None, figax=None):
     if d == 1:
         ax.set_xlim(-1, 2)
 
-    def autolabel(rects):
-        """Attach a text label above each bar in *rects*, displaying its height."""
-        for rect in rects:
-            height = rect.get_height()
-            if height < 0.01 or height > 10e4:
-                ann = "{:.2E}".format(height)
-            else:
-                ann = '{:.2f}'.format(height)
-            ax.annotate(ann,
-                        xy = (rect.get_x() + rect.get_width() / 2, height),
-                        xytext=(0, 3),  # 3 points vertical offset
-                        textcoords="offset points",
-                        ha='center', va='bottom')
 
     ax.legend()
-    autolabel(rects1)
-    autolabel(rects2)
+    autolabel_bar_chart(ax, rects1)
+    autolabel_bar_chart(ax, rects2)
 
     fig.tight_layout()
 
     if figax is None:
         return fig, ax
+
+    return rects1, rects2
+
+def set_axhlines(ax, ys):
+    """Paint len(ys) segmented horizontal lines onto plot given by ax."""
+    try:
+        ns = len(ys)
+    except TypeError:
+        ys = [ys]
+        ns = len(ys)
+    grid = np.linspace(0, 1, num=ns+1)
+
+    for i, y in enumerate(ys):
+        ax.axhline(y, xmin=grid[i], xmax=grid[i+1], color="k", linestyle="--", linewidth=2.5)
