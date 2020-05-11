@@ -165,7 +165,33 @@ def ard(x, y, h):
         raise ValueError(f"Bandwidth can't have more than one dimension. Instead h has rank {h.ndim}")
     elif h.ndim == 1:
         assert x.shape == h.shape
+
     return np.exp(- np.sum((x - y)**2 / h**2) / 2)
+
+def ard_m(x, y, sigma):
+    """
+    Arguments:
+    * x, y: np.arrays of shape (d,)
+    * sigma: np.array of shape (d, d). Must be positive definite.
+    Returns:
+    scalar given by
+    \[ e^{- 1/2 (x - y)^T \Sigma^{-1} (x - y)} \]
+    """
+    x, y = np.array(x), np.array(y)
+    if x.shape != y.shape:
+        raise ValueError(f"Shapes of particles x and y need to match. Recieved shapes x: {x.shape}, y: {y.shape}")
+    elif x.ndim > 1 or x.ndim == 0:
+        raise ValueError(f"Input particles x and y need to have shape (d,). Instead received shape {x.shape}")
+    sigma = np.array(sigma)
+    d = x.shape[0]
+    if sigma.ndim != 2 and d != 1:
+        raise ValueError(f"Bandwidth can't have more than one dimension. Instead h has rank {h.ndim}")
+
+    inv = np.linalg.inv(sigma)
+    return np.exp(- np.matmul(np.matmul(x - y, inv), x - y) / 2)
+
+
+
 
 #############################
 ### better pairwise distances

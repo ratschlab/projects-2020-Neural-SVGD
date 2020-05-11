@@ -18,6 +18,8 @@ class Distribution():
         self.expectations = None
         self.sample_metrics = None
         self.d = None
+        self.ksd_grid = (0.1, 1, 10)
+        self.initialize_metric_names()
         pass
 
     key = random.PRNGKey(0)
@@ -46,25 +48,27 @@ class Distribution():
             square_errors = [(sample - true)**2 for sample, true in zip(sample_expectations, self.expectations)]
             square_errors = np.array(square_errors) # shape (4, d)
 
-            ksds = [ksd(x, self.logpdf, h) for h in (0.1, 1, 10)]
+            ksds = [ksd(x, self.logpdf, h) for h in self.ksd_grid]
             ksds = np.array(ksds)
 
             metrics_dict = {
                 "square_errors": square_errors, # shape (4, d)
-                "ksds": ksds # shape (3,)
+                "ksds": ksds # shape (len(ksd_grid),)
             }
             return metrics_dict
 
     def get_metrics_shape(self):
         return {
         "square_errors": (4, self.d),
-        "ksds": (3,)
+        "ksds": (len(self.ksd_grid),)
         }
 
-    metric_names = {
-        "square_errors": [f"SE for {val}" for val in ["X", "X^2", "cos(X)", "sin(X)"]],
-        "ksds": [f"KSD {h}" for h in (0.1, 1, 10)]
-    }
+    def initialize_metric_names(self):
+        self.metric_names = {
+            "square_errors": [f"SE for {val}" for val in ["X", "X^2", "cos(X)", "sin(X)"]],
+            "ksds": [f"KSD for h = {h}" for h in self.ksd_grid]
+        }
+        return None
 
     def compute_metrics_for_sample(self, sample_size):
         """For benchmarking. Returns metrics computed for a true random sample of size sample_size, averaged over 100 random seeds."""
@@ -102,6 +106,9 @@ class Gaussian(Distribution):
         self.expectations = [mean, np.diagonal(cov) + mean**2, np.real(char), np.imag(char)]
         self.key = random.PRNGKey(0)
         self.sample_metrics = dict()
+
+        self.ksd_grid = (0.1, 1, 10)
+        self.initialize_metric_names()
         return None
 
     def sample(self, shape):
@@ -178,6 +185,10 @@ class GaussianMixture(Distribution):
         self.cov = np.average(covs + mumut, weights=weights, axis=0) - np.outer(mean, mean)
         self.sample_metrics = dict()
 
+        self.ksd_grid = (0.1, 1, 10)
+        self.initialize_metric_names()
+        return None
+
     def sample(self, shape):
         """mutates self.rkey"""
         def sample_from_component(rkey, component, num_samples):
@@ -252,6 +263,7 @@ ksd = jit(ksd, static_argnums=1)
 ########################
 ### metrics to log while running SVGD
 def initialize_log(self):
+    """self is an SVGD object"""
     d = self.particle_shape[1]
     log = {
         "desc": dict(),

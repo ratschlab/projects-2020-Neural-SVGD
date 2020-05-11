@@ -90,6 +90,8 @@ def plotobject(data, colors=None, titles=None, xscale="linear", yscale="linear",
             plt.yscale(yscale)
             plt.xscale(xscale)
             plt.title(k)
+            plt.ylabel(ylabel)
+            plt.xlabel(xlabel)
     else:
         for i, v in enumerate(data):
             plt.subplot(f"{h}{w}{i+1}")
@@ -109,12 +111,12 @@ def plotobject(data, colors=None, titles=None, xscale="linear", yscale="linear",
 def svgd_log(log, style="-", full=False):
     """plot metrics logged during SVGD run."""
     # plot mean and var
-    titles = metrics.Distribution.metric_names
+    titles = log["metric_names"]
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     colors = colors + colors + colors # avoid index out of bound
     for key, dic in log.items():
         if key == "desc":
-            plotobject(dic, colors, style=style)
+            plotobject(dic, colors, style=style, xlabel="step")
             colors = colors[len(dic):]
 
         elif key == "metrics" and full:

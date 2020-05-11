@@ -197,32 +197,34 @@ class SVGD():
             return [x, log, historical_grad, rkey]
 
         x, log, *_ = lax.fori_loop(0, self.n_iter_max, update_fun, [x, log, historical_grad, rkey])
+        log["metric_names"] = self.dist.metric_names
         return x, log
 
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
-    def step(self, rkey, x, logh, lr, svgd_stepsize, ksd_logh=1, gradient_clip_threshold=100):
+    def step(self, rkey, x, logh, lr, svgd_stepsize, ksd_logh, gradient_clip_threshold=100):
         """SGD update step
         1) compute SVGD step (forward)
         2) compute Loss (backward)
         3) update bandwidth via SGD"""
         if ksd_logh is None:
             ksd_logh = logh
+        log = dict()
 
-        def loss(logh): # TODO add ksd_logh as argument, or make sure jax works like this
+        def loss(logh, ksd_logh): # TODO add ksd_logh as argument, or make sure jax works like this
             bandwidth = np.exp(logh)
             ksd_bandwidth = np.exp(ksd_logh)
             xout = update(x, self.logp, svgd_stepsize, bandwidth, None, False, None)
             xout = xout + random.normal(rkey, shape=x.shape) * self.noise
+            log["ksd_h"] = ksd_bandwidth
             return metrics.ksd(xout, self.logp, ksd_bandwidth)
 
-        current_loss = loss(logh)
-        gradient = jacfwd(loss)(logh)
+        current_loss = loss(logh, ksd_logh)
+        gradient = jacfwd(loss)(logh, ksd_logh)
         gradient = gradient / np.linalg.norm(gradient) # normalize
 
-        log = {
-            "loss": current_loss,
-        }
+        log["loss"] = current_loss
+
         updated_logh = logh - lr * optimizers.clip_grads(gradient, gradient_clip_threshold)
         return updated_logh, log
 
@@ -236,6 +238,7 @@ class SVGD():
         log = metrics.initialize_log(self)
         log["x0"] = x
         loss = []
+        ksd_hs = []
         if ksd_bandwidth is None:
             concurrent = True
         else:
@@ -254,6 +257,8 @@ class SVGD():
                 rkey = random.split(rkey)[0]
                 logh, loss_log = self.step(rkey, x, logh, lr, svgd_stepsize, ksd_logh)
                 loss.append(loss_log["loss"])
+                ksd_hs.append(loss_log["ksd_h"])
+
 
             bandwidth = np.exp(logh)
             log = metrics.update_log(self, i, x, log, bandwidth)
@@ -268,6 +273,8 @@ class SVGD():
             elif np.any(np.isnan(x)):
                 warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
                 break
+        log["metric_names"] = self.dist.metric_names
+        log["ksd_hs"] = ksd_hs
         return x, log, loss #x_grad, x, log_grad, log_svgd, loss
 
 
@@ -313,6 +320,7 @@ class SVGD():
         init = [x, xest, log, rkey]
         x, xest, log, _ = lax.fori_loop(0, self.n_iter_max, update_fun, init)
         log["x0"] = x0
+        log["metric_names"] = self.dist.metric_names
         return x, xest, log
 
     svgd_twotrack = utils.verbose_jit(svgd_twotrack, static_argnums=0)
