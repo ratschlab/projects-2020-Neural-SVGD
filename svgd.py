@@ -38,8 +38,7 @@ def phistar_i(xi, x, logp, bandwidth):
     """
     if xi.ndim > 1:
         raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
-    else:
-        pass
+
     k = lambda y: utils.ard(y, xi, bandwidth)
     return stein.stein(k, x, logp)
 
@@ -103,7 +102,7 @@ def median_heuristic(x):
     elif x.ndim == 1:
         n = x.shape[0]
         medsq = np.median(utils.squared_distance_matrix(x))
-        h = np.sqrt(medsq / np.log(n) / 2)
+        h = np.sqrt(medsq / np.log(n) / 2) # TODO: when replacing h**2 with h, remove the sqrt from here.
         return h
     else:
         raise ValueError("Shape of x has to be either (n,) or (n, d)")

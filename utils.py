@@ -166,7 +166,7 @@ def ard(x, y, h):
     elif h.ndim == 1:
         assert x.shape == h.shape
 
-    return np.exp(- np.sum((x - y)**2 / h**2) / 2)
+    return np.exp(- np.sum((x - y)**2 / h**2) / 2) # TODO replace h**2 with h. Remember to remove sqrt in median heuristic
 
 def ard_m(x, y, sigma):
     """

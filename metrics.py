@@ -257,6 +257,7 @@ def ksd(xs, logp, bandwidth):
         k = lambda x: kernel(x, z)
         return stein.stein(k, xs, logp)
     return stein.stein(phistar, xs, logp, transposed=True)
+# NOTE: this is actually the square of the stein discrepancy.
 
 ksd = jit(ksd, static_argnums=1)
 
