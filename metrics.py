@@ -48,7 +48,7 @@ class Distribution():
             square_errors = [(sample - true)**2 for sample, true in zip(sample_expectations, self.expectations)]
             square_errors = np.array(square_errors) # shape (4, d)
 
-            ksds = [ksd(x, self.logpdf, h) for h in self.ksd_grid]
+            ksds = [ksd_squared(x, self.logpdf, np.log(np.array(h))) for h in self.ksd_grid]
             ksds = np.array(ksds)
 
             metrics_dict = {
@@ -249,7 +249,7 @@ def _ksd(x, logp, bandwidth):
     return np.mean(vmap(ksd_i, (0, None, None, None))(x, x, logp, bandwidth)) / x.shape[0]
 
 
-def ksd(xs, logp, bandwidth):
+def ksd_squared(xs, logp, bandwidth):
     kernel = lambda x, y: utils.ard(x, y, bandwidth)
     def phistar(z):
         """z has shape (d,).
@@ -259,7 +259,7 @@ def ksd(xs, logp, bandwidth):
     return stein.stein(phistar, xs, logp, transposed=True)
 # NOTE: this is actually the square of the stein discrepancy.
 
-ksd = jit(ksd, static_argnums=1)
+ksd_squared = jit(ksd_squared, static_argnums=1)
 
 ########################
 ### metrics to log while running SVGD
@@ -288,6 +288,7 @@ def update_log(self, i, x, log, bandwidth):
     1) create dict of updates
     2) 'append' dict of updates to log dict
     """
+    bandwidth = np.exp(bandwidth) # cause else h is rescaled to log(h)
     update_dict = {
         "desc": dict(),
         "metrics": dict()

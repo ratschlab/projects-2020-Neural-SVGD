@@ -11,13 +11,13 @@ import utils
 def stein_operator(fun, x, logp, transposed=False):
     """
     Arguments:
-    * fun: callable, transformation $fun: \R^d \to \R^d$, or $fun: \R^d \to \R$. Satisfies lim fun(x) = 0 for x \to \infty.
+    * fun: callable, transformation $\text{fun}: \mathbb R^d \to \mathbb R^d$, or $\text{fun}: \mathbb R^d \to \mathbb R$. Satisfies $\lim_{x \to \infty} \text{fun}(x) = 0$.
     * x: np.array of shape (d,).
     * p: callable, takes argument of shape (d,). Computes log(p(x)). Can be unnormalized (just using gradient.)
 
     Returns:
     Stein operator $\mathcal A$ evaluated at fun and x:
-    \[ \mathcal A_p [fun](x) .\]
+    \[ \mathcal A_p [\text{fun}](x) .\]
     np.array of shape (d,) if transposed else (d, d) # TODO check if shapes are correct
     """
     x = np.array(x, dtype=np.float32)
@@ -50,7 +50,7 @@ def stein(fun, xs, logp, transposed=False):
     * p: callable, takes argument of shape (d,). Computes log(p(x)). Can be unnormalized (just using gradient.)
 
     Returns:
-    \[1/n \sum_i \mathcal A_p fun(x)\]
+    \[1/n \sum_i \mathcal A_p [\text{fun}](x) \]
     np.array of shape (d,) if transposed else shape (d, d)
     """
     return np.mean(vmap(stein_operator, (None, 0, None, None))(fun, xs, logp, transposed), axis=0)

@@ -145,11 +145,11 @@ def single_rbf(x, y, h):
     return np.exp(- normsq(x - y) / (2 * h))
 
 # @jit
-def ard(x, y, h):
+def ard(x, y, logh):
     """
     IN:
     * x, y: np arrays of shape (d,)
-    * h: np array of shape (d,), or scalar
+    * h: np array of shape (d,), or scalar. represents log of bandwidth parameter (so can be negative or zero).
 
     OUT:
     scalar kernel(x, y, h).
@@ -160,13 +160,14 @@ def ard(x, y, h):
     if x.ndim > 1:
         raise ValueError(f"Input particles x and y can't have more than one dimension. Instead they have rank {x.ndim}")
 
-    h = np.array(h)
-    if h.ndim > 1:
-        raise ValueError(f"Bandwidth can't have more than one dimension. Instead h has rank {h.ndim}")
-    elif h.ndim == 1:
-        assert x.shape == h.shape
+    logh = np.array(logh)
+    if logh.ndim > 1:
+        raise ValueError(f"Bandwidth can't have more than one dimension. Instead it has rank {logh.ndim}")
+    elif logh.ndim == 1:
+        assert x.shape == logh.shape
 
-    return np.exp(- np.sum((x - y)**2 / h**2) / 2) # TODO replace h**2 with h. Remember to remove sqrt in median heuristic
+    h = np.exp(logh)
+    return np.exp(- np.sum((x - y)**2 / h**2) / 2) # TODO warning: change median trick too
 
 def ard_m(x, y, sigma):
     """
