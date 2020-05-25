@@ -18,28 +18,29 @@ def stein_operator(fun, x, logp, transposed=False):
     Returns:
     Stein operator $\mathcal A$ evaluated at fun and x:
     \[ \mathcal A_p [\text{fun}](x) .\]
-    np.array of shape (d,) if transposed else (d, d) # TODO check if shapes are correct
+    This expression takes the form of a scalar if transposed else a dxd matrix
     """
     x = np.array(x, dtype=np.float32)
     if x.ndim != 1:
         raise ValueError(f"x needs to be an np.array of shape (d,). Instead, x has shape {x.shape}")
+    fx = fun(x)
     if transposed:
-        out = stein_operator(fun, x, logp, transposed=False)
-        if out.ndim == 1 and x.shape[0] != 1:
-            raise ValueError(f"Got passed transposed = True, but the input function {fun.__name__} returns a scalar. This doesn't make sense: the transposed Stein operator acts on functions in R^d.")
-        elif out.ndim == 1:
-            return out
-        elif out.ndim == 2:
-            return np.trace(out)
+        if fx.ndim == 0:   # f: R^d --> R
+            raise ValueError(f"Got passed transposed = True, but the input function {fun.__name__} returns a scalar. This doesn't make sense: the transposed Stein operator acts only on vector-valued functions.")
+        elif fx.ndim == 1: # f: R^d --> R^d
+            return np.inner(grad(logp)(x), fun(x)) + np.trace(jacfwd(fun)(x).transpose())
         else:
-            raise ValueError("Output of stein_operator must have shape (d,) or (d, d)")
+            raise ValueError(f"Output of input function {fun.__name__} needs to have dimension 1 or two. Instead got output of shape {fx.shape}")
     else:
-        fx = fun(x)
         if fx.ndim == 0:   # f: R^d --> R
             return grad(logp)(x) * fun(x) + grad(fun)(x)
         elif fx.ndim == 1: # f: R^d --> R^d
-            return np.einsum("i,j->ij", grad(logp)(x), fun(x)) + jacfwd(fun)(x)
+            return np.einsum("i,j->ij", grad(logp)(x), fun(x)) + jacfwd(fun)(x).transpose()
+        elif fx.ndim == 2 and fx.shape[0] == fx.shape[1]:
+            raise NotImplementedError()
+#            return np.einsum("ij,j->ij", fun(x), grad(logp)(x)) + #np.einsum("iii->i", jacfwd(fun)(x).transpose())
         else:
+            raise ValueError(f"Output of input function {fun.__name__} needs to be a scalar, a vector, or a square matrix. Instead got output of shape {fx.shape}")
             raise ValueError()
 
 def stein(fun, xs, logp, transposed=False):

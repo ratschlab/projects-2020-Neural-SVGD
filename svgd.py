@@ -173,7 +173,17 @@ class SVGD():
         * stepsize: scalar"""
         def ksd_sq(h):
             return metrics.ksd_squared(x, self.logp, h)
-        return h + stepsize * optimizers.clip_grads(grad(ksd_sq)(h), 0.00005)
+
+        # normalize gradient
+        gradient = grad(ksd_sq)(h)
+        gradient = gradient / np.linalg.norm(gradient)
+
+#        # clip gradient
+#        gradient = grad(ksd_sq)(h)
+#        gradient = optimizers.clip_grads(gradient, 0.00005)
+
+        return h + stepsize * gradient
+
     kernel_step = jit(kernel_step, static_argnums=0)
 
     def svgd_step(self, x, h, stepsize):
@@ -196,18 +206,25 @@ class SVGD():
         ksd_post = []
         for i in tqdm(range(n_steps)):
             ksd_pre.append(metrics.ksd_squared(x, self.logp, bandwidth))
+
+            # update bandwidth
             bandwidth = self.kernel_step(bandwidth, x, lr)
             ksd_post.append(metrics.ksd_squared(x, self.logp, bandwidth))
-            x = self.svgd_step(x, bandwidth, svgd_stepsize)
-            log = metrics.update_log(self, i, x, log, bandwidth)
-
             if np.any(np.isnan(bandwidth)):
+                log["interrupt_iter"] = i
+                log["last_bandwidth"] = log["desc"]["bandwidth"][i-1]
                 warnings.warn(f"NaNs detected in bandwidth at iteration {i}. Training interrupted.", RuntimeWarning)
                 break
-            elif np.any(np.isnan(x)):
+
+            # update x
+            x = self.svgd_step(x, bandwidth, svgd_stepsize)
+            log = metrics.update_log(self, i, x, log, bandwidth)
+            if np.any(np.isnan(x)):
+                log["interrupt_iter"] = i
                 warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
                 break
         log["metric_names"] = self.dist.metric_names
         log["ksd_pre"] = np.array(ksd_pre)
         log["ksd_post"] = np.array(ksd_post)
+
         return x, log

@@ -85,10 +85,16 @@ class Gaussian(Distribution):
         """self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)"""
         mean = np.array(mean)
         cov = np.array(cov)
+        if cov.ndim == 0:
+            if mean.ndim == 1: # d fixed by shape of mean
+                cov = len(mean) * (cov,)
+                cov = np.array(cov)
+            elif mean.ndim == 0:
+                cov = cov[np.newaxis, np.newaxis]
+            else:
+                raise ValueError(f"Recieved inappropriate shape {mean.shape} for mean. (Wrong nr of dimensions).")
         if cov.ndim == 1:
             cov = np.diag(cov)
-        elif cov.ndim == 0:
-            cov = cov[np.newaxis, np.newaxis]
         if mean.ndim == 0:
             mean = np.ones(len(cov)) * mean
         assert mean.ndim == 1 and cov.ndim == 2
