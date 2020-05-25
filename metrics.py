@@ -254,9 +254,18 @@ def _ksd(x, logp, bandwidth):
 
     return np.mean(vmap(ksd_i, (0, None, None, None))(x, x, logp, bandwidth)) / x.shape[0]
 
+ksd_squared = stein.ksd_squared
+def _ksd_squared(xs, logp, logh):
+    """
+    Arguments:
+    * xs: np.array of shape (n, d)
+    * logp: callable
+    * logh: np.array. Understood to be the log of rbf param h > 0 (so can be negative or 0).
 
-def ksd_squared(xs, logp, bandwidth):
-    kernel = lambda x, y: utils.ard(x, y, bandwidth)
+    Returns:
+    The square of the stein discrepancy KSD(q, p) computed using bandwidth h. Here, q is the empirical dist of xs.
+    """
+    kernel = lambda x, y: utils.ard(x, y, logh)
     def phistar(z):
         """z has shape (d,).
         Returns array of shape (d,)."""
@@ -264,8 +273,6 @@ def ksd_squared(xs, logp, bandwidth):
         return stein.stein(k, xs, logp)
     return stein.stein(phistar, xs, logp, transposed=True)
 # NOTE: this is actually the square of the stein discrepancy.
-
-ksd_squared = jit(ksd_squared, static_argnums=1)
 
 ########################
 ### metrics to log while running SVGD
@@ -286,7 +293,6 @@ def initialize_log(self):
         log["metrics"][key] = np.zeros(shape=(self.n_iter_max,) + shape)
 
     return log
-
 
 def update_log(self, i, x, log, bandwidth):
     """
@@ -317,4 +323,5 @@ def update_log(self, i, x, log, bandwidth):
                 log[key][k] = index_update(v, index[i, :], update_dict[key][k])
         else:
             pass
+
     return log

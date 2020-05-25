@@ -12,13 +12,13 @@ import utils
 import metrics
 import stein
 
-def phistar_i(xi, x, logp, bandwidth):
+def phistar_i(xi, x, logp, logh):
     """
     Arguments:
     * xi: np.array of shape (d,), usually a row element of x
     * x: np.array of shape (n, d)
     * logp: callable
-    * bandwidth: scalar or np.array of shape (d,)
+    * logh: scalar or np.array of shape (d,)
 
     Returns:
     * \phi^*(xi) estimated using the particles x
@@ -26,18 +26,18 @@ def phistar_i(xi, x, logp, bandwidth):
     if xi.ndim > 1:
         raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
 
-    k = lambda y: utils.ard(y, xi, bandwidth)
+    k = lambda y: utils.ard(y, xi, logh)
     return stein.stein(k, x, logp)
 
-def phistar(x, logp, bandwidth, xest=None):
+def phistar(x, logp, logh, xest=None):
     """
     Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
     Optionally, supply an array xest of the same shape. This array will be used to estimate phistar; the trafo will then be applied to x.
     """
     if xest is None:
-        return vmap(phistar_i, (0, None, None, None))(x, x, logp, bandwidth)
+        return vmap(phistar_i, (0, None, None, None))(x, x, logp, logh)
     else:
-        return vmap(phistar_i, (0, None, None, None))(x, xest, logp, bandwidth)
+        return vmap(phistar_i, (0, None, None, None))(x, xest, logp, logh)
 
 # adagrad params (fixed):
 alpha = 0.9
@@ -73,7 +73,7 @@ def median_heuristic(x):
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
 
 class SVGD():
-    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=None, adagrad=False, noise=0):
+    def __init__(self, dist, n_iter_max, adaptive_kernel=False, get_bandwidth=None, particle_shape=None, adagrad=False, noise=0, snapshot_iter=[10, 20, 30, 50, 100]):
         """
         Arguments:
         * dist: instance of class metrics.Distribution. Alternatively, a callable that computes log(p(x))
@@ -113,6 +113,7 @@ class SVGD():
         # these don't trigger recompilation, but also the compiled method doesn't noticed they changed.
         self.ksd_kernel_range = np.array([0.1, 1, 10])
         self.noise = noise
+        self.snapshot_iter = snapshot_iter
 
     def newkey(self):
         """Not pure"""
@@ -165,34 +166,34 @@ class SVGD():
         return x, log
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
-    def kernel_step(self, h, x, stepsize):
-        """Update h <- h + \nabla KSD_{h}(q, p)
+    def kernel_step(self, logh, x, stepsize):
+        """Update logh <- logh + \nabla KSD_{logh}(q, p)
         Arguments:
         * x: np.array of shape (n,d).
-        * h: scalar or np.array of shape (d,)
+        * logh: scalar or np.array of shape (d,)
         * stepsize: scalar"""
-        def ksd_sq(h):
-            return metrics.ksd_squared(x, self.logp, h)
+        def ksd_sq(logh):
+            return stein.ksd_squared(x, self.logp, logh)
 
         # normalize gradient
-        gradient = grad(ksd_sq)(h)
+        gradient = grad(ksd_sq)(logh)
         gradient = gradient / np.linalg.norm(gradient)
 
 #        # clip gradient
-#        gradient = grad(ksd_sq)(h)
+#        gradient = grad(ksd_sq)(logh)
 #        gradient = optimizers.clip_grads(gradient, 0.00005)
 
-        return h + stepsize * gradient
+        return logh + stepsize * gradient
 
     kernel_step = jit(kernel_step, static_argnums=0)
 
-    def svgd_step(self, x, h, stepsize):
+    def svgd_step(self, x, logh, stepsize):
         """Update X <- X + \phi^*_{p,q}(X)
         Arguments:
         * x: np.array of shape (n,d).
         * h: scalar or np.array of shape (d,)
         * stepsize: scalar"""
-        return x + stepsize * phistar(x, self.logp, h)
+        return x + stepsize * phistar(x, self.logp, logh)
     svgd_step = jit(svgd_step, static_argnums=0)
 
     def train(self, rkey, bandwidth, lr, svgd_stepsize, n_steps):
@@ -202,14 +203,17 @@ class SVGD():
         x = self.initialize(rkey)
         log = metrics.initialize_log(self)
         log["x0"] = x
+        if self.snapshot_iter is not None:
+            log["particle_snapshots"] = []
+            log["bandwidth_snapshots"] = []
         ksd_pre = []
         ksd_post = []
         for i in tqdm(range(n_steps)):
-            ksd_pre.append(metrics.ksd_squared(x, self.logp, bandwidth))
+            ksd_pre.append(stein.ksd_squared(x, self.logp, bandwidth))
 
             # update bandwidth
             bandwidth = self.kernel_step(bandwidth, x, lr)
-            ksd_post.append(metrics.ksd_squared(x, self.logp, bandwidth))
+            ksd_post.append(stein.ksd_squared(x, self.logp, bandwidth))
             if np.any(np.isnan(bandwidth)):
                 log["interrupt_iter"] = i
                 log["last_bandwidth"] = log["desc"]["bandwidth"][i-1]
@@ -223,6 +227,11 @@ class SVGD():
                 log["interrupt_iter"] = i
                 warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
                 break
+
+            if i in self.snapshot_iter:
+                log["particle_snapshots"].append(x)
+                log["bandwidth_snapshots"].append(np.exp(bandwidth))
+
         log["metric_names"] = self.dist.metric_names
         log["ksd_pre"] = np.array(ksd_pre)
         log["ksd_post"] = np.array(ksd_post)

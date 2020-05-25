@@ -149,7 +149,7 @@ def ard(x, y, logh):
     """
     IN:
     * x, y: np arrays of shape (d,)
-    * h: np array of shape (d,), or scalar. represents log of bandwidth parameter (so can be negative or zero).
+    * logh: np array of shape (d,), or scalar. represents log of bandwidth parameter (so can be negative or zero).
 
     OUT:
     scalar kernel(x, y, h).
@@ -162,12 +162,12 @@ def ard(x, y, logh):
 
     logh = np.array(logh)
     if logh.ndim > 1:
-        raise ValueError(f"Bandwidth can't have more than one dimension. Instead it has rank {logh.ndim}")
+        raise ValueError(f"Bandwidth needs to be a scalar or a d-dim vector. Instead it has shape {logh.shape}")
     elif logh.ndim == 1:
         assert x.shape == logh.shape
 
     h = np.exp(logh)
-    return np.exp(- np.sum((x - y)**2 / h**2) / 2) # TODO warning: change median trick too
+    return np.exp(- np.sum((x - y)**2 / h) / 2)
 
 def ard_m(x, y, sigma):
     """

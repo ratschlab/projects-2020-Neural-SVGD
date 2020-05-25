@@ -43,6 +43,55 @@ def stein_operator(fun, x, logp, transposed=False):
             raise ValueError(f"Output of input function {fun.__name__} needs to be a scalar, a vector, or a square matrix. Instead got output of shape {fx.shape}")
             raise ValueError()
 
+
+def ksd_squared(xs, logp, logh):
+    """
+    Arguments:
+    * xs: np.array of shape (n, d)
+    * logp: callable
+    * k: callable, computes scalar-valued kernel k(x, y) given two input arguments.
+
+    Returns:
+    The square of the stein discrepancy KSD(q, p). Here, q is the empirical dist of xs.
+    """
+    k = lambda x, y: utils.ard(x, y, logh)
+    def g(x, y):
+        """x, y: np.arrays of shape (d,)"""
+        def inner(x):
+            kx = lambda y_: k(x, y_)
+            return stein_operator(kx, y, logp)
+        return stein_operator(inner, x, logp, transposed=True)
+
+    gv  = vmap(g,  (0, None))
+    gvv = vmap(gv, (None, 0))
+    ksd_matrix = gvv(xs, xs)
+
+    n = xs.shape[0]
+    trace_indices = [list(range(n))]*2
+    ksd_matrix = index_update(ksd_matrix, trace_indices, 0)
+
+    return np.mean(ksd_matrix)
+ksd_squared = jit(ksd_squared, static_argnums=1)
+
+def phistar(xs, logp, logh, xest=None):
+    if xest is not None:
+        raise NotImplementedError()
+
+    def f(x, y):
+        """evaluated inside the expectation"""
+        kx = lambda y: utils.ard(x, y, logh)
+        return stein_operator(kx, y, logp, transposed=False)
+
+    fv  = vmap(f,  (None, 0))
+    fvv = vmap(fv, (0, None))
+    phi_matrix = fvv(xs, xs)
+
+    n = xs.shape[0]
+    trace_indices = [list(range(n))]*2
+    phi_matrix = index_update(phi_matrix, trace_indices, 0)
+
+    return np.mean(phi_matrix, axis=1)
+
 def stein(fun, xs, logp, transposed=False):
     """
     Arguments:
