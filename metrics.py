@@ -82,7 +82,8 @@ class Distribution():
 
 class Gaussian(Distribution):
     def __init__(self, mean, cov):
-        """self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)"""
+        """
+        self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)"""
         mean = np.array(mean)
         cov = np.array(cov)
         if cov.ndim == 0:
@@ -118,6 +119,7 @@ class Gaussian(Distribution):
         return None
 
     def sample(self, shape):
+        """mutates self.rkey"""
         self.newkey()
         out = random.multivariate_normal(self.key, self.mean, self.cov, shape)
         self.newkey()

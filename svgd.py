@@ -167,24 +167,23 @@ class SVGD():
     svgd = utils.verbose_jit(svgd, static_argnums=0)
 
     def kernel_step(self, logh, x, stepsize):
-        """Update logh <- logh + \nabla KSD_{logh}(q, p)
+        """Update logh <- logh + stepsize * \gradient_{logh} KSD_{logh}(q, p)^2
         Arguments:
-        * x: np.array of shape (n,d).
         * logh: scalar or np.array of shape (d,)
-        * stepsize: scalar"""
+        * x: np.array of shape (n,d).
+        * stepsize: scalar
+        * log: dict for logging stuff"""
         def ksd_sq(logh):
             return stein.ksd_squared(x, self.logp, logh)
-
-        # normalize gradient
         gradient = grad(ksd_sq)(logh)
-        gradient = gradient / np.linalg.norm(gradient)
+
+#        # normalize gradient
+#        gradient = gradient / np.linalg.norm(gradient)
 
 #        # clip gradient
-#        gradient = grad(ksd_sq)(logh)
-#        gradient = optimizers.clip_grads(gradient, 0.00005)
+#        gradient = optimizers.clip_grads(gradient, 1)
 
-        return logh + stepsize * gradient
-
+        return logh + stepsize * gradient, gradient
     kernel_step = jit(kernel_step, static_argnums=0)
 
     def svgd_step(self, x, logh, stepsize):
@@ -203,17 +202,20 @@ class SVGD():
         x = self.initialize(rkey)
         log = metrics.initialize_log(self)
         log["x0"] = x
+        log["ksd_gradients"] = []
         if self.snapshot_iter is not None:
             log["particle_snapshots"] = []
             log["bandwidth_snapshots"] = []
         ksd_pre = []
         ksd_post = []
         for i in tqdm(range(n_steps)):
+            log = metrics.update_log(self, i, x, log, bandwidth)
             ksd_pre.append(stein.ksd_squared(x, self.logp, bandwidth))
 
             # update bandwidth
-            bandwidth = self.kernel_step(bandwidth, x, lr)
+            bandwidth, gradient = self.kernel_step(bandwidth, x, lr)
             ksd_post.append(stein.ksd_squared(x, self.logp, bandwidth))
+            log["ksd_gradients"].append(gradient)
             if np.any(np.isnan(bandwidth)):
                 log["interrupt_iter"] = i
                 log["last_bandwidth"] = log["desc"]["bandwidth"][i-1]
@@ -222,7 +224,6 @@ class SVGD():
 
             # update x
             x = self.svgd_step(x, bandwidth, svgd_stepsize)
-            log = metrics.update_log(self, i, x, log, bandwidth)
             if np.any(np.isnan(x)):
                 log["interrupt_iter"] = i
                 warnings.warn(f"NaNs detected in x at iteration {i}. Logh is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
@@ -235,5 +236,6 @@ class SVGD():
         log["metric_names"] = self.dist.metric_names
         log["ksd_pre"] = np.array(ksd_pre)
         log["ksd_post"] = np.array(ksd_post)
+        log["ksd_gradients"] = np.array(log["ksd_gradients"])
 
         return x, log
