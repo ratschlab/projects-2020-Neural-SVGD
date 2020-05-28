@@ -8,6 +8,82 @@ import time
 from tqdm import tqdm
 from functools import wraps
 
+##############################
+### KL divergence utilities
+def smooth_and_normalize(vec, normalize=True):
+    """
+    Parameters:
+    * vec : np.array of shape (n,)
+    * normalize : bool
+
+    Returns:
+    out : np.array of shape (n,).
+    If vec_i = 0, then out_i = epsilon. If vec_i !=0, then out_i = vec_i - c.
+    c is chosen such that sum(vec) == 1.
+    """
+    vec = np.asarray(vec, dtype=np.float32)
+
+    if normalize:
+        vec = vec / vec.sum()
+    n = len(vec)
+    epsilon = 0.0001
+    num_nonzero = np.count_nonzero(vec)
+    c = epsilon * (n - num_nonzero) / num_nonzero
+    perturbation =  (vec == 0)*epsilon - (vec != 0)*c
+    return vec + perturbation
+
+def get_bins_and_bincounts(samples, normalized=False):
+    """take in samples, create a common set of bins, and compute the counts count(x in bin)
+    for each bin and each sample x.
+    Parameters
+    ------------
+    samples : np.array of shape (n,) or shape (k, n).
+    - If shape (n,): interpreted as a set of n scalar-valued samples.
+    - If shape (k, n): interpreted as k sets of n scalar-valued samples.
+
+    Returns
+    --------
+    probabilities :
+    bins :
+    """
+    nr_samples = np.prod(samples.shape)
+    nr_bins = np.log2(nr_samples)
+    nr_bins = int(max(nr_bins, 5))
+
+    lims = [np.min(samples), np.max(samples)]
+    bins = np.linspace(*lims, num=nr_bins)
+
+    if samples.ndim == 2:
+        out = np.asarray([np.histogram(x, bins=bins, density=normalized)[0] for x in samples])
+        return out, bins
+    elif samples.ndim == 1:
+        return np.histogram(samples, bins=bins, density=normalized)[0], bins
+    else:
+        raise ValueError(f"Input must have shape (n,) or shape (k,n). Instead received shape {samples.shape}")
+
+def get_histogram_likelihoods(samples):
+    """
+    Parameters:
+    * samples : np.array of scalar-valued samples from a distribution.
+
+    Returns:
+    np.array of same length as samples, consisting of a histogram-based approximation of the pdf q(x_i) at the samples x_i
+    """
+    samples = np.asarray(samples, dtype=np.float32)
+    samples = np.squeeze(samples)
+    if samples.ndim != 1:
+        raise ValueError(f"The shape of samples has to be either (n,) or (n,1). Instead received shape {samples.shape}.")
+    n = len(samples)
+
+    bincounts, bins = get_bins_and_bincounts(samples)
+    bincounts = np.array(bincounts, dtype=np.int32)
+    likelihoods = smooth_and_normalize(bincounts) / np.diff(bins)
+
+    sample_likelihoods = np.repeat(likelihoods, bincounts) # TODO this doesn't play well with jit, cause shape of output depends on values in bincounts
+    return sample_likelihoods
+
+##############
+### sweep
 def sweep(rkey, grid, sample_each_time=False, joint_param=False, average_over=1):
     """Sweep a grid of bandwidth values and output corresponding metrics.
     Arguments:
@@ -143,6 +219,7 @@ def single_rbf(x, y, h):
     assert x.ndim == 1
     assert y.ndim == 1
     return np.exp(- normsq(x - y) / (2 * h))
+
 
 # @jit
 def ard(x, y, logh):

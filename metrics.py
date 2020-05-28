@@ -9,6 +9,7 @@ import svgd
 import utils
 import stein
 
+
 # distributions packaged with metrics
 # check wikipedia for computation of higher moments https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
 # also recall form of characteristic function https://en.wikipedia.org/wiki/Characteristic_function_(probability_theory)#Examples
@@ -34,7 +35,7 @@ class Distribution():
         raise NotImplementedError()
 
     def compute_metrics(self, x, normalize=False):
-        """Compute metrics given samples.
+        """Compute metrics given samples x.
         If normalize = True, then all values are divided by the corresponding expected value for a true random sample of the same size."""
         if x.shape[-1] != self.d:
             raise ValueError(f"Particles x need to have shape (n, d), where d = {self.d} is the particle dimension.")
@@ -55,19 +56,27 @@ class Distribution():
                 "square_errors": square_errors, # shape (4, d)
                 "ksds": ksds # shape (len(ksd_grid),)
             }
+
+            if self.d == 1:
+                metrics_dict["KL Divergence"] = self.kl_divergence(x) # scalar
             return metrics_dict
 
     def get_metrics_shape(self):
-        return {
+        shapes =  {
         "square_errors": (4, self.d),
         "ksds": (len(self.ksd_grid),)
         }
+        if self.d == 1:
+            shapes["KL Divergence"] = (1,)
+        return shapes
 
     def initialize_metric_names(self):
         self.metric_names = {
             "square_errors": [f"SE for {val}" for val in ["X", "X^2", "cos(X)", "sin(X)"]],
             "ksds": [f"KSD for h = {h}" for h in self.ksd_grid]
         }
+        if self.d == 1:
+            self.metric_names["KL Divergence"] = "Estimated KL Divergence"
         return None
 
     def compute_metrics_for_sample(self, sample_size):
@@ -79,6 +88,16 @@ class Distribution():
                 return self.compute_metrics(sample)
             self.sample_metrics[sample_size] = utils.dict_mean([compute() for _ in range(100)])
         return self.sample_metrics[sample_size]
+
+    def kl_divergence(self, sample):
+        """Kullback-Leibler divergence D(sample || p) between sample and distribution of class instance.
+
+        Parameters
+        ----------
+        sample : array-like, shape (n,). Scalar-valued sample from some distribution.
+        """
+        histogram_likelihoods = utils.get_histogram_likelihoods(sample)
+        return np.mean(np.log(histogram_likelihoods) - vmap(self.logpdf)(sample))
 
 class Gaussian(Distribution):
     def __init__(self, mean, cov):
