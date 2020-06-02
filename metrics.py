@@ -4,11 +4,11 @@ from jax.ops import index_update, index
 from jax.scipy import stats, special
 
 import numpy as onp
+from functools import partial
 
 import svgd
 import utils
 import stein
-
 
 # distributions packaged with metrics
 # check wikipedia for computation of higher moments https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
@@ -89,6 +89,7 @@ class Distribution():
             self.sample_metrics[sample_size] = utils.dict_mean([compute() for _ in range(100)])
         return self.sample_metrics[sample_size]
 
+    # @partial(jit, static_argnums=0) # TODO: replace np.repeat with smth else so I can use jit here.
     def kl_divergence(self, sample):
         """Kullback-Leibler divergence D(sample || p) between sample and distribution of class instance.
 
@@ -286,7 +287,7 @@ def _ksd_squared(xs, logp, logh):
     Returns:
     The square of the stein discrepancy KSD(q, p) computed using bandwidth h. Here, q is the empirical dist of xs.
     """
-    kernel = lambda x, y: utils.ard(x, y, logh)
+    kernel = lambda x, y: kernels.ard(x, y, logh)
     def phistar(z):
         """z has shape (d,).
         Returns array of shape (d,)."""
@@ -299,19 +300,19 @@ def _ksd_squared(xs, logp, logh):
 ### metrics to log while running SVGD
 def initialize_log(self):
     """self is an SVGD object"""
-    d = self.particle_shape[1]
+    d = self.d
     log = {
         "desc": dict(),
         "metrics": dict()
     }
     log["desc"] = {
-        "particle_mean": np.zeros(shape=(self.n_iter_max, d)),
-        "particle_var":  np.zeros(shape=(self.n_iter_max, d)),
-        "bandwidth":     np.zeros(shape=(self.n_iter_max, d))
+        "particle_mean": np.zeros(shape=(self.n_iter, d)),
+        "particle_var":  np.zeros(shape=(self.n_iter, d)),
+        "bandwidth":     np.zeros(shape=(self.n_iter, d))
     }
 
     for key, shape in self.dist.get_metrics_shape().items():
-        log["metrics"][key] = np.zeros(shape=(self.n_iter_max,) + shape)
+        log["metrics"][key] = np.zeros(shape=(self.n_iter,) + shape)
 
     return log
 

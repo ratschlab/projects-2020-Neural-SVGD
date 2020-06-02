@@ -116,20 +116,6 @@ def sweep(rkey, grid, sample_each_time=False, joint_param=False, average_over=1)
     if np.any(np.isnan(sweep_results)): print("NaNs detected!")
     return sweep_results
 
-
-def get_ada_loss(m):
-    ksd_ada = []
-    for _ in tqdm(range(m)):
-        svgd_ada.newkey()
-        xout_ada, _ = svgd_ada.svgd(svgd_ada.rkey, svgd_stepsize, bandwidth=0, n_iter=n_iter_max)
-        ksd_ada.append(ksd(xout_ada, logp, bandwidth=1))
-    ksd_ada = np.array(ksd_ada)
-    print("variance", np.var(ksd_ada))
-    ksd_ada = np.mean(ksd_ada)
-    return ksd_ada
-
-
-
 # wrapper that prints when the function compiles
 def verbose_jit(fun, *jargs, **jkwargs):
     """Does same thing as jax.jit, only that it also inserts a print statement."""
@@ -155,11 +141,11 @@ def check_for_nans(thing):
         for k, v in thing.items():
             check_for_nans(v)
     else:
-        pass
+        warnings.warn("Didn't recognize type. Not checking for NaNs.", RuntimeWarning)
     return None
 
 # wrapper that checks output for NaNs and returns a warning if isnan
-def check_for_nans(fun):
+def warn_if_nan(fun):
     @wraps(fun)
     def checked_fun(*args, **kwargs):
         out = fun(*args, **kwargs)
@@ -195,85 +181,9 @@ def python_fori_loop(lower, upper, body_fun, init_val):
         val = body_fun(i, val)
     return val
 
-
-
-
-
-
-############ Kernel
-# @jit
-def normsq(x):
-    assert x.ndim == 1
-    x = np.array(x)
-    return np.vdot(x, x)
-
-v_normsq = vmap(normsq) # outputs vector of norms
-vv_normsq = vmap(v_normsq)
-
-def single_rbf(x, y, h):
-    """
-    x and y are d-dimensional arrays
-    h is a scalar parameter, h > 0
-    """
-    x, y = np.array([x, y])
-    assert x.ndim == 1
-    assert y.ndim == 1
-    return np.exp(- normsq(x - y) / (2 * h))
-
-
-# @jit
-def ard(x, y, logh):
-    """
-    IN:
-    * x, y: np arrays of shape (d,)
-    * logh: np array of shape (d,), or scalar. represents log of bandwidth parameter (so can be negative or zero).
-
-    OUT:
-    scalar kernel(x, y, h).
-    """
-    x, y = np.array(x), np.array(y)
-    if x.shape != y.shape:
-        raise ValueError(f"Shapes of particles x and y need to match. Recieved shapes x: {x.shape}, y: {y.shape}")
-    if x.ndim > 1:
-        raise ValueError(f"Input particles x and y can't have more than one dimension. Instead they have rank {x.ndim}")
-
-    logh = np.array(logh)
-    if logh.ndim > 1:
-        raise ValueError(f"Bandwidth needs to be a scalar or a d-dim vector. Instead it has shape {logh.shape}")
-    elif logh.ndim == 1:
-        assert x.shape == logh.shape
-
-    h = np.exp(logh)
-    return np.exp(- np.sum((x - y)**2 / h) / 2)
-
-def ard_m(x, y, sigma):
-    """
-    Arguments:
-    * x, y: np.arrays of shape (d,)
-    * sigma: np.array of shape (d, d). Must be positive definite.
-    Returns:
-    scalar given by
-    \[ e^{- 1/2 (x - y)^T \Sigma^{-1} (x - y)} \]
-    """
-    x, y = np.array(x), np.array(y)
-    if x.shape != y.shape:
-        raise ValueError(f"Shapes of particles x and y need to match. Recieved shapes x: {x.shape}, y: {y.shape}")
-    elif x.ndim > 1 or x.ndim == 0:
-        raise ValueError(f"Input particles x and y need to have shape (d,). Instead received shape {x.shape}")
-    sigma = np.array(sigma)
-    d = x.shape[0]
-    if sigma.ndim != 2 and d != 1:
-        raise ValueError(f"Bandwidth can't have more than one dimension. Instead h has rank {h.ndim}")
-
-    inv = np.linalg.inv(sigma)
-    return np.exp(- np.matmul(np.matmul(x - y, inv), x - y) / 2)
-
-
-
-
 #############################
 ### better pairwise distances
-# @jit
+
 def squared_distance_matrix(x):
     """
     Parameters:
@@ -287,6 +197,14 @@ def squared_distance_matrix(x):
         x = np.reshape(x, (n, 1)) # add dummy dimension
     xx = np.tile(x, (n, 1, 1)) # shape (n, n, d)
     diff = xx - xx.transpose((1, 0, 2))
+
+    def normsq(x):
+        assert x.ndim == 1
+        x = np.array(x)
+        return np.vdot(x, x)
+    v_normsq = vmap(normsq) # outputs vector of norms
+    vv_normsq = vmap(v_normsq)
+
     return vv_normsq(diff)
 
 def getn(l):
@@ -316,8 +234,6 @@ def squareform(distances):
     out = out + out.T
     return out
 
-
-#########################33
 
 ##########################33
 ### cartesian product

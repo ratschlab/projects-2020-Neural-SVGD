@@ -1,12 +1,10 @@
 import jax.numpy as np
-from jax import grad, jit, vmap, random, jacfwd, jacrev
+from jax import grad, vmap, random, jacfwd, jacrev
 from jax.ops import index_update, index
-from jax.scipy import stats, special
-
-import numpy as onp
 
 import svgd
 import utils
+import kernels
 
 def stein_operator(fun, x, logp, transposed=False):
     """
@@ -41,10 +39,8 @@ def stein_operator(fun, x, logp, transposed=False):
 #            return np.einsum("ij,j->ij", fun(x), grad(logp)(x)) + #np.einsum("iii->i", jacfwd(fun)(x).transpose())
         else:
             raise ValueError(f"Output of input function {fun.__name__} needs to be a scalar, a vector, or a square matrix. Instead got output of shape {fx.shape}")
-            raise ValueError()
 
-
-def ksd_squared(xs, logp, logh):
+def ksd_squared(xs, logp, k):
     """
     Arguments:
     * xs: np.array of shape (n, d)
@@ -54,7 +50,6 @@ def ksd_squared(xs, logp, logh):
     Returns:
     The square of the stein discrepancy KSD(q, p). Here, q is the empirical dist of xs.
     """
-    k = lambda x, y: utils.ard(x, y, logh)
     def g(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):
@@ -71,26 +66,24 @@ def ksd_squared(xs, logp, logh):
     ksd_matrix = index_update(ksd_matrix, trace_indices, 0)
 
     return np.mean(ksd_matrix)
-ksd_squared = jit(ksd_squared, static_argnums=1)
 
-def phistar(xs, logp, logh, xest=None):
-    if xest is not None:
-        raise NotImplementedError()
-
-    def f(x, y):
-        """evaluated inside the expectation"""
-        kx = lambda y: utils.ard(x, y, logh)
-        return stein_operator(kx, y, logp, transposed=False)
-
-    fv  = vmap(f,  (None, 0))
-    fvv = vmap(fv, (0, None))
-    phi_matrix = fvv(xs, xs)
-
-    n = xs.shape[0]
-    trace_indices = [list(range(n))]*2
-    phi_matrix = index_update(phi_matrix, trace_indices, 0)
-
-    return np.mean(phi_matrix, axis=1)
+# def phistar(xs, logp, k, xest=None):
+#     if xest is not None:
+#         raise NotImplementedError()
+#     def f(x, y):
+#         """evaluated inside the expectation"""
+#         kx = lambda y: k(x, y)
+#         return stein_operator(kx, y, logp, transposed=False)
+#
+#     fv  = vmap(f,  (None, 0))
+#     fvv = vmap(fv, (0, None))
+#     phi_matrix = fvv(xs, xs)
+#
+#     n = xs.shape[0]
+#     trace_indices = [list(range(n))]*2
+#     phi_matrix = index_update(phi_matrix, trace_indices, 0)
+#
+#     return np.mean(phi_matrix, axis=1)
 
 def stein(fun, xs, logp, transposed=False):
     """
@@ -104,3 +97,30 @@ def stein(fun, xs, logp, transposed=False):
     np.array of shape (d,) if transposed else shape (d, d)
     """
     return np.mean(vmap(stein_operator, (None, 0, None, None))(fun, xs, logp, transposed), axis=0)
+
+def phistar_i(xi, x, logp, kernel):
+    """
+    Arguments:
+    * xi: np.array of shape (d,), usually a row element of x
+    * x: np.array of shape (n, d)
+    * logp: callable
+    * kernel: callable. Takes as arguments two vectors x and y.
+
+    Returns:
+    * \phi^*(xi) estimated using the particles x
+    """
+    if xi.ndim > 1:
+        raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
+    kx = lambda y: kernel(y, xi)
+    return stein(kx, x, logp)
+
+def phistar(x, logp, kernel):
+    """
+    Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
+
+    Arguments:
+    * x: np.array of shape (n, d)
+    * logp: callable
+    * kernel: callable. Takes as arguments two vectors x and y.
+    """
+    return vmap(phistar_i, (0, None, None, None))(x, x, logp, kernel)
