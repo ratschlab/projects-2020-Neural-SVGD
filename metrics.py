@@ -298,52 +298,9 @@ def _ksd_squared(xs, logp, logh):
 
 ########################
 ### metrics to log while running SVGD
-def initialize_log(self):
-    """self is an SVGD object"""
-    d = self.d
-    log = {
-        "desc": dict(),
-        "metrics": dict()
-    }
-    log["desc"] = {
-        "particle_mean": np.zeros(shape=(self.n_iter, d)),
-        "particle_var":  np.zeros(shape=(self.n_iter, d)),
-        "bandwidth":     np.zeros(shape=(self.n_iter, d))
-    }
-
-    for key, shape in self.dist.get_metrics_shape().items():
-        log["metrics"][key] = np.zeros(shape=(self.n_iter,) + shape)
-
-    return log
-
-def update_log(self, i, x, log, bandwidth):
+def append_to_log(dct, update_dict):
+    """appends update_dict to dict
     """
-    Input: log is a dict with two subdicts, "metrics" and "desc". This function updates these dicts.
-    1) create dict of updates
-    2) 'append' dict of updates to log dict
-    """
-    bandwidth = np.exp(bandwidth) # cause else h is rescaled to log(h)
-    update_dict = {
-        "desc": dict(),
-        "metrics": dict()
-    }
-    update_dict["desc"] = {
-        "particle_mean": np.mean(x, axis=0),
-        "particle_var": np.var(x, axis=0),
-        "bandwidth": bandwidth
-    }
-
-    # metrics
-    update_dict["metrics"] = self.dist.compute_metrics(x)
-
-    for key in log.keys():
-        if key == "metrics":
-            for k, v in log[key].items():
-                log["metrics"][k] = index_update(v, index[i, ...], update_dict["metrics"][k])
-        elif key == "desc":
-            for k, v in log[key].items():
-                log[key][k] = index_update(v, index[i, :], update_dict[key][k])
-        else:
-            pass
-
-    return log
+    for key, newvalue in update_dict.items():
+        dct.setdefault(key, []).append(newvalue)
+    return dct

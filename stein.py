@@ -61,9 +61,9 @@ def ksd_squared(xs, logp, k):
     gvv = vmap(gv, (None, 0))
     ksd_matrix = gvv(xs, xs)
 
-    n = xs.shape[0]
-    trace_indices = [list(range(n))]*2
-    ksd_matrix = index_update(ksd_matrix, trace_indices, 0)
+#    n = xs.shape[0]
+#    trace_indices = [list(range(n))]*2
+#    ksd_matrix = index_update(ksd_matrix, trace_indices, 0)
 
     return np.mean(ksd_matrix)
 

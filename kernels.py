@@ -4,8 +4,9 @@ import warnings
 
 import utils
 
+###############################
+###### Kernels
 """A collection of positive definite kernel functions written using Jax."""
-
 def _ard(x, y, logh):
     """
     IN:
@@ -22,16 +23,17 @@ def _ard(x, y, logh):
         raise ValueError(f"Input particles x and y can't have more than one dimension. Instead they have rank {x.ndim}")
 
     logh = np.array(logh)
+    logh = np.squeeze(logh)
     if logh.ndim > 1:
         raise ValueError(f"Bandwidth needs to be a scalar or a d-dim vector. Instead it has shape {logh.shape}")
     elif logh.ndim == 1:
         assert x.shape == logh.shape
 
     h = np.exp(logh)
-    return np.exp(- np.sum((x - y)**2 / h) / 2)
+    return np.exp(- np.sum((x - y)**2 / h) / 2) / np.sqrt(2 * np.pi * h)
 
-def ard(h):
-    return lambda x, y: _ard(x, y, h)
+def ard(logh):
+    return lambda x, y: _ard(x, y, logh)
 
 def _ard_m(x, y, sigma):
     """
@@ -54,7 +56,7 @@ def _ard_m(x, y, sigma):
         raise ValueError(f"Sigma needs to be a square matrix. Instead, received shape {sigma.shape}.")
 
     inv = np.linalg.inv(sigma)
-    return np.exp(- np.matmul(np.matmul(x - y, inv), x - y) / 2)
+    return np.exp(- np.matmul(np.matmul(x - y, inv), x - y) / 2) # TODO add normalization factor
 
 def ard_m(sigma):
     return lambda x, y: _ard_m(x, y, sigma)
@@ -76,4 +78,36 @@ def median_heuristic(x):
         return h
     else:
         raise ValueError("Shape of x has to be either (n,) or (n, d)")
+
+
+###########################################
+######### Hyper-learner for kernel params
+import haiku as hk
+
+def linear_regression_fn(x):
+    """Linear Regression"""
+    mlp = hk.Sequential([
+        hk.Flatten(),
+        hk.Linear(1),
+    ])
+    return mlp(x)
+linear_regression = hk.transform(linear_regression_fn)
+
+def mlp_fn(x):
+    """Simple MLP"""
+    mlp = hk.Sequential([
+        hk.Flatten(),
+        hk.Linear(64), jax.nn.relu,
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(1),
+    ])
+    return mlp(x)
+mlp = hk.transform(mlp_fn)
+
+
+
+
+
+
 

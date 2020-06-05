@@ -8,6 +8,11 @@ import time
 from tqdm import tqdm
 from functools import wraps
 
+from collections.abc import Iterable   # drop `.abc` with Python 2.7 or lower
+
+def isiterable(obj):
+    return isinstance(obj, Iterable)
+
 ##############################
 ### KL divergence utilities
 def smooth_and_normalize(vec, normalize=True):
@@ -129,27 +134,35 @@ def verbose_jit(fun, *jargs, **jkwargs):
         return out
     return jit(verbose_fun, *jargs, **jkwargs)
 
-def check_for_nans(thing):
+#from haiku._src.data_structures import frozendict
+import collections
+def _warn_if_nan(thing):
     """not supposed to end up inside jit ofc"""
     if type(thing) is jax.interpreters.xla.DeviceArray:
-        if np.isnan(thing):
-            warnings.warn("Detected NaNs in output.", RuntimeWarning)
-    elif type(thing) is tuple or type(thing) is list:
-        for el in thing:
-            check_for_nans(el)
-    elif type(thing) is dict:
+        if np.any(np.isnan(thing)):
+            warnings.warn(f"Detected NaNs.", RuntimeWarning)
+#    elif type(thing) is dict or frozendict:
+    elif isinstance(thing, collections.Mapping):
         for k, v in thing.items():
-            check_for_nans(v)
+            _warn_if_nan(v)
+    elif isiterable(thing):
+        for el in thing:
+            _warn_if_nan(el)
     else:
         warnings.warn("Didn't recognize type. Not checking for NaNs.", RuntimeWarning)
     return None
 
+def warn_if_nan(*args):
+    for arg in args:
+        _warn_if_nan(arg)
+    return None
+
 # wrapper that checks output for NaNs and returns a warning if isnan
-def warn_if_nan(fun):
+def check_for_nans(fun):
     @wraps(fun)
     def checked_fun(*args, **kwargs):
         out = fun(*args, **kwargs)
-        check_for_nans(out)
+        warn_if_nan(out)
         return out
     return checked_fun
 
