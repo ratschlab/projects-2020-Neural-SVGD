@@ -1,241 +1,151 @@
 import jax.numpy as np
-from jax import grad, jit, vmap, random
-from jax import lax
-from jax.ops import index, index_add, index_update
-from jax.experimental import optimizers
+from jax import jit, vmap, random, value_and_grad
 
 import time
 from tqdm import tqdm
-import warnings
+
 from functools import partial
+import json
 
 import utils
 import metrics
 import stein
-import kernels
 
-verbose_jit = utils.verbose_jit
 
-def phistar_i(xi, x, logp, kernel):
-    """
-    Arguments:
-    * xi: np.array of shape (d,), usually a row element of x
-    * x: np.array of shape (n, d)
-    * logp: callable
-    * kernel: callable. Takes as arguments two vectors x and y.
+class Optimizer():
+    def __init__(self, opt_init, opt_update, get_params):
+        """opt_init, opt_update, get_params are the three functions obtained
+        from a stax.optimizer call."""
+        self.init = jit(opt_init)
+        self.update = jit(opt_update)
+        self.get_params = jit(get_params)
 
-    Returns:
-    * \phi^*(xi) estimated using the particles x
-    """
-    if xi.ndim > 1:
-        raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
-    kx = lambda y: kernel(y, xi)
-    return stein.stein(kx, x, logp)
 
-def phistar(x, logp, kernel):
-    """
-    Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
+@partial(jit, static_argnums=1)
+def init_svgd(key, particle_shape):
+    return random.normal(key, particle_shape) * 2 - 6
 
-    Arguments:
-    * x: np.array of shape (n, d)
-    * logp: callable
-    * kernel: callable. Takes as arguments two vectors x and y.
-    """
-    return vmap(phistar_i, (0, None, None, None))(x, x, logp, kernel)
-
-# adagrad params (fixed):
-alpha = 0.9
-fudge_factor = 1e-6
-def update(x, logp, stepsize, kernel, adagrad=False, historical_grad=None):
-    """SVGD update step / forward pass
-    """
-    if adagrad:
-        phi = phistar(x, logp, kernel)
-        historical_grad = alpha * historical_grad + (1 - alpha) * (phi ** 2)
-        phi_adj = np.divide(phi, fudge_factor+np.sqrt(historical_grad))
-        x = x + stepsize * phi_adj
-    else:
-        x = x + stepsize * phistar(x, logp, kernel)
-    return x
-update = jit(update, static_argnums=(1, 5))
 
 class SVGD():
-    def __init__(self, dist, n_iter, nr_particles=None, particle_dim=None, kernel=kernels.ard, snapshot_iter=[10, 20, 30, 50, 100]):
+    def __init__(self, target, n_particles, optimizer_svgd, kernel):
         """
-        Arguments:
-        * dist: instance of class metrics.Distribution. Alternatively, a callable that computes log(p(x))
-        * n_iter: integer, nr of SVGD steps.
-        * kernel: callable. Takes in three arguments:
-            x, y : array-like, shape (d,).
-            kernel_params : pytree (ie scalar, or recursive list, dict, or tuple) containing kernel parameters.
+        target: instance of class metrics.Distribution
 
-        * noise: scalar. level of gaussian noise added at each iteration.
+        kernel needs to have pure methods
+           kernel.init(rkey, x, y) -> params
+           kernel.apply(params, x, y) -> scalar
+
+        optimizer_svgd needs to have pure methods
+           optimizer_svgd.init(params) -> state
+           optimizer_svgd.update(rkey, gradient, state) -> state
+           optimizer_svgd.get_params(state) -> params
         """
-        # check arguments:
-        if not callable(kernel):
-            raise ValueError("kernel must be callable.")
+        self.target = target
+        self.n_particles = n_particles
+        self.kernel = kernel
+        self.opt = optimizer_svgd
 
-        if nr_particles is None:
-            self.nr_particles = 100 # default nr of particles
-        else:
-            self.nr_particles = nr_particles
+        self.n = self.n_particles
+        self.particle_shape = (self.n, self.target.d)
 
-        self.kernel = lambda kernel_params: lambda x, y: kernel(x, y, kernel_params)
+#    @partial(jit, static_argnums=0)
+    def phistar(self, particles, kernel_params):
+        kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
+        return stein.phistar(particles, self.target.logpdf, kernel_fn)
 
-        if isinstance(dist, metrics.Distribution):
-            self.logp = dist.logpdf
-            self.dist = dist
-            if dist.d != particle_dim and particle_dim is not None:
-                raise ValueError(f"Arguments dist.d and particle_dim need to be equal.\
-                                  Instead received {dist.d} and {particle_dim}, respectively.")
-            self.d = dist.d
-        elif callable(dist):
-            self.logp = dist
-            warnings.warn("No dist instance supplied. This means you won't have access to\
-                          the SVGD.dist.compute_metrics method, which computes the metrics\
-                          logged during calls to SVGD.svgd and SVGD.step.")
-            self.d = particle_dim
-            self.dist = None
-        else:
-            raise ValueError()
+    def ksd_squared(self, kernel_params, particles):
+        kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
+        return stein.ksd_squared(particles, self.target.logpdf, kernel_fn)
 
-        self.n_iter = n_iter
+#    @partial(jit, static_argnums=0)
+    def negative_ksd_squared_batched(self, kernel_params, particles):
+        """Mean - KSD^2 for a batch of particles."""
+        if particles.ndim < 3:
+            particles = np.expand_dims(particles, 0)  # batch dimension
+        return - np.mean(vmap(self.ksd_squared, (None, 0))(kernel_params, particles))
 
-        # these don't trigger recompilation (never used as context in jitted functions)
-        self.rkey = random.PRNGKey(0)
+    def train_kernel(self, key, n_iter, ksd_steps, svgd_steps, opt_ksd):
+        """Train the kernel parameters
+        Training goes over one SVGD run.
 
-        # these don't trigger recompilation, but also the compiled method doesn't noticed they changed.
-        self.ksd_kernel_range = np.array([0.1, 1, 10])
-        self.noise = 1e-3
-        self.snapshot_iter = snapshot_iter
+        Arguments
+        ---------
+        key : jax.random.PRNGKey
+        n_iter : nr of iterations in total
+        ksd_steps : nr of ksd steps per iteration
+        svgd_steps : nr of svgd steps per iteration
+        opt_ksd : instance of class Optimizer.
 
-    def newkey(self):
-        """Not pure"""
-        self.rkey = random.split(self.rkey)[0]
-
-    def initialize(self, rkey=None):
-        """Initialize particles distributed as N(-10, 1)."""
-        if rkey is None:
-            rkey = self.rkey
-            self.newkey()
-        return random.normal(rkey, shape=(self.nr_particles, self.d)) - 5
-
-    def kernel_step(self, kernel_params, x, stepsize):
-        """Update kernel_params <- kernel_params + stepsize * \gradient_{kernel_params} KSD_{kernel_params}(q, p)^2
-        Arguments:
-        * kernel_params: scalar or np.array of shape (d,)
-        * x: np.array of shape (n,d).
-        * stepsize: scalar
-        * log: dict for logging stuff"""
-        def ksd_sq(kernel_params):
-            return stein.ksd_squared(x, self.logp, self.kernel(kernel_params))
-        gradient = grad(ksd_sq)(kernel_params)
-
-#        # normalize gradient
-#        gradient = gradient / np.linalg.norm(gradient)
-
-#        # clip gradient
-#        gradient = optimizers.clip_grads(gradient, 1)
-
-        return kernel_params + stepsize * gradient, gradient # TODO: (modularity) this should be done by optimizer object
-    kernel_step = jit(kernel_step, static_argnums=0)
-
-    def svgd_step(self, x, kernel_params, stepsize):
-        """Update X <- X + \phi^*_{p,q}(X)
-
-        Arguments:
-        * x: np.array of shape (n,d).
-        * h: scalar or np.array of shape (d,)
-        * stepsize: scalar"""
-        return x + stepsize * phistar(x, self.logp, self.kernel(kernel_params))
-    svgd_step = jit(svgd_step, static_argnums=0)
-
-    def train(self, rkey, kernel_params, lr, svgd_stepsize, n_steps):
-        kernel_params = np.array(kernel_params, dtype=np.float32) # cast to float so it works with grad
-
-        x = self.initialize(rkey)
-        log = metrics.initialize_log(self)
-        log["x0"] = x
-        log["ksd_gradients"] = []
-        if self.snapshot_iter is not None:
-            log["particle_snapshots"] = []
-            log["kernel_params_snapshots"] = []
-        ksd_pre = []
-        ksd_post = []
-        for i in tqdm(range(n_steps)):
-            log = metrics.update_log(self, i, x, log, kernel_params)
-            ksd_pre.append(stein.ksd_squared(x, self.logp, kernel_params))
-
-            # update kernel_params
-            kernel_params, gradient = self.kernel_step(kernel_params, x, lr)
-            ksd_post.append(stein.ksd_squared(x, self.logp, kernel_params))
-            log["ksd_gradients"].append(gradient)
-            if np.any(np.isnan(kernel_params)):
-                log["interrupt_iter"] = i
-                log["last_kernel_params"] = log["desc"]["kernel_params"][i-1]
-                warnings.warn(f"NaNs detected in kernel_params at iteration {i}. Training interrupted.", RuntimeWarning)
-                break
-
-            # update x
-            x = self.svgd_step(x, kernel_params, svgd_stepsize)
-            if np.any(np.isnan(x)):
-                log["interrupt_iter"] = i
-                warnings.warn(f"NaNs detected in x at iteration {i}. Kernel_Params is fine, which means NaNs come from update. Training interrupted.", RuntimeWarning)
-                break
-
-            if i in self.snapshot_iter:
-                log["particle_snapshots"].append(x)
-                log["kernel_params_snapshots"].append(np.exp(kernel_params))
-
-        log["metric_names"] = self.dist.metric_names
-        log["ksd_pre"] = np.array(ksd_pre)
-        log["ksd_post"] = np.array(ksd_post)
-        log["ksd_gradients"] = np.array(log["ksd_gradients"])
-
-        return x, log
-
-
-
-
-
-
-    @partial(verbose_jit, static_argnums=(0, 4))
-    def svgd(self, x0, stepsize, bandwidth, adaptive_kernel=False):
+        Returns
+        -------
+        Updated kernel parameters.
         """
-        IN:
-        * rkey: random seed
-        * stepsize is a float
-        * bandwidth is an np array of length d: bandwidth parameter for RBF kernel.
-          The bandwidth is fixed throughout training.
-        * n: integer, number of particles
+        def current_step(i, j, steps):
+            return i*steps + j
+        key1, _ = random.split(key)
 
-        OUT:
-        * Updated particles x (np array of shape n x d) after self.n_iter steps of SVGD
-        * dictionary with logs
-        """
-        x = x0
-        log = metrics.initialize_log(self)
-        log["x0"] = x0
-        particle_shape = x.shape
-        historical_grad = np.zeros(shape=particle_shape)
-        rkey = random.PRNGKey(7)
+        particles = init_svgd(key, self.particle_shape)
+        opt_svgd_state = self.opt.init(particles)
 
-        def update_fun(i, u):
-            """Compute updated particles and log metrics."""
-            x, log, historical_grad, rkey = u
-            if adaptive_kernel:
-                _bandwidth = kernels.median_heuristic(x)
-            else:
-                _bandwidth = bandwidth
+        x_dummy, y_dummy = self.target.sample((2,1))  # TODO: for now hardcoded for 1 dim
+        kernel_params = self.kernel.init(key1, x_dummy, y_dummy)
+        opt_ksd_state = opt_ksd.init(kernel_params)
 
-            log = metrics.update_log(self, i, x, log, _bandwidth)
-            x = update(x, self.logp, stepsize, self.kernel(_bandwidth), None, adagrad, historical_grad)
+        log = dict()
+        for i in tqdm(range(n_iter)):
+            # update particles:
+            kernel_params = opt_ksd.get_params(opt_ksd_state)
+            particle_batch = []
+            for j in range(svgd_steps):
+                step = current_step(i, j, svgd_steps)
 
-            rkey = random.split(rkey)[0]
-            x = x + random.normal(rkey, shape=x.shape) * self.noise
+                particles = self.opt.get_params(opt_svgd_state)
+                gp = -self.phistar(particles, kernel_params)
+                opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
 
-            return [x, log, historical_grad, rkey]
+                particle_batch.append(particles)
+                utils.warn_if_nan(gp)
 
-        x, log, *_ = lax.fori_loop(0, self.n_iter, update_fun, [x, log, historical_grad, rkey])
-        log["metric_names"] = self.dist.metric_names
-        return x, log
+                metrics.append_to_log(log, self.target.compute_metrics(particles))
+                metrics.append_to_log(log, {"mean": np.mean(particles, axis=0),
+                                            "var": np.var(particles, axis=0)})
+
+            # update kernel_params:
+            particle_batch = np.asarray(particle_batch, dtype=np.float32)
+#            log = metrics.append_to_log(log, {"particles": particle_batch})
+            inner_updates = []
+            ksds = []
+            for j in range(ksd_steps):
+                step = current_step(i, j, ksd_steps)
+                kernel_params = opt_ksd.get_params(opt_ksd_state)
+                ksd, gk = value_and_grad(self.negative_ksd_squared_batched)(kernel_params, particle_batch)
+                ksd = -ksd
+                opt_ksd_state = opt_ksd.update(step, gk, opt_ksd_state)
+
+                ksds.append(ksd)
+                utils.warn_if_nan(ksd)
+                utils.warn_if_nan(gk)
+            update_log = {
+                "ksd": ksds
+            }
+            log = metrics.append_to_log(log, update_log)
+
+        log["particles"] = particles
+        log = utils.dict_asarray(log)
+        return kernel_params, log
+
+    # @partial(jit, static_argnums=(0, 3))
+    def sample(self, kernel_params, key, n_iter):
+        """Sample from the (approximation of the) target distribution using the current kernel parameters."""
+        particles = init_svgd(key, self.particle_shape)
+        opt_svgd_state = self.opt.init(particles)
+
+        log = dict()
+        for i in tqdm(range(n_iter)):
+            particles = self.opt.get_params(opt_svgd_state)
+            gp = -self.phistar(particles, kernel_params)
+            opt_svgd_state = self.opt.update(i, gp, opt_svgd_state)
+            metrics.append_to_log(log, {"mean": np.mean(particles, axis=0),
+                                        "var": np.var(particles, axis=0)})
+
+        return self.opt.get_params(opt_svgd_state), log

@@ -1,14 +1,13 @@
 import jax.numpy as np
-from jax import grad, jit, vmap, random, jacfwd, jacrev
-from jax.ops import index_update, index
+from jax import grad, vmap, random, jacfwd, jacrev
 from jax.scipy import stats, special
 
 import numpy as onp
-from functools import partial
 
 import svgd
 import utils
 import stein
+import kernels
 
 # distributions packaged with metrics
 # check wikipedia for computation of higher moments https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
@@ -47,24 +46,24 @@ class Distribution():
         else:
             sample_expectations = [np.mean(value, axis=0) for value in (x, x**2, np.cos(x), np.sin(x))]
             square_errors = [(sample - true)**2 for sample, true in zip(sample_expectations, self.expectations)]
-            square_errors = np.array(square_errors) # shape (4, d)
+            square_errors = np.array(square_errors)  # shape (4, d)
 
-            ksds = [ksd_squared(x, self.logpdf, np.log(np.array(h))) for h in self.ksd_grid]
-            ksds = np.array(ksds)
+#            ksds = [ksd_squared(x, self.logpdf, np.log(np.array(h))) for h in self.ksd_grid]
+#            ksds = np.array(ksds)
 
             metrics_dict = {
-                "square_errors": square_errors, # shape (4, d)
-                "ksds": ksds # shape (len(ksd_grid),)
+                "square_errors": square_errors  # shape (4, d)
+#                "ksds": ksds  # shape (len(ksd_grid),)
             }
 
-            if self.d == 1:
-                metrics_dict["KL Divergence"] = self.kl_divergence(x) # scalar
+            if self.d == 1 and False:  # TODO: fix kl
+                metrics_dict["KL Divergence"] = self.kl_divergence(x)  # scalar
             return metrics_dict
 
     def get_metrics_shape(self):
-        shapes =  {
-        "square_errors": (4, self.d),
-        "ksds": (len(self.ksd_grid),)
+        shapes = {
+            "square_errors": (4, self.d)
+            #        "ksds": (len(self.ksd_grid),)
         }
         if self.d == 1:
             shapes["KL Divergence"] = (1,)
@@ -72,8 +71,8 @@ class Distribution():
 
     def initialize_metric_names(self):
         self.metric_names = {
-            "square_errors": [f"SE for {val}" for val in ["X", "X^2", "cos(X)", "sin(X)"]],
-            "ksds": [f"KSD for h = {h}" for h in self.ksd_grid]
+            "square_errors": [f"SE for {val}" for val in ["X", "X^2", "cos(X)", "sin(X)"]]
+#            "ksds": [f"KSD for h = {h}" for h in self.ksd_grid]
         }
         if self.d == 1:
             self.metric_names["KL Divergence"] = "Estimated KL Divergence"
@@ -294,12 +293,12 @@ def _ksd_squared(xs, logp, logh):
         k = lambda x: kernel(x, z)
         return stein.stein(k, xs, logp)
     return stein.stein(phistar, xs, logp, transposed=True)
-# NOTE: this is actually the square of the stein discrepancy.
 
 ########################
 ### metrics to log while running SVGD
 def append_to_log(dct, update_dict):
-    """appends update_dict to dict
+    """appends update_dict to dict, entry-wise.
+    If an entry is itself a dictionary, then recurse.
     """
     for key, newvalue in update_dict.items():
         dct.setdefault(key, []).append(newvalue)

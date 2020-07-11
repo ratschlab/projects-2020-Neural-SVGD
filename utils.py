@@ -1,20 +1,23 @@
 import jax.numpy as np
 import jax
-from jax import grad, jit, vmap, random
+from jax import jit, vmap, random
 from jax.ops import index_update, index
-from jax.scipy.special import logsumexp
 from jax import lax
 import time
 from tqdm import tqdm
 from functools import wraps
 
-from collections.abc import Iterable   # drop `.abc` with Python 2.7 or lower
+from collections.abc import Iterable
+import warnings
+
 
 def isiterable(obj):
     return isinstance(obj, Iterable)
 
 ##############################
 ### KL divergence utilities
+
+
 def smooth_and_normalize(vec, normalize=True):
     """
     Parameters:
@@ -34,7 +37,7 @@ def smooth_and_normalize(vec, normalize=True):
     epsilon = 0.0001
     num_nonzero = np.count_nonzero(vec)
     c = epsilon * (n - num_nonzero) / num_nonzero
-    perturbation =  (vec == 0)*epsilon - (vec != 0)*c
+    perturbation = (vec == 0)*epsilon - (vec != 0)*c
     return vec + perturbation
 
 def get_bins_and_bincounts(samples, normalized=False):
@@ -86,40 +89,6 @@ def get_histogram_likelihoods(samples):
 
     sample_likelihoods = np.repeat(likelihoods, bincounts) # TODO this doesn't play well with jit, cause shape of output depends on values in bincounts
     return sample_likelihoods
-
-##############
-### sweep
-def sweep(rkey, grid, sample_each_time=False, joint_param=False, average_over=1):
-    """Sweep a grid of bandwidth values and output corresponding metrics.
-    Arguments:
-    * average_over: integer, compute average over m random seeds
-    * metrics: callable, takes bandwidth h as only input and oututs a either a scalar or an np.array of shape (k,)
-    """
-    if average_over == 1:
-        sweep_results = []
-        if sample_each_time:
-            rkeys = random.split(svgd_fix.rkey, len(grid))
-        else:
-            rkeys = [rkey] * len(grid)
-
-        for rkey, h in tqdm(zip(rkeys, grid)):
-            if joint_param:
-                res = metrics(h)
-            else:
-                res = metrics(h)
-            sweep_results.append(res)
-
-        sweep_results = np.array(sweep_results)
-    else:
-        ress = []
-        for _ in range(average_over):
-            rkey = random.split(rkey)[0]
-            res = sweep(rkey, grid, sample_each_time=False, joint_param=joint_param, average_over=1)
-            ress.append(res)
-        ress = np.array(ress)
-        sweep_results = np.mean(ress, axis=0)
-    if np.any(np.isnan(sweep_results)): print("NaNs detected!")
-    return sweep_results
 
 # wrapper that prints when the function compiles
 def verbose_jit(fun, *jargs, **jkwargs):
@@ -317,3 +286,11 @@ def dict_divide(da, db):
         except TypeError:
             da[k] = dict_divide(a, b)
     return da
+
+def dict_asarray(dct):
+    for k, v in dct.items():
+        try:
+            dct[k] = np.asarray(v)
+        except TypeError:
+            dct[k] = dict_asarray(dct[k])
+    return dct

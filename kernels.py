@@ -1,12 +1,90 @@
 import jax.numpy as np
 from jax import vmap
+import jax
+import haiku as hk
+
 import warnings
 
 import utils
 
-###############################
-###### Kernels
-"""A collection of positive definite kernel functions written using Jax."""
+"""A collection of positive definite kernel functions written using Jax.
+
+Kernels are implemented as Haiku modules.
+Every kernel takes as input two jax scalars or arrays x, y of shape (d,), where d is the particle dimension,
+and outputs a scalar.
+"""
+
+class ARD(hk.Module):
+    def __init__(self, name=None):
+        super(ARD, self).__init__(name=name)
+
+    def __call__(self, x, y):
+        logh_init = np.zeros
+        logh = hk.get_parameter("logh", shape=x.shape, dtype=x.dtype, init=logh_init)
+        return _ard(x, y, logh)
+
+def vanilla_ard(x, y):
+    ard = ARD()
+    return(ard(x, y))
+
+def make_mlp_ard(sizes):
+    def mlp_ard(x, y):
+        layers = [hk.Flatten()] + [layer for size in sizes
+                                 for layer in [hk.Linear(size), jax.nn.relu]
+                                 ] + [hk.Linear(2)]
+        mlp = hk.Sequential(layers)
+        ard = ARD()
+        return ard(mlp(x), mlp(y))
+    return mlp_ard
+
+def mlp_ard_classic(x, y):
+    mlp = hk.Sequential([
+        hk.Flatten(),
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(64), jax.nn.relu,
+        hk.Linear(64), jax.nn.relu,
+        hk.Linear(64), jax.nn.relu,
+        hk.Linear(2)
+    ])
+    ard = ARD()
+    return ard(mlp(x), mlp(y))
+
+
+def mlpa(x):
+    mlp = hk.Sequential([
+        hk.Flatten,
+        hk.Linear(32), jax.nn.relu,
+        hk.Linear(64), jax.nn.relu,
+        hk.Linear(64), jax.nn.relu,
+        hk.Linear(64), jax.nn.relu,
+        hk.Linear(2)
+    ])
+    return mlp(x)
+
+
+
+
+
+## utils
+
+def median_heuristic(x):
+    """
+    Heuristic for choosing ARD bandwidth.
+
+    IN: np array of shape (n,) or (n,d): set of particles
+    OUT: scalar: bandwidth parameter for RBF kernel, based on the heuristic from the SVGD paper.
+    Note: assumes k(x, y) = exp(- (x - y)^2 / h / 2)
+    """
+    if x.ndim == 2:
+        return vmap(median_heuristic, 1)(x)
+    elif x.ndim == 1:
+        n = x.shape[0]
+        medsq = np.median(utils.squared_distance_matrix(x))
+        h = medsq / np.log(n) / 2
+        return h
+    else:
+        raise ValueError("Shape of x has to be either (n,) or (n, d)")
+
 def _ard(x, y, logh):
     """
     IN:
@@ -30,7 +108,11 @@ def _ard(x, y, logh):
         assert x.shape == logh.shape
 
     h = np.exp(logh)
-    return np.exp(- np.sum((x - y)**2 / h) / 2) / np.sqrt(2 * np.pi * h)
+    if h.ndim == 0:
+        return np.exp(- np.sum((x - y)**2 / h) / 2) / np.sqrt(2 * np.pi * h)
+    else:
+        d = h.shape[0]
+        return np.exp(- np.sum((x - y)**2 / h) / 2) / (2 * np.pi)**(d / 2) / np.sqrt(np.prod(h))
 
 def ard(logh):
     return lambda x, y: _ard(x, y, logh)
@@ -60,54 +142,3 @@ def _ard_m(x, y, sigma):
 
 def ard_m(sigma):
     return lambda x, y: _ard_m(x, y, sigma)
-
-def median_heuristic(x):
-    """
-    Heuristic for choosing ARD bandwidth.
-
-    IN: np array of shape (n,) or (n,d): set of particles
-    OUT: scalar: bandwidth parameter for RBF kernel, based on the heuristic from the SVGD paper.
-    Note: assumes k(x, y) = exp(- (x - y)^2 / h / 2)
-    """
-    if x.ndim == 2:
-        return vmap(median_heuristic, 1)(x)
-    elif x.ndim == 1:
-        n = x.shape[0]
-        medsq = np.median(utils.squared_distance_matrix(x))
-        h = medsq / np.log(n) / 2
-        return h
-    else:
-        raise ValueError("Shape of x has to be either (n,) or (n, d)")
-
-
-###########################################
-######### Hyper-learner for kernel params
-import haiku as hk
-
-def linear_regression_fn(x):
-    """Linear Regression"""
-    mlp = hk.Sequential([
-        hk.Flatten(),
-        hk.Linear(1),
-    ])
-    return mlp(x)
-linear_regression = hk.transform(linear_regression_fn)
-
-def mlp_fn(x):
-    """Simple MLP"""
-    mlp = hk.Sequential([
-        hk.Flatten(),
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(32), jax.nn.relu,
-        hk.Linear(32), jax.nn.relu,
-        hk.Linear(1),
-    ])
-    return mlp(x)
-mlp = hk.transform(mlp_fn)
-
-
-
-
-
-
-
