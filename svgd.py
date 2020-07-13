@@ -87,8 +87,12 @@ class SVGD():
         particles = init_svgd(key, self.particle_shape)
         opt_svgd_state = self.opt.init(particles)
 
-        x_dummy, y_dummy = self.target.sample((2,1))  # TODO: for now hardcoded for 1 dim
-        kernel_params = self.kernel.init(key1, x_dummy, y_dummy)
+        x_dummy = self.target.sample(1)
+        x_dummy = np.reshape(x_dummy, newshape=(self.target.d,))
+#        x_dummy = np.squeeze(x_dummy)
+#        x_dummy = np.stack([x_dummy, x_dummy])
+
+        kernel_params = self.kernel.init(key1, x_dummy, x_dummy)
         opt_ksd_state = opt_ksd.init(kernel_params)
 
         log = dict()
