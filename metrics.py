@@ -137,12 +137,14 @@ class Gaussian(Distribution):
         self.initialize_metric_names()
         return None
 
-    def sample(self, shape):
+    def sample(self, n_samples):
         """mutates self.rkey"""
         self.newkey()
-        out = random.multivariate_normal(self.key, self.mean, self.cov, shape)
+        out = random.multivariate_normal(self.key, self.mean, self.cov, shape=(n_samples,))
         self.newkey()
-        return out.reshape(shape + (self.d,)) if self.d > 1 else out.reshape(shape)
+
+        shape = (n_samples, self.d)
+        return out.reshape(shape)
 
     def _checkx(self, x):
         """check if particle (single particle shape (d,)) in right shape, etc"""
@@ -216,11 +218,11 @@ class GaussianMixture(Distribution):
         self.initialize_metric_names()
         return None
 
-    def sample(self, shape):
+    def sample(self, n_samples):
         """mutates self.rkey"""
         def sample_from_component(rkey, component, num_samples):
             return random.multivariate_normal(rkey, self.means[component], self.covs[component], shape=(num_samples,))
-        components = random.categorical(self.key, np.log(self.weights), shape=shape)
+        components = random.categorical(self.key, np.log(self.weights), shape=(n_samples,))
         counts = onp.bincount(components.flatten())
         self.newkey()
 
@@ -228,7 +230,9 @@ class GaussianMixture(Distribution):
         out = np.concatenate(out)
         self.newkey()
 
-        return out.reshape(shape + (self.d,)) if self.d > 1 else out.reshape(shape)
+        shape = (n_samples, self.d)
+        return out.reshape(shape)
+    
 
     def _logpdf(self, x):
         """unnormalized"""
@@ -303,3 +307,12 @@ def append_to_log(dct, update_dict):
     for key, newvalue in update_dict.items():
         dct.setdefault(key, []).append(newvalue)
     return dct
+
+def compute_final_metric(particles, svgd):
+    """
+    Compute the ARD KSD between particles and target.
+    particles: np.array of shape (n, d)
+    svgd: instance of svgd.SVGD
+    """
+    kernel = kernels.ard(logh=0)
+    return stein.ksd_squared(particles, svgd.target.logpdf, kernel)

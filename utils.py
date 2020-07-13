@@ -1,15 +1,15 @@
 import jax.numpy as np
 import jax
-from jax import jit, vmap, random
+from jax import jit, vmap
 from jax.ops import index_update, index
 from jax import lax
 import time
-from tqdm import tqdm
 from functools import wraps
+import itertools
 
 from collections.abc import Iterable
+from collections import Mapping
 import warnings
-
 
 def isiterable(obj):
     return isinstance(obj, Iterable)
@@ -294,3 +294,28 @@ def dict_asarray(dct):
         except TypeError:
             dct[k] = dict_asarray(dct[k])
     return dct
+
+def flatten_dict(d):
+    """This assumes no name collisions"""
+    def visit(subdict):
+        flat = []
+        for k, v in subdict.items():
+            if isinstance(v, Mapping):
+                flat.extend(visit(v))
+            else:
+                flat.append((k, v))
+        return flat
+    return dict(visit(d))
+
+def dict_cartesian_product(**kwargs):
+    """
+    >>> [x for x in dict_cartesian_product(chars="ab", nums=[1,2])]
+    [{'chars': 'a', 'nums': 1},
+     {'chars': 'a', 'nums': 2},
+     {'chars': 'b', 'nums': 1},
+     {'chars': 'b', 'nums': 2}]
+    """
+    keys = kwargs.keys()
+    vals = kwargs.values()
+    for instance in itertools.product(*vals):
+        yield dict(zip(keys, instance))

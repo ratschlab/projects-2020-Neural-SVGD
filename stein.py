@@ -1,10 +1,6 @@
 import jax.numpy as np
-from jax import grad, vmap, random, jacfwd, jacrev
+from jax import grad, vmap, random, jacfwd
 from jax.ops import index_update, index
-
-import svgd
-import utils
-import kernels
 
 def stein_operator(fun, x, logp, transposed=False):
     """

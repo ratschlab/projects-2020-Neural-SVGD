@@ -3,21 +3,20 @@ from jax import random
 from jax.experimental import optimizers
 import metrics
 import kernels
-import train
 import svgd
 
 config = dict()
 config["svgd"] = {
     "target": "Gaussian",  # one of ["Gaussian", "Gaussian Mixture"]
-    "target_args": [0, 1],  # either [mean, cov] or [means, covs, weights]
+    "target_args": [3, 10],  # either [mean, cov] or [means, covs, weights]
     "n_particles": 100,
     "optimizer_svgd": "Adagrad",  # One of ["Adam", "Adagrad", "SGD"]
-    "optimizer_svgd_args": [1e-1]
+    "optimizer_svgd_args": [1.0]
 }
 
 config["kernel"] = {
     "architecture": "MLP",  # One of ["MLP", "Vanilla"]
-    "layers": [32, 32, 32, 2]  # Layer sizes
+    "layers": [32, 32]  # Layer sizes
 }
 
 config["train_kernel"] = {
@@ -28,7 +27,6 @@ config["train_kernel"] = {
     "optimizer_ksd": "Adam",  # One of ["Adam", "Adagrad", "SGD"]
     "optimizer_ksd_args": [1e-2]
 }
-
 
 ####### utilities
 opts = {
@@ -75,3 +73,18 @@ def get_sample_args(config):
         "n_iter": config["train_kernel"]["n_iter"] * config["train_kernel"]["svgd_steps"]
     }
     return kwargs
+
+def flat_to_nested(flat_dict):
+    """takes in flat dict.
+    returns dict with same nested structure as config."""
+    out = dict()
+    for k, v in config.items():
+        out[k] = dict()
+        for subk in v:
+            if subk in flat_dict:
+                out[k][subk] = flat_dict[subk]
+            else:
+                pass
+#        if not out[k]:  # out[k] is empty
+#           del out[k]
+    return out
