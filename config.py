@@ -4,6 +4,7 @@ from jax.experimental import optimizers
 import metrics
 import kernels
 import svgd
+import utils
 
 config = dict()
 config["svgd"] = {
@@ -48,6 +49,8 @@ def get_svgd_args(config):
         kernel_fn = kernels.vanilla_ard
     elif kcfg["architecture"] == "MLP":
         kernel_fn = kernels.make_mlp_ard(kcfg["layers"])
+    else:
+        raise ValueError(f"Architecture must be either 'MLP' or 'Vanilla'. Instead received {kcfg['architecture']}.")
 
     optimizer = opts[cfg["optimizer_svgd"]]
     kwargs = {
@@ -87,4 +90,8 @@ def flat_to_nested(flat_dict):
                 pass
 #        if not out[k]:  # out[k] is empty
 #           del out[k]
+    # check everythings all right:
+    for k in flat_dict:
+        if not utils.nested_dict_contains_key(config, k):
+            raise ValueError(f"Key {k} is not a configuration option.")
     return out

@@ -319,3 +319,13 @@ def dict_cartesian_product(**kwargs):
     vals = kwargs.values()
     for instance in itertools.product(*vals):
         yield dict(zip(keys, instance))
+
+def nested_dict_contains_key(ndict: collections.Mapping, key):
+    if key in ndict:
+        return True
+    else:
+        for k, v in ndict.items():
+            if isinstance(v, collections.Mapping):
+                if nested_dict_contains_key(v, key):
+                    return True
+        return False

@@ -8,6 +8,7 @@ import numpy as onp
 import config
 import metrics
 import utils
+import itertools
 
 """
 Perform experiment with hyperparameters from config.py
@@ -72,8 +73,12 @@ def grid_search(base_config, hparams, logdir):
         f.write(json.dumps([base_config, hparams]))
 
     run_config = copy.deepcopy(base_config)
-    for svgd_config in utils.dict_cartesian_product(**hparams["svgd"]):
+    svgd_configs = utils.dict_cartesian_product(**hparams["svgd"])
+    kernel_configs = utils.dict_cartesian_product(**hparams["kernel"])
+
+    for svgd_config, kernel_config in itertools.product(svgd_configs, kernel_configs):
         run_config["svgd"].update(svgd_config)
+        run_config["kernel"].update(kernel_config)
         svgd = SVGD(**config.get_svgd_args(run_config)) # keep SVGD state, so we don't recompile the kernel every time
         for train_config in utils.dict_cartesian_product(**hparams["train_kernel"]):
             run_config["train_kernel"].update(train_config)
@@ -81,16 +86,19 @@ def grid_search(base_config, hparams, logdir):
 
 
 if __name__ == "__main__":
-    logdir = "./runs/multiple_svgd_steps/"
+    logdir = "./runs/vanilla/"
     layers = [ # TODO: hparams["kernel"] is ignored by grid_search
         [32, 32],
     ]
     optimizer_svgd_args = [[0.5], [1], [2], [5]]
-    svgd_steps = [5]
-    ksd_steps = [5, 10]
-    n_iter = [100 // 5]
+    svgd_steps = [1]
+    ksd_steps = [1, 2, 3, 5, 10]
+    n_iter = [100]
+    architecture = ["Vanilla"]
 
-    hparams = config.flat_to_nested(dict(layers=layers,
+
+    hparams = config.flat_to_nested(dict(
+                                         architecture=architecture,
                                          optimizer_svgd_args=optimizer_svgd_args,
                                          ksd_steps=ksd_steps,
                                          svgd_steps=svgd_steps,
