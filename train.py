@@ -86,18 +86,18 @@ def grid_search(base_config, hparams, logdir):
 
 
 if __name__ == "__main__":
-    logdir = "./runs/vanilla/"
-    layers = [ # TODO: hparams["kernel"] is ignored by grid_search
-        [32, 32],
+    logdir = "./runs/30-steps-larger-net/"
+    layers = [
+        [32, 64, 64, 32],
     ]
-    optimizer_svgd_args = [[0.5], [1], [2], [5]]
+    optimizer_svgd_args = [[1.0]]
     svgd_steps = [1]
-    ksd_steps = [1, 2, 3, 5, 10]
-    n_iter = [100]
-    architecture = ["Vanilla"]
+    ksd_steps = [1]
+    n_iter = [30]
+    architecture = ["Vanilla", "MLP"]
+    key = list(range(2))
 
-
-    hparams = config.flat_to_nested(dict(
+    hparams = config.flat_to_nested(dict(key=key,
                                          architecture=architecture,
                                          optimizer_svgd_args=optimizer_svgd_args,
                                          ksd_steps=ksd_steps,

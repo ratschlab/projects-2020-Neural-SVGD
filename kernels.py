@@ -30,8 +30,8 @@ def vanilla_ard(x, y):
 def make_mlp_ard(sizes):
     def mlp_ard(x, y):
         layers = [hk.Flatten()] + [layer for size in sizes
-                                 for layer in [hk.Linear(size), jax.nn.relu]
-                                 ] + [hk.Linear(2)]
+                                   for layer in [hk.Linear(size), jax.nn.relu]
+                                  ] + [hk.Linear(2)]
         mlp = hk.Sequential(layers)
         ard = ARD()
         return ard(mlp(x), mlp(y))
