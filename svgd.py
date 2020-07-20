@@ -5,9 +5,10 @@ import time
 from tqdm import tqdm
 
 from functools import partial
-import json
+import json_tricks as json
 
 import utils
+from utils import NanError
 import metrics
 import stein
 
@@ -96,45 +97,59 @@ class SVGD():
         opt_ksd_state = opt_ksd.init(kernel_params)
 
         log = dict()
-        for i in tqdm(range(n_iter)):
-            # update particles:
-            kernel_params = opt_ksd.get_params(opt_ksd_state)
-            particle_batch = []
-            for j in range(svgd_steps):
-                step = current_step(i, j, svgd_steps)
-
-                particles = self.opt.get_params(opt_svgd_state)
-                gp = -self.phistar(particles, kernel_params)
-                opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
-
-                particle_batch.append(particles)
-                utils.warn_if_nan(gp)
-
-                metrics.append_to_log(log, self.target.compute_metrics(particles))
-                metrics.append_to_log(log, {"mean": np.mean(particles, axis=0),
-                                            "var": np.var(particles, axis=0)})
-
-            # update kernel_params:
-            particle_batch = np.asarray(particle_batch, dtype=np.float32)
-#            log = metrics.append_to_log(log, {"particles": particle_batch})
-            inner_updates = []
-            ksds = []
-            for j in range(ksd_steps):
-                step = current_step(i, j, ksd_steps)
+        def train():
+            nonlocal opt_svgd_state
+            nonlocal opt_ksd_state
+            nonlocal log
+            for i in tqdm(range(n_iter)):
+                # update particles:
                 kernel_params = opt_ksd.get_params(opt_ksd_state)
-                ksd, gk = value_and_grad(self.negative_ksd_squared_batched)(kernel_params, particle_batch)
-                ksd = -ksd
-                opt_ksd_state = opt_ksd.update(step, gk, opt_ksd_state)
+                particle_batch = []
+                for j in range(svgd_steps):
+                    step = current_step(i, j, svgd_steps)
 
-                ksds.append(ksd)
-                utils.warn_if_nan(ksd)
-                utils.warn_if_nan(gk)
-            update_log = {
-                "ksd": ksds
-            }
-            log = metrics.append_to_log(log, update_log)
+                    particles = self.opt.get_params(opt_svgd_state)
+                    gp = -self.phistar(particles, kernel_params)
+                    opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
 
-        log["particles"] = particles
+                    particle_batch.append(particles)
+                    metrics.append_to_log(log, self.target.compute_metrics(particles))
+                    metrics.append_to_log(log, {"mean": np.mean(particles, axis=0),
+                                                "var": np.var(particles, axis=0)})
+                    if utils.is_nan(gp):
+                        raise NanError("Particle update is NaN. Interrupting training.")
+
+                # update kernel_params:
+                particle_batch = np.asarray(particle_batch, dtype=np.float32)
+                inner_updates = []
+                ksds = []
+                for j in range(ksd_steps):
+                    step = current_step(i, j, ksd_steps)
+                    kernel_params = opt_ksd.get_params(opt_ksd_state)
+                    ksd, gk = value_and_grad(self.negative_ksd_squared_batched)(kernel_params, particle_batch)
+                    ksd = -ksd
+                    opt_ksd_state = opt_ksd.update(step, gk, opt_ksd_state)
+
+                    ksds.append(ksd)
+                    utils.warn_if_nan(ksd)
+                    if utils.is_nan(gk):
+                        raise NanError("KSD update gradient is NaN. Interrupting training.")
+
+                update_log = {
+                    "ksd": ksds
+                }
+                metrics.append_to_log(log, update_log)
+
+            log["particles"] = particles
+            return None
+
+        try:
+            train()
+            log["Interrupted because of NaN"] = False
+        except NanError as e:
+            print(e)
+            log["Interrupted because of NaN"] = True
+
         log = utils.dict_asarray(log)
         return kernel_params, log
 

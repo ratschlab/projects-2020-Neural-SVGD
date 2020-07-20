@@ -1,6 +1,7 @@
 import os
 import time
-import json
+import datetime
+import json_tricks as json
 import copy
 
 from svgd import SVGD
@@ -9,6 +10,8 @@ import config
 import metrics
 import utils
 import itertools
+
+import colored_traceback.auto
 
 """
 Perform experiment with hyperparameters from config.py
@@ -36,13 +39,16 @@ def run(cfg: dict, svgd: SVGD, logdir: str):
     starttime = time.strftime("%H:%M:%S", time.localtime(t))
     experiment_name = startdate + "__" + starttime
     logdir = logdir + experiment_name + "/"  # logdir = f"./runs/{experiment_name}/"
-    os.makedirs(logdir, exist_ok=True)
-    files = [logdir + f for f in ["run", "config", "data", "metrics"]]
-    if os.path.exists(files[0]):
-        files = [f + "-new" for f in files]
+    try:
+        os.makedirs(logdir)
+    except FileExistsError:
+        logdir = logdir[:-1] + datetime.datetime.now().strftime("%f/")
+        os.makedirs(logdir)
+
+    files = [logdir + f for f in ["run", "config.json", "data.json", "metrics.json"]]
     logfile, configfile, datafile, metricfile = files
     with open(configfile, "w") as f:
-        f.write(json.dumps(cfg))
+        json.dump(cfg, f, ensure_ascii=False, indent=4, sort_keys=True)
 
     print(f"Learning kernel parameters. Writing to {logfile}.")
     kernel_params, log = svgd.train_kernel(**config.get_train_args(cfg))
@@ -52,55 +58,97 @@ def run(cfg: dict, svgd: SVGD, logdir: str):
     endtime = time.strftime("%H:%M:%S", time.localtime(et))
     duration= time.strftime("%H:%M:%S", time.gmtime(et - t))
 
-    metric: str = str(metrics.compute_final_metric(log["particles"], svgd))
+    if not log["Interrupted because of NaN"]:
+        metrics_dict = metrics.compute_final_metrics(log["particles"], svgd)
+    else:
+        metrics_dict = dict()
     # write to logs
     logstring = f"Training started: {startdate} at {starttime}\nTraining ended: {enddate} at {endtime}\nDuration: {duration}\n-----------------\n\nExperiment config and data written to:\n{configfile}\n{datafile}"
     with open(logfile, "w") as f:
         f.write(logstring)
 
     with open(datafile, "w") as f:
-        f.write(json.dumps({k: onp.asarray(v).tolist() for k, v in log.items()}))
+        json.dump(utils.tolist(log),          f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
 
     with open(metricfile, "w") as f:
-        f.write(metric)
+        json.dump(utils.tolist(metrics_dict), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
 
 
-def grid_search(base_config, hparams, logdir):
+def update_config(base_config, run_config, svgd_conf=None, kernel_conf=None, train_conf=None):
+    """Modify run_config based on input configurations.
+    base_config is never modified.
+
+    Arguments:
+    svgd_conf, kernel_conf, train_conf are (not nested) dictionaries."""
+    if svgd_conf is not None:
+        run_config["svgd"].update(svgd_conf)
+    if kernel_conf is not None:
+        run_config["kernel"].update(kernel_conf)
+    if train_conf is not None:
+        run_config["train_kernel"].update(train_conf)
+        if "svgd_steps" in train_conf:
+            if "n_iter" not in train_conf:
+                run_config["train_kernel"]["n_iter"] = base_config["train_kernel"]["n_iter"] // train_conf["svgd_steps"]
+            if "ksd_steps" not in train_conf:
+                run_config["train_kernel"]["ksd_steps"] = train_conf["svgd_steps"]
+
+def grid_search(base_config, hparams, logdir, num_experiments):
     """traverse cartesian product of lists in hparams"""
+    print("Number of experiments:", num_experiments)
+    print()
     os.makedirs(logdir, exist_ok=True)
     starttime = time.strftime("%Y-%m-%d__%H:%M:%S__sweep-config")
-    with open(logdir + starttime, "w") as f:
-        f.write(json.dumps([base_config, hparams]))
+    with open(logdir + starttime + ".json", "w") as f:
+        json.dump([base_config, hparams], f, ensure_ascii=False, indent=4, sort_keys=True)
 
     run_config = copy.deepcopy(base_config)
     svgd_configs = utils.dict_cartesian_product(**hparams["svgd"])
     kernel_configs = utils.dict_cartesian_product(**hparams["kernel"])
 
+    counter=1
     for svgd_config, kernel_config in itertools.product(svgd_configs, kernel_configs):
         run_config["svgd"].update(svgd_config)
         run_config["kernel"].update(kernel_config)
         svgd = SVGD(**config.get_svgd_args(run_config)) # keep SVGD state, so we don't recompile the kernel every time
         for train_config in utils.dict_cartesian_product(**hparams["train_kernel"]):
-            run_config["train_kernel"].update(train_config)
+            print()
+            print(f"Run {counter}/{num_experiments}:")
+            update_config(base_config, run_config, train_conf=train_config)
             run(run_config, svgd, logdir)
+            counter += 1
 
 
 if __name__ == "__main__":
-    logdir = "./runs/30-steps-larger-net/"
-    layers = [
-        [32, 64, 64, 32],
-    ]
-    optimizer_svgd_args = [[1.0]]
-    svgd_steps = [1]
-    ksd_steps = [1]
-    n_iter = [30]
-    architecture = ["Vanilla", "MLP"]
-    key = list(range(2))
+    logdir = "./runs/ten-dim/"
+    num_lr = 5
+    d = 10
+    k = None
 
-    hparams = config.flat_to_nested(dict(key=key,
+    # hparams
+    layers = [
+        [32, 32],
+        [32, 32, 32],
+    ]
+    optimizer_ksd_args = onp.logspace(-2.5, -1, num=num_lr).reshape((num_lr,1))
+    svgd_steps = [1, 5]
+    architecture = ["Vanilla", "MLP"]
+
+    onp.random.seed(0)
+    target_args=[utils.generate_parameters_for_gaussian(d, k)]
+    if k is None:
+        target = ["Gaussian"]
+    else:
+        target=["Gaussian Mixture"]
+    n_particles = [500]
+
+    hparams = config.flat_to_nested(dict(layers=layers,
                                          architecture=architecture,
-                                         optimizer_svgd_args=optimizer_svgd_args,
-                                         ksd_steps=ksd_steps,
+                                         optimizer_ksd_args=optimizer_ksd_args,
                                          svgd_steps=svgd_steps,
-                                         n_iter=n_iter))
-    grid_search(config.config, hparams, logdir)
+                                         target=target,
+                                         target_args=target_args,
+                                         n_particles=n_particles,
+                                         ))
+
+    num_experiments = onp.prod([len(v) for v in utils.flatten_dict(hparams).values()])
+    grid_search(config.config, hparams, logdir, num_experiments)

@@ -9,8 +9,8 @@ import utils
 config = dict()
 config["svgd"] = {
     "target": "Gaussian",  # one of ["Gaussian", "Gaussian Mixture"]
-    "target_args": [3, 10],  # either [mean, cov] or [means, covs, weights]
-    "n_particles": 100,
+    "target_args": [[0, 0, 5, -5, ], [2, 5, 1, 6]],  # either [mean, cov] or [means, covs, weights]
+    "n_particles": 200,
     "optimizer_svgd": "Adagrad",  # One of ["Adam", "Adagrad", "SGD"]
     "optimizer_svgd_args": [1.0]
 }
@@ -22,11 +22,11 @@ config["kernel"] = {
 
 config["train_kernel"] = {
     "key": 0,
-    "n_iter": 100,
+    "n_iter": 30,
     "ksd_steps": 1,
     "svgd_steps": 1,
     "optimizer_ksd": "Adam",  # One of ["Adam", "Adagrad", "SGD"]
-    "optimizer_ksd_args": [1e-2]
+    "optimizer_ksd_args": [0.003]
 }
 
 ####### utilities

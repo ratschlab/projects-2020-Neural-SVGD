@@ -11,6 +11,8 @@ from collections.abc import Iterable
 from collections import Mapping
 import warnings
 
+import numpy as onp
+
 def isiterable(obj):
     return isinstance(obj, Iterable)
 
@@ -105,25 +107,26 @@ def verbose_jit(fun, *jargs, **jkwargs):
 
 #from haiku._src.data_structures import frozendict
 import collections
-def _warn_if_nan(thing):
-    """not supposed to end up inside jit ofc"""
+
+def is_nan(thing):
     if type(thing) is jax.interpreters.xla.DeviceArray:
-        if np.any(np.isnan(thing)):
-            warnings.warn(f"Detected NaNs.", RuntimeWarning)
-#    elif type(thing) is dict or frozendict:
+        return np.any(np.isnan(thing))
+    elif type(thing) is onp.ndarray:
+        return onp.any(onp.isnan(thing))
     elif isinstance(thing, collections.Mapping):
         for k, v in thing.items():
-            _warn_if_nan(v)
+            is_nan(v)
     elif isiterable(thing):
         for el in thing:
-            _warn_if_nan(el)
+            is_nan(el)
     else:
-        warnings.warn("Didn't recognize type. Not checking for NaNs.", RuntimeWarning)
-    return None
+        warnings.warn(f"Didn't recognize type {type(thing)}. Not checking for NaNs.", RuntimeWarning)
+        return None
 
 def warn_if_nan(*args):
     for arg in args:
-        _warn_if_nan(arg)
+        if is_nan(arg):
+            warnings.warn(f"Detected NaNs.", RuntimeWarning)
     return None
 
 # wrapper that checks output for NaNs and returns a warning if isnan
@@ -329,3 +332,25 @@ def nested_dict_contains_key(ndict: collections.Mapping, key):
                 if nested_dict_contains_key(v, key):
                     return True
         return False
+
+def tolist(dictionary):
+    return {k: onp.asarray(v).tolist() for k, v in dictionary.items()}
+
+def generate_pd_matrix(dim):
+    A = onp.random.rand(dim, dim)
+    return onp.matmul(A, A.T)
+
+def generate_parameters_for_gaussian(dim, k=None):
+    if k is not None:
+        means = onp.random.rand(k, dim) * 10 # random means in [0, 10]
+        covs = [generate_pd_matrix(dim) for _ in range(k)]
+        weights = onp.random.randint(1, 5, k)
+        weights = weights / weights.sum()
+        return means, covs, weights
+    else:
+        mean = onp.random.rand(dim) * 10 # random means in [0, 10]
+        cov = generate_pd_matrix(dim)
+        return mean, cov
+
+class NanError(Exception):
+    pass

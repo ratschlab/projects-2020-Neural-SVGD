@@ -163,7 +163,7 @@ def plot_3d(x, y, z):
     if ax is None: print("huh?")
     return ax
 
-def plot_pdf(pdf, lims, type="3d"):
+def plot_pdf(pdf, lims, type="3d", num_gridpoints=150):
     """
     Arguments
     * pdf: callable, computes a distribution on R2.
@@ -171,9 +171,9 @@ def plot_pdf(pdf, lims, type="3d"):
     * type: string, one of "3d", "contour".
     """
     if type=="3d":
-        return plot_3d(*make_meshgrid(pdf, lims, num=150))
+        return plot_3d(*make_meshgrid(pdf, lims, num=num_gridpoints))
     elif type=="contour":
-        return plt.contour(*make_meshgrid(pdf, lims, num=150))
+        return plt.contour(*make_meshgrid(pdf, lims, num=num_gridpoints))
     else:
         raise ValueError("type must be one of '3d' or 'contour'.")
 

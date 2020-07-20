@@ -1,6 +1,8 @@
 import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jacrev
 from jax.scipy import stats, special
+import ot
+from scipy.spatial.distance import cdist
 
 import numpy as onp
 
@@ -48,7 +50,7 @@ class Distribution():
             square_errors = [(sample - true)**2 for sample, true in zip(sample_expectations, self.expectations)]
             square_errors = np.array(square_errors)  # shape (4, d)
 
-#            ksds = [ksd_squared(x, self.logpdf, np.log(np.array(h))) for h in self.ksd_grid]
+#            ksds = [stein.ksd_squared(x, self.logpdf, np.log(np.array(h))) for h in self.ksd_grid]
 #            ksds = np.array(ksds)
 
             metrics_dict = {
@@ -102,25 +104,30 @@ class Distribution():
 class Gaussian(Distribution):
     def __init__(self, mean, cov):
         """
-        self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)"""
-        mean = np.array(mean)
-        cov = np.array(cov)
-        if cov.ndim == 0:
-            if mean.ndim == 1: # d fixed by shape of mean
-                cov = len(mean) * (cov,)
-                cov = np.array(cov)
-            elif mean.ndim == 0:
-                cov = cov[np.newaxis, np.newaxis]
-            else:
-                raise ValueError(f"Recieved inappropriate shape {mean.shape} for mean. (Wrong nr of dimensions).")
-        if cov.ndim == 1:
-            cov = np.diag(cov)
+        self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)
+
+        Possible input shapes for mean and cov:
+        1) mean.shape defines dimension of domain: if mean has shape (d,), then particles have shape (d,)
+        2) if covariance is a scalar, it is reshaped to diag(3 * (cov,))
+        3) if covariance is an array of shape (k,), it is reshaped to diag(cov)"""
+        mean = np.asarray(mean)
+        cov = np.asarray(cov)
         if mean.ndim == 0:
-            mean = np.ones(len(cov)) * mean
+            mean = np.reshape(mean, newshape=(1,))
+        elif mean.ndim > 1:
+            raise ValueError(f"Recieved inappropriate shape {mean.shape} for mean. (Wrong nr of dimensions).")
+        self.d = mean.shape[0]
+
+        if cov.ndim == 0:
+            cov = self.d * (cov,)
+            cov = np.asarray(cov)
+            cov = np.diag(cov)
+        elif cov.ndim == 1:
+            assert len(cov) == len(mean)
+            cov = np.diag(cov)
         assert mean.ndim == 1 and cov.ndim == 2
         assert mean.shape[0] == cov.shape[0] == cov.shape[1]
 
-        self.d = mean.shape[0]
         self.mean = mean
         self.cov = cov
         if not utils.is_pd(cov):
@@ -171,14 +178,16 @@ class GaussianMixture(Distribution):
 
         Initialization:
         self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)"""
-        means = np.array(means)
-        covs = np.array(covs)
-        weights = np.array(weights)
+        means = np.asarray(means)
+        covs = np.asarray(covs)
+        weights = np.asarray(weights)
         weights = weights / np.sum(weights) # normalize
+
         assert len(means) == len(covs)
 
         if means.ndim == 1:
             means = means[:, np.newaxis]
+#            means = np.reshape(means, newshape=(None, 1)) # same things
         d = means.shape[1]
         if covs.ndim == 1 or covs.ndim == 2:
             covs = [np.identity(d) * var for var in covs]
@@ -232,7 +241,6 @@ class GaussianMixture(Distribution):
 
         shape = (n_samples, self.d)
         return out.reshape(shape)
-    
 
     def _logpdf(self, x):
         """unnormalized"""
@@ -249,14 +257,10 @@ class GaussianMixture(Distribution):
         return np.squeeze(out)
 
     def logpdf(self, x):
-        x = np.array(x)
-        if x.shape != (self.d,) and not (self.d == 1 and x.ndim == 0):
-            raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
-        pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
-        return np.log(np.vdot(pdfs, self.weights))
+        return np.log(self.pdf(x))
 
     def pdf(self, x):
-        x = np.array(x)
+        x = np.asarray(x)
         if x.shape != (self.d,) and not (self.d == 1 and x.ndim == 0):
             raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
         pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
@@ -279,40 +283,41 @@ def _ksd(x, logp, bandwidth):
 
     return np.mean(vmap(ksd_i, (0, None, None, None))(x, x, logp, bandwidth)) / x.shape[0]
 
-ksd_squared = stein.ksd_squared
-def _ksd_squared(xs, logp, logh):
-    """
-    Arguments:
-    * xs: np.array of shape (n, d)
-    * logp: callable
-    * logh: np.array. Understood to be the log of rbf param h > 0 (so can be negative or 0).
-
-    Returns:
-    The square of the stein discrepancy KSD(q, p) computed using bandwidth h. Here, q is the empirical dist of xs.
-    """
-    kernel = lambda x, y: kernels.ard(x, y, logh)
-    def phistar(z):
-        """z has shape (d,).
-        Returns array of shape (d,)."""
-        k = lambda x: kernel(x, z)
-        return stein.stein(k, xs, logp)
-    return stein.stein(phistar, xs, logp, transposed=True)
-
 ########################
 ### metrics to log while running SVGD
 def append_to_log(dct, update_dict):
     """appends update_dict to dict, entry-wise.
-    If an entry is itself a dictionary, then recurse.
     """
     for key, newvalue in update_dict.items():
         dct.setdefault(key, []).append(newvalue)
     return dct
 
-def compute_final_metric(particles, svgd):
+###############
+# Metrics
+from scipy.spatial.distance import cdist
+import ot
+def compute_final_metrics(particles, svgd):
     """
     Compute the ARD KSD between particles and target.
     particles: np.array of shape (n, d)
     svgd: instance of svgd.SVGD
     """
-    kernel = kernels.ard(logh=0)
-    return stein.ksd_squared(particles, svgd.target.logpdf, kernel)
+    n = len(particles) * 2
+    target_sample = svgd.target.sample(n)
+    emd = wasserstein_distance(particles, target_sample)
+    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
+    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
+    ksd = stein.ksd_squared(particles, svgd.target.logpdf, kernels.ard(0))
+
+    se_mean = np.mean((np.mean(particles, axis=0) - svgd.target.mean)**2)
+    se_var = np.mean((np.cov(particles, rowvar=False) - svgd.target.cov)**2)
+    return dict(emd=emd, sinkhorn_divergence=sinkhorn_divergence, ksd=ksd, se_mean=se_mean, se_var=se_var)
+
+def wasserstein_distance(s1, s2):
+    """
+    Arguments: samples from two distributions, shape (n, d) (not (n,)).
+    Returns: W2 distance inf E[d(X, Y)^2]^0.5 over all joint distributions of X and Y such that the marginal distributions are equal those of the input samples. Here, d is the euclidean distance."""
+    M = cdist(s1, s2, "sqeuclidean")
+    a = np.ones(len(s1)) / len(s1)
+    b = np.ones(len(s2)) / len(s2)
+    return np.sqrt(ot.emd2(a, b, M))
