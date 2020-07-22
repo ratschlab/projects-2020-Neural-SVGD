@@ -4,7 +4,6 @@ import jax
 import haiku as hk
 
 import warnings
-
 import utils
 
 """A collection of positive definite kernel functions written using Jax.
@@ -27,7 +26,9 @@ def vanilla_ard(x, y):
     ard = ARD()
     return(ard(x, y))
 
-def make_mlp_ard(sizes):
+def make_mlp_ard(sizes, final):
+    """sizes is a list of integers representing layer dimension
+    final is the size of the final layer (with no activation function after it)."""
     def mlp_ard(x, y):
         layers = [hk.Flatten()] + [layer for size in sizes
                                    for layer in [hk.Linear(size), jax.nn.relu]

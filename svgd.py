@@ -96,7 +96,7 @@ class SVGD():
         kernel_params = self.kernel.init(key1, x_dummy, x_dummy)
         opt_ksd_state = opt_ksd.init(kernel_params)
 
-        log = dict()
+        log = dict(ksd=[], mean=[], var=[], particles=None)
         def train():
             nonlocal opt_svgd_state
             nonlocal opt_ksd_state
@@ -135,10 +135,7 @@ class SVGD():
                     if utils.is_nan(gk):
                         raise NanError("KSD update gradient is NaN. Interrupting training.")
 
-                update_log = {
-                    "ksd": ksds
-                }
-                metrics.append_to_log(log, update_log)
+                log["ksd"].extend(ksds)
 
             log["particles"] = particles
             return None

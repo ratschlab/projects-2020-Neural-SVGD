@@ -4,6 +4,10 @@ import datetime
 import json_tricks as json
 import copy
 
+enable_float64 = True
+from jax.config import config
+config.update("jax_enable_x64", enable_float64)
+
 from svgd import SVGD
 import numpy as onp
 import config
@@ -19,12 +23,12 @@ Log metrics, config, and other stuff according to the following structure:
 
 runs/{date-time}/run
 runs/{date-time}/config
-runs/{date-time}/data
+runs/{date-time}/rundata
 
 containing, respectively,
 * text logs with references to other files
 * json dumps of hyperparameter config
-* json dumps of data collected during run (eg loss, metrics)
+* json dumps of rundata collected during run (eg loss, metrics)
 """
 
 
@@ -45,7 +49,7 @@ def run(cfg: dict, svgd: SVGD, logdir: str):
         logdir = logdir[:-1] + datetime.datetime.now().strftime("%f/")
         os.makedirs(logdir)
 
-    files = [logdir + f for f in ["run", "config.json", "data.json", "metrics.json"]]
+    files = [logdir + f for f in ["run", "config.json", "rundata.json", "metrics.json"]]
     logfile, configfile, datafile, metricfile = files
     with open(configfile, "w") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=4, sort_keys=True)
@@ -63,7 +67,7 @@ def run(cfg: dict, svgd: SVGD, logdir: str):
     else:
         metrics_dict = dict()
     # write to logs
-    logstring = f"Training started: {startdate} at {starttime}\nTraining ended: {enddate} at {endtime}\nDuration: {duration}\n-----------------\n\nExperiment config and data written to:\n{configfile}\n{datafile}"
+    logstring = f"Training started: {startdate} at {starttime}\nTraining ended: {enddate} at {endtime}\nDuration: {duration}\n-----------------\n\nExperiment config and rundata written to:\n{configfile}\n{datafile}"
     with open(logfile, "w") as f:
         f.write(logstring)
 
@@ -119,9 +123,9 @@ def grid_search(base_config, hparams, logdir, num_experiments):
 
 
 if __name__ == "__main__":
-    logdir = "./runs/ten-dim/"
+    logdir = "./runs/test-two-dim/"
     num_lr = 5
-    d = 10
+    d = 2
     k = None
 
     # hparams
@@ -151,4 +155,9 @@ if __name__ == "__main__":
                                          ))
 
     num_experiments = onp.prod([len(v) for v in utils.flatten_dict(hparams).values()])
+
+    print()
+    print("Starting experiment:")
+    print(f"Target dimension: {d}\nFloat64 enabled: {enable_float64}")
+    print()
     grid_search(config.config, hparams, logdir, num_experiments)
