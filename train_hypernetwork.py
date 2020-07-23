@@ -103,7 +103,7 @@ class SVGD():
                 utils.warn_if_nan(gp)
 
             # update network params:
-            particle_batch = np.asarray(particle_batch, dtype=np.float32)
+            particle_batch = np.asarray(particle_batch, dtype=np.float64)
             log = metrics.append_to_log(log, {"particles": particle_batch})
             inner_updates = []
             ksds = []

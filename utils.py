@@ -31,7 +31,7 @@ def smooth_and_normalize(vec, normalize=True):
     If vec_i = 0, then out_i = epsilon. If vec_i !=0, then out_i = vec_i - c.
     c is chosen such that sum(vec) == 1.
     """
-    vec = np.asarray(vec, dtype=np.float32)
+    vec = np.asarray(vec, dtype=np.float64)
 
     if normalize:
         vec = vec / vec.sum()
@@ -79,7 +79,7 @@ def get_histogram_likelihoods(samples):
     Returns:
     np.array of same length as samples, consisting of a histogram-based approximation of the pdf q(x_i) at the samples x_i
     """
-    samples = np.asarray(samples, dtype=np.float32)
+    samples = np.asarray(samples, dtype=np.float64)
     samples = np.squeeze(samples)
     if samples.ndim != 1:
         raise ValueError(f"The shape of samples has to be either (n,) or (n,1). Instead received shape {samples.shape}.")
@@ -108,35 +108,26 @@ def verbose_jit(fun, *jargs, **jkwargs):
 #from haiku._src.data_structures import frozendict
 import collections
 
-def is_nan(thing):
+def isfinite(thing):
     if type(thing) is jax.interpreters.xla.DeviceArray:
-        return np.any(np.isnan(thing))
+        return np.all(np.isfinite(thing))
     elif type(thing) is onp.ndarray:
-        return onp.any(onp.isnan(thing))
+        return onp.all(onp.isfinite(thing))
     elif isinstance(thing, collections.Mapping):
         for k, v in thing.items():
-            is_nan(v)
+            isfinite(v)
     elif isiterable(thing):
         for el in thing:
-            is_nan(el)
+            isfinite(el)
     else:
         warnings.warn(f"Didn't recognize type {type(thing)}. Not checking for NaNs.", RuntimeWarning)
         return None
 
-def warn_if_nan(*args):
+def warn_if_nonfinite(*args):
     for arg in args:
-        if is_nan(arg):
-            warnings.warn(f"Detected NaNs.", RuntimeWarning)
+        if not isfinite(arg):
+            warnings.warn(f"Detected NaNs or infs.", RuntimeWarning)
     return None
-
-# wrapper that checks output for NaNs and returns a warning if isnan
-def check_for_nans(fun):
-    @wraps(fun)
-    def checked_fun(*args, **kwargs):
-        out = fun(*args, **kwargs)
-        warn_if_nan(out)
-        return out
-    return checked_fun
 
 def is_pd(x):
     """check if matrix is positive defininite"""
@@ -337,7 +328,7 @@ def tolist(dictionary):
     return {k: onp.asarray(v).tolist() for k, v in dictionary.items()}
 
 def generate_pd_matrix(dim):
-    A = onp.random.rand(dim, dim)
+    A = onp.random.rand(dim, dim) * 2
     return onp.matmul(A, A.T)
 
 def generate_parameters_for_gaussian(dim, k=None):

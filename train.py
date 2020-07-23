@@ -46,7 +46,7 @@ def run(cfg: dict, svgd: SVGD, logdir: str):
     try:
         os.makedirs(logdir)
     except FileExistsError:
-        logdir = logdir[:-1] + datetime.datetime.now().strftime("%f/")
+        logdir = logdir[:-1] + datetime.datetime.now().strftime(".%f/")
         os.makedirs(logdir)
 
     files = [logdir + f for f in ["run", "config.json", "rundata.json", "metrics.json"]]
@@ -88,6 +88,8 @@ def update_config(base_config, run_config, svgd_conf=None, kernel_conf=None, tra
         run_config["svgd"].update(svgd_conf)
     if kernel_conf is not None:
         run_config["kernel"].update(kernel_conf)
+        if kernel_conf["architecture"] == "Vanilla":
+            run_config["kernel"]["layers"] = []
     if train_conf is not None:
         run_config["train_kernel"].update(train_conf)
         if "svgd_steps" in train_conf:
@@ -96,10 +98,8 @@ def update_config(base_config, run_config, svgd_conf=None, kernel_conf=None, tra
             if "ksd_steps" not in train_conf:
                 run_config["train_kernel"]["ksd_steps"] = train_conf["svgd_steps"]
 
-def grid_search(base_config, hparams, logdir, num_experiments):
+def grid_search(base_config, hparams, logdir, num_experiments="?"):
     """traverse cartesian product of lists in hparams"""
-    print("Number of experiments:", num_experiments)
-    print()
     os.makedirs(logdir, exist_ok=True)
     starttime = time.strftime("%Y-%m-%d__%H:%M:%S__sweep-config")
     with open(logdir + starttime + ".json", "w") as f:
@@ -111,8 +111,7 @@ def grid_search(base_config, hparams, logdir, num_experiments):
 
     counter=1
     for svgd_config, kernel_config in itertools.product(svgd_configs, kernel_configs):
-        run_config["svgd"].update(svgd_config)
-        run_config["kernel"].update(kernel_config)
+        update_config(base_config, run_config, svgd_conf=svgd_config, kernel_conf=kernel_config)
         svgd = SVGD(**config.get_svgd_args(run_config)) # keep SVGD state, so we don't recompile the kernel every time
         for train_config in utils.dict_cartesian_product(**hparams["train_kernel"]):
             print()
@@ -123,32 +122,34 @@ def grid_search(base_config, hparams, logdir, num_experiments):
 
 
 if __name__ == "__main__":
-    logdir = "./runs/test-two-dim/"
+#    logdir = "./runs/dimension-sweep/"
+    logdir = "./runs/two-dim/"
     num_lr = 5
     d = 2
     k = None
 
     # hparams
     layers = [
-        [32, 32],
-        [32, 32, 32],
+        [32, 32, 32, 2],
     ]
-    optimizer_ksd_args = onp.logspace(-2.5, -1, num=num_lr).reshape((num_lr,1))
-    svgd_steps = [1, 5]
+    optimizer_ksd_args = onp.logspace(-3, 0, num=num_lr).reshape((num_lr,1))
+    svgd_steps = [4]
+    ksd_steps = [10, 50, 100]
     architecture = ["Vanilla", "MLP"]
 
-    onp.random.seed(0)
-    target_args=[utils.generate_parameters_for_gaussian(d, k)]
     if k is None:
         target = ["Gaussian"]
     else:
         target=["Gaussian Mixture"]
-    n_particles = [500]
+    onp.random.seed(0)
+    target_args=[utils.generate_parameters_for_gaussian(d, k)]
+    n_particles = [200]
 
     hparams = config.flat_to_nested(dict(layers=layers,
                                          architecture=architecture,
                                          optimizer_ksd_args=optimizer_ksd_args,
                                          svgd_steps=svgd_steps,
+                                         ksd_steps=ksd_steps,
                                          target=target,
                                          target_args=target_args,
                                          n_particles=n_particles,
@@ -158,6 +159,11 @@ if __name__ == "__main__":
 
     print()
     print("Starting experiment:")
-    print(f"Target dimension: {d}\nFloat64 enabled: {enable_float64}")
+    print(f"Target dimension: {d}")
+    if target == ["Gaussian"]:
+        print(f"Target shape: Gaussian with parameters:\n* mean {target_args[0][0]}\n* variance {target_args[0][1]}")
+    print(f"Float64 enabled: {enable_float64}")
+    print(f"Number of modes in mixture: {k if k is not None else 1}")
+    print(f"Number of experiments: {num_experiments}")
     print()
     grid_search(config.config, hparams, logdir, num_experiments)

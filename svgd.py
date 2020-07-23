@@ -60,7 +60,7 @@ class SVGD():
 
 #    @partial(jit, static_argnums=0)
     def negative_ksd_squared_batched(self, kernel_params, particles):
-        """Mean - KSD^2 for a batch of particles."""
+        """The mean -KSD^2 for a (k, n, d)-sized batch of particles."""
         if particles.ndim < 3:
             particles = np.expand_dims(particles, 0)  # batch dimension
         return - np.mean(vmap(self.ksd_squared, (None, 0))(kernel_params, particles))
@@ -96,15 +96,35 @@ class SVGD():
         kernel_params = self.kernel.init(key1, x_dummy, x_dummy)
         opt_ksd_state = opt_ksd.init(kernel_params)
 
-        log = dict(ksd=[], mean=[], var=[], particles=None)
+        log = dict(ksd_after_kernel_update=[], mean=[], var=[], ksd_after_svgd_update=[])
         def train():
             nonlocal opt_svgd_state
             nonlocal opt_ksd_state
             nonlocal log
+            particles = self.opt.get_params(opt_svgd_state)
+            particle_batch = [particles]
             for i in tqdm(range(n_iter)):
+                # update kernel_params:
+                particle_batch = np.asarray(particle_batch, dtype=np.float64) # TODO sometimes i wanna use float64
+                ksds = []
+                for j in range(ksd_steps):
+                    step = current_step(i, j, ksd_steps)
+                    kernel_params = opt_ksd.get_params(opt_ksd_state)
+                    ksd_batched, gk = value_and_grad(self.negative_ksd_squared_batched)(kernel_params, particle_batch)
+                    opt_ksd_state = opt_ksd.update(step, gk, opt_ksd_state)
+
+                    ksd_batched = -ksd_batched
+                    ksds.append(ksd_batched)
+#                    utils.warn_if_nonfinite(ksd_batched)
+#                    if not utils.isfinite(gk):
+#                        raise NanError("KSD update gradient is NaN or inf. Interrupting training.")
+
+                log["ksd_after_kernel_update"].extend(ksds)
+
                 # update particles:
                 kernel_params = opt_ksd.get_params(opt_ksd_state)
                 particle_batch = []
+                ksd_after_kernel_update = []
                 for j in range(svgd_steps):
                     step = current_step(i, j, svgd_steps)
 
@@ -115,27 +135,11 @@ class SVGD():
                     particle_batch.append(particles)
                     metrics.append_to_log(log, self.target.compute_metrics(particles))
                     metrics.append_to_log(log, {"mean": np.mean(particles, axis=0),
-                                                "var": np.var(particles, axis=0)})
-                    if utils.is_nan(gp):
-                        raise NanError("Particle update is NaN. Interrupting training.")
+                                                "var": np.var(particles, axis=0),
+                                                "ksd_after_svgd_update": self.ksd_squared(kernel_params, particles)})
+#                    if not utils.isfinite(gp): # TODO
+#                        raise NanError("Particle update is NaN or inf. Interrupting training.")
 
-                # update kernel_params:
-                particle_batch = np.asarray(particle_batch, dtype=np.float32)
-                inner_updates = []
-                ksds = []
-                for j in range(ksd_steps):
-                    step = current_step(i, j, ksd_steps)
-                    kernel_params = opt_ksd.get_params(opt_ksd_state)
-                    ksd, gk = value_and_grad(self.negative_ksd_squared_batched)(kernel_params, particle_batch)
-                    ksd = -ksd
-                    opt_ksd_state = opt_ksd.update(step, gk, opt_ksd_state)
-
-                    ksds.append(ksd)
-                    utils.warn_if_nan(ksd)
-                    if utils.is_nan(gk):
-                        raise NanError("KSD update gradient is NaN. Interrupting training.")
-
-                log["ksd"].extend(ksds)
 
             log["particles"] = particles
             return None

@@ -26,14 +26,18 @@ def vanilla_ard(x, y):
     ard = ARD()
     return(ard(x, y))
 
-def make_mlp_ard(sizes, final):
-    """sizes is a list of integers representing layer dimension
-    final is the size of the final layer (with no activation function after it)."""
+def make_mlp_ard(sizes):
+    """
+    * sizes is a list of integers representing layer dimension
+
+    Network uses He initalization; see https://github.com/deepmind/dm-haiku/issues/6
+    and https://sonnet.readthedocs.io/en/latest/api.html#variancescaling.
+    """
     def mlp_ard(x, y):
-        layers = [hk.Flatten()] + [layer for size in sizes
-                                   for layer in [hk.Linear(size), jax.nn.relu]
-                                  ] + [hk.Linear(2)]
-        mlp = hk.Sequential(layers)
+        mlp = hk.nets.MLP(output_sizes=sizes,
+                          w_init=hk.initializers.VarianceScaling(scale=2.0),
+                          activation=jax.nn.relu,
+                          activate_final=False)
         ard = ARD()
         return ard(mlp(x), mlp(y))
     return mlp_ard

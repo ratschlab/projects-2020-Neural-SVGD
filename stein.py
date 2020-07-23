@@ -14,7 +14,7 @@ def stein_operator(fun, x, logp, transposed=False):
     \[ \mathcal A_p [\text{fun}](x) .\]
     This expression takes the form of a scalar if transposed else a dxd matrix
     """
-    x = np.array(x, dtype=np.float32)
+    x = np.array(x, dtype=np.float64)
     if x.ndim != 1:
         raise ValueError(f"x needs to be an np.array of shape (d,). Instead, x has shape {x.shape}")
     fx = fun(x)
@@ -88,8 +88,8 @@ def stein(fun, xs, logp, transposed=False):
     * xs: np.array of shape (n, d). Used to compute an empirical distribution \hat q.
     * p: callable, takes argument of shape (d,). Computes log(p(x)). Can be unnormalized (just using gradient.)
 
-    Returns:
-    \[1/n \sum_i \mathcal A_p [\text{fun}](x) \]
+    Returns: the expectation of the Stein operator $\mathcal A [\text{fun}]$ wrt the empirical distribution of the particles xs:
+    \[1/n \sum_i \mathcal A_p [\text{fun}](x_i) \]
     np.array of shape (d,) if transposed else shape (d, d)
     """
     return np.mean(vmap(stein_operator, (None, 0, None, None))(fun, xs, logp, transposed), axis=0)

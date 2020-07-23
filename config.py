@@ -17,12 +17,12 @@ config["svgd"] = {
 
 config["kernel"] = {
     "architecture": "MLP",  # One of ["MLP", "Vanilla"]
-    "layers": [32, 32]  # Layer sizes
+    "layers": [32, 32, 2]  # Layer sizes
 }
 
 config["train_kernel"] = {
     "key": 0,
-    "n_iter": 30,
+    "n_iter": 200,
     "ksd_steps": 1,
     "svgd_steps": 1,
     "optimizer_ksd": "Adam",  # One of ["Adam", "Adagrad", "SGD"]
