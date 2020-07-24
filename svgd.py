@@ -3,7 +3,6 @@ from jax import jit, vmap, random, value_and_grad
 
 import time
 from tqdm import tqdm
-
 from functools import partial
 import json_tricks as json
 
@@ -30,6 +29,8 @@ def init_svgd(key, particle_shape):
 class SVGD():
     def __init__(self, target, n_particles, optimizer_svgd, kernel):
         """
+        Arguments
+        ----------
         target: instance of class metrics.Distribution
 
         kernel needs to have pure methods
@@ -49,16 +50,19 @@ class SVGD():
         self.n = self.n_particles
         self.particle_shape = (self.n, self.target.d)
 
-#    @partial(jit, static_argnums=0)
-    def phistar(self, particles, kernel_params):
+    # can't jit this I think
+    def phistar(self, rkey, particles, kernel_params):
+        n = 300
+        subsample_idx = random.choice(rkey, len(particles), shape=(n,), replace=False) # set replace=True?
+        subsample = particles[subsample_idx]
         kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
-        return stein.phistar(particles, self.target.logpdf, kernel_fn)
+        return stein.phistar(particles, subsample, self.target.logpdf, kernel_fn)
 
     def ksd_squared(self, kernel_params, particles):
         kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
         return stein.ksd_squared(particles, self.target.logpdf, kernel_fn)
 
-#    @partial(jit, static_argnums=0)
+    @partial(jit, static_argnums=0)
     def negative_ksd_squared_batched(self, kernel_params, particles):
         """The mean -KSD^2 for a (k, n, d)-sized batch of particles."""
         if particles.ndim < 3:
@@ -83,7 +87,7 @@ class SVGD():
         """
         def current_step(i, j, steps):
             return i*steps + j
-        key1, _ = random.split(key)
+        key1 = random.split(key)[0]
 
         particles = init_svgd(key, self.particle_shape)
         opt_svgd_state = self.opt.init(particles)
@@ -96,17 +100,19 @@ class SVGD():
         kernel_params = self.kernel.init(key1, x_dummy, x_dummy)
         opt_ksd_state = opt_ksd.init(kernel_params)
 
-        log = dict(ksd_after_kernel_update=[], mean=[], var=[], ksd_after_svgd_update=[])
+        log = dict(bandwidth = [], ksd_after_kernel_update=[], mean=[], var=[], ksd_after_svgd_update=[])
         def train():
             nonlocal opt_svgd_state
             nonlocal opt_ksd_state
             nonlocal log
+            rkey = key1
             particles = self.opt.get_params(opt_svgd_state)
             particle_batch = [particles]
             for i in tqdm(range(n_iter)):
                 # update kernel_params:
                 particle_batch = np.asarray(particle_batch, dtype=np.float64) # TODO sometimes i wanna use float64
                 ksds = []
+                bandwidths = []
                 for j in range(ksd_steps):
                     step = current_step(i, j, ksd_steps)
                     kernel_params = opt_ksd.get_params(opt_ksd_state)
@@ -115,11 +121,14 @@ class SVGD():
 
                     ksd_batched = -ksd_batched
                     ksds.append(ksd_batched)
+                    bandwidth = np.exp(kernel_params["ard"]["logh"])**2 # h = sqrt(bandwith)
+                    bandwidths.append(bandwidth)
 #                    utils.warn_if_nonfinite(ksd_batched)
 #                    if not utils.isfinite(gk):
 #                        raise NanError("KSD update gradient is NaN or inf. Interrupting training.")
 
                 log["ksd_after_kernel_update"].extend(ksds)
+                log["bandwidth"].extend(bandwidths)
 
                 # update particles:
                 kernel_params = opt_ksd.get_params(opt_ksd_state)
@@ -129,7 +138,8 @@ class SVGD():
                     step = current_step(i, j, svgd_steps)
 
                     particles = self.opt.get_params(opt_svgd_state)
-                    gp = -self.phistar(particles, kernel_params)
+                    rkey = random.split(rkey)[0]
+                    gp = -self.phistar(rkey, particles, kernel_params)
                     opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
 
                     particle_batch.append(particles)

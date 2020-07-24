@@ -38,7 +38,7 @@ class SVGD():
         self.kernel_param_shape = () # 1d for now, TODO
 
     def _phistar(self, particles, kernel_params):
-        return stein.phistar(particles, self.target.logpdf, self.kernel(kernel_params))
+        return stein.phistar(particles, particles, self.target.logpdf, self.kernel(kernel_params))
 
 #    @partial(jit, static_argnums=0)
     def phistar(self, particles, params):

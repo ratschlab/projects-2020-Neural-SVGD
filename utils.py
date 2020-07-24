@@ -281,12 +281,15 @@ def dict_divide(da, db):
             da[k] = dict_divide(a, b)
     return da
 
-def dict_asarray(dct):
+def dict_asarray(dct: dict):
     for k, v in dct.items():
         try:
             dct[k] = np.asarray(v)
         except TypeError:
-            dct[k] = dict_asarray(dct[k])
+            try:
+                dct[k] = dict_asarray(dct[k])
+            except AttributeError:
+                pass # be nice if value is neither np-ifiable nor a dictionary.
     return dct
 
 def flatten_dict(d):

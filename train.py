@@ -4,7 +4,7 @@ import datetime
 import json_tricks as json
 import copy
 
-enable_float64 = True
+enable_float64 = False
 from jax.config import config
 config.update("jax_enable_x64", enable_float64)
 
@@ -123,7 +123,7 @@ def grid_search(base_config, hparams, logdir, num_experiments="?"):
 
 if __name__ == "__main__":
 #    logdir = "./runs/dimension-sweep/"
-    logdir = "./runs/two-dim/"
+    logdir = "./runs/two-dim-float32/"
     num_lr = 5
     d = 2
     k = None

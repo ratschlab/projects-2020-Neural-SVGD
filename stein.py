@@ -110,13 +110,17 @@ def phistar_i(xi, x, logp, kernel):
     kx = lambda y: kernel(y, xi)
     return stein(kx, x, logp)
 
-def phistar(x, logp, kernel):
+def phistar(x, xest, logp, kernel):
     """
     Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
 
     Arguments:
     * x: np.array of shape (n, d)
+    * xest: np.array of shape (n, l). Subsample of particles used to compute phi.
     * logp: callable
     * kernel: callable. Takes as arguments two vectors x and y.
+
+    Returns:
+    np array of same shape as x.
     """
-    return vmap(phistar_i, (0, None, None, None))(x, x, logp, kernel)
+    return vmap(phistar_i, (0, None, None, None))(x, xest, logp, kernel)
