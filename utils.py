@@ -1,6 +1,6 @@
 import jax.numpy as np
 import jax
-from jax import jit, vmap
+from jax import jit, vmap, random
 from jax.ops import index_update, index
 from jax import lax
 import time
@@ -346,5 +346,17 @@ def generate_parameters_for_gaussian(dim, k=None):
         cov = generate_pd_matrix(dim)
         return mean, cov
 
-class NanError(Exception):
-    pass
+def subsample(key, array, n_subsamples, replace=True, axis=0):
+    """
+    Arguments
+    ----------
+
+    Returns
+    ----------
+    np.array of same shape as array except that the specified axis has length n_subsamples.
+    consists of random samples from input array.
+    """
+    subsample_idx = random.choice(key, array.shape[axis], shape=(n_subsamples,), replace=replace)
+    subsample = array.take(indices=subsample_idx, axis=axis)
+    return subsample
+

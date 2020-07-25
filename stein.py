@@ -36,15 +36,17 @@ def stein_operator(fun, x, logp, transposed=False):
         else:
             raise ValueError(f"Output of input function {fun.__name__} needs to be a scalar, a vector, or a square matrix. Instead got output of shape {fx.shape}")
 
-def ksd_squared(xs, logp, k):
+def ksd_squared(xs, ys, logp, k):
     """
     Arguments:
     * xs: np.array of shape (n, d)
+    * ys: np.array of shape (m, d) (can be the same array as xs)
     * logp: callable
     * k: callable, computes scalar-valued kernel k(x, y) given two input arguments.
 
     Returns:
-    The square of the stein discrepancy KSD(q, p). Here, q is the empirical dist of xs.
+    The square of the stein discrepancy KSD(q, p).
+    KSD is approximated as $\sum_i \sum_j g(x_i, y_j)$, where the x and y are iid distributed as q
     """
     def g(x, y):
         """x, y: np.arrays of shape (d,)"""
@@ -55,7 +57,7 @@ def ksd_squared(xs, logp, k):
 
     gv  = vmap(g,  (0, None))
     gvv = vmap(gv, (None, 0))
-    ksd_matrix = gvv(xs, xs)
+    ksd_matrix = gvv(xs, ys)
 
 #    n = xs.shape[0]
 #    trace_indices = [list(range(n))]*2

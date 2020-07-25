@@ -7,6 +7,7 @@ import copy
 enable_float64 = False
 from jax.config import config
 config.update("jax_enable_x64", enable_float64)
+config.update("jax_debug_nans", True)
 
 from svgd import SVGD
 import numpy as onp
@@ -130,12 +131,12 @@ if __name__ == "__main__":
 
     # hparams
     layers = [
-        [32, 32, 32, 2],
+        [4, 4, 2],
     ]
-    optimizer_ksd_args = onp.logspace(-3, 0, num=num_lr).reshape((num_lr,1))
-    svgd_steps = [4]
-    ksd_steps = [10, 50, 100]
-    architecture = ["Vanilla", "MLP"]
+    optimizer_ksd_args = onp.logspace(-2, 1, num=num_lr).reshape((num_lr,1))
+    svgd_steps = [1]
+    ksd_steps = [1]
+    architecture = ["MLP"]
 
     if k is None:
         target = ["Gaussian"]
@@ -143,7 +144,8 @@ if __name__ == "__main__":
         target=["Gaussian Mixture"]
     onp.random.seed(0)
     target_args=[utils.generate_parameters_for_gaussian(d, k)]
-    n_particles = [200]
+    n_particles = [5000]
+    n_subsamples = [200]
 
     hparams = config.flat_to_nested(dict(layers=layers,
                                          architecture=architecture,
@@ -153,6 +155,7 @@ if __name__ == "__main__":
                                          target=target,
                                          target_args=target_args,
                                          n_particles=n_particles,
+                                         n_subsamples=n_subsamples,
                                          ))
 
     num_experiments = onp.prod([len(v) for v in utils.flatten_dict(hparams).values()])

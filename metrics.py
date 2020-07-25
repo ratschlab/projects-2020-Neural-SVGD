@@ -50,16 +50,10 @@ class Distribution():
             square_errors = [(sample - true)**2 for sample, true in zip(sample_expectations, self.expectations)]
             square_errors = np.array(square_errors)  # shape (4, d)
 
-#            ksds = [stein.ksd_squared(x, self.logpdf, np.log(np.array(h))) for h in self.ksd_grid]
-#            ksds = np.array(ksds)
-
             metrics_dict = {
                 "square_errors": square_errors  # shape (4, d)
-#                "ksds": ksds  # shape (len(ksd_grid),)
             }
 
-            if self.d == 1 and False:  # TODO: fix kl
-                metrics_dict["KL Divergence"] = self.kl_divergence(x)  # scalar
             return metrics_dict
 
     def get_metrics_shape(self):
@@ -304,14 +298,14 @@ def compute_final_metrics(particles, svgd):
     """
     n = len(particles) * 2
     target_sample = svgd.target.sample(n)
-    emd = wasserstein_distance(particles, target_sample)
+#    emd = wasserstein_distance(particles, target_sample)
     sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
     sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
-    ksd = stein.ksd_squared(particles, svgd.target.logpdf, kernels.ard(0))
+    ksd = stein.ksd_squared(particles, particles, svgd.target.logpdf, kernels.ard(0))
 
     se_mean = np.mean((np.mean(particles, axis=0) - svgd.target.mean)**2)
     se_var = np.mean((np.cov(particles, rowvar=False) - svgd.target.cov)**2)
-    return dict(emd=emd, sinkhorn_divergence=sinkhorn_divergence, ksd=ksd, se_mean=se_mean, se_var=se_var)
+    return dict(sinkhorn_divergence=sinkhorn_divergence, ksd=ksd, se_mean=se_mean, se_var=se_var)
 
 def wasserstein_distance(s1, s2):
     """

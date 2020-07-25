@@ -49,7 +49,7 @@ class SVGD():
         return np.reshape(vmap(self._phistar)(particles, kernel_params), newshape=inshape)
 
     def _ksd_squared(self, kernel_params, particles):
-        return stein.ksd_squared(particles, self.target.logpdf, self.kernel(kernel_params))
+        return stein.ksd_squared(particles, particles, self.target.logpdf, self.kernel(kernel_params))
 
 #    @partial(jit, static_argnums=0)
     def ksd_squared(self, params, particles):
