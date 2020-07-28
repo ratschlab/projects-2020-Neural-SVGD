@@ -13,7 +13,8 @@ config["svgd"] = {
     "n_particles": 1000,
     "n_subsamples": 200,
     "optimizer_svgd": "Adagrad",  # One of ["Adam", "Adagrad", "SGD"]
-    "optimizer_svgd_args": [1.0]
+    "optimizer_svgd_args": [1.0],
+    "subsample_with_replacement": False,
 }
 
 config["kernel"] = {
@@ -58,6 +59,7 @@ def get_svgd_args(config):
         "target": targets[cfg["target"]](*cfg["target_args"]),
         "n_particles": cfg["n_particles"],
         "n_subsamples": cfg["n_subsamples"],
+        "subsample_with_replacement": cfg["subsample_with_replacement"],
         "optimizer_svgd": svgd.Optimizer(
             *optimizer(*cfg["optimizer_svgd_args"])),
         "kernel": hk.transform(kernel_fn)

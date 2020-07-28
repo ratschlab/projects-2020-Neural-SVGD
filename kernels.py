@@ -42,6 +42,13 @@ def make_mlp_ard(sizes):
         return ard(mlp(x), mlp(y))
     return mlp_ard
 
+def autoencoder(x): # TODO: feed kernel_params to autoencoder, get mlp params
+    decoder = hk.nets.MLP(output_sizes=sizes,
+                        w_init=hk.initializers.VarianceScaling(scale=2.0),
+                        activation=jax.nn.relu,
+                        activate_final=False)
+    return decoder(mlp(x))
+
 def mlp_ard_classic(x, y):
     mlp = hk.Sequential([
         hk.Flatten(),

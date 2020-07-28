@@ -27,24 +27,25 @@ def init_svgd(key, particle_shape):
 
 
 class SVGD():
-    def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel):
+    def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel, subsample_with_replacement: bool):
         """
         Arguments
         ----------
         target: instance of class metrics.Distribution
 
         kernel needs to have pure methods
-           kernel.init(rkey, x, y) -> params
+           kernel.init(key, x, y) -> params
            kernel.apply(params, x, y) -> scalar
 
         optimizer_svgd needs to have pure methods
            optimizer_svgd.init(params) -> state
-           optimizer_svgd.update(rkey, gradient, state) -> state
+           optimizer_svgd.update(key, gradient, state) -> state
            optimizer_svgd.get_params(state) -> params
         """
         self.target = target
         self.n_particles = n_particles
         self.n_subsamples = n_subsamples
+        self.subsample_with_replacement = subsample_with_replacement
         self.kernel = kernel
         self.opt = optimizer_svgd
 
@@ -69,6 +70,10 @@ class SVGD():
             particles_a, particles_b = [np.expand_dims(particles, 0) for particles in (particles_a, particles_b)]  # batch dimension
         return - np.mean(vmap(self.ksd_squared, (None, 0, 0))(kernel_params, particles_a, particles_b))
 
+    def kernel_loss_batched(self, kernel_params, particles_a, particles_b):
+        """Regularized KSD"""
+        return self.negative_ksd_squared_batched(kernel_params, particles_a, particles_b) + autoencoder_loss
+
     def train_kernel(self, key, n_iter, ksd_steps, svgd_steps, opt_ksd):
         """Train the kernel parameters
         Training goes over one SVGD run.
@@ -88,98 +93,128 @@ class SVGD():
         def current_step(i, j, steps):
             return i*steps + j
 
-        particles = init_svgd(key, self.particle_shape)
-        train_idx, validation_idx = np.arange(self.n_particles).split(2)
+        key, key1, key2 = random.split(key, 3)
+        particles = init_svgd(key1, self.particle_shape)
         opt_svgd_state = self.opt.init(particles)
+        train_idx, validation_idx = random.permutation(key2, np.arange(self.n_particles)).split(2)
 
         x_dummy = self.target.sample(1)
         x_dummy = np.reshape(x_dummy, newshape=(self.target.d,))
-
-        key = random.split(key)[0]
-        kernel_params = self.kernel.init(key, x_dummy, x_dummy)
+        key, subkey = random.split(key)
+        kernel_params = self.kernel.init(subkey, x_dummy, x_dummy)
         opt_ksd_state = opt_ksd.init(kernel_params)
 
-        log = dict(bandwidth = [], ksd_after_kernel_update=[], ksd_after_kernel_update_val=[], mean=[], var=[], ksd_after_svgd_update=[])
-        def train():
+        rundata = dict(bandwidth = [], ksd_after_kernel_update=[],
+                       ksd_after_kernel_update_val=[],
+                       update_to_weight_ratio=[],
+                       mean=[], var=[], ksd_after_svgd_update=[])
+
+        def update_kernel(key, opt_ksd_state, particle_batch, step: int):
+            """performs a single ksd update and logs results.
+            Returns updated_opt_ksd_state: container for the updated ksd particles and optimizer state
+            """
+            kernel_params_pre_update = opt_ksd.get_params(opt_ksd_state)
+
+            # Update
+            key, subkey = random.split(key)
+            subsamples = utils.subsample(subkey, particle_batch[:, train_idx, :], self.n_subsamples*2, replace=self.subsample_with_replacement, axis=1).split(2, axis=1)
+            ksd_batched, gk = value_and_grad(self.negative_ksd_squared_batched)(kernel_params_pre_update, *subsamples)
+            updated_opt_ksd_state = opt_ksd.update(step, gk, opt_ksd_state)
+
+            # Compute validation KSD and log rundata
+            kernel_params = opt_ksd.get_params(updated_opt_ksd_state)
+            key, subkey = random.split(key)
+            validation_subsamples = utils.subsample(subkey, particle_batch[:, validation_idx, :], self.n_subsamples*2, replace=self.subsample_with_replacement, axis=1).split(2, axis=1)
+            bandwidth = np.exp(kernel_params["ard"]["logh"])**2 # h = sqrt(bandwith)
+            kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
+            metrics.append_to_log(rundata, {
+                "ksd_after_kernel_update": - ksd_batched,
+                "ksd_after_kernel_update_val": -self.negative_ksd_squared_batched(kernel_params, *validation_subsamples),
+                "update_to_weight_ratio": utils.compute_update_to_weight_ratio(kernel_params_pre_update, kernel_params),
+                "kernel_params": kernel_params,
+                "bandwidth": bandwidth,
+                "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples) # E[k(x, x)]
+            })
+            return updated_opt_ksd_state
+
+        def update_particles(key, opt_svgd_state, kernel_params, step: int):
+            """performs a single svgd update and logs results."""
+            # Update
+            particles = self.opt.get_params(opt_svgd_state)
+            key, subkey = random.split(key)
+            subsample = utils.subsample(subkey, particles[train_idx], self.n_subsamples, replace=self.subsample_with_replacement)
+            gp = -self.phistar(particles, subsample, kernel_params)
+            updated_opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
+
+            # compute KSD, validation KSD, and log rundata
+            updated_particles = self.opt.get_params(updated_opt_svgd_state)
+            key1, key2, key = random.split(key, 3)
+            subsamples            = utils.subsample(key1, updated_particles[train_idx],      self.n_subsamples*2, replace=self.subsample_with_replacement).split(2)
+            validation_subsamples = utils.subsample(key2, updated_particles[validation_idx], self.n_subsamples*2, replace=self.subsample_with_replacement).split(2)
+            metrics.append_to_log(rundata, self.target.compute_metrics(updated_particles))
+            metrics.append_to_log(rundata, {
+                "training_mean": np.mean(updated_particles[train_idx], axis=0),
+                "training_var": np.var(updated_particles[train_idx], axis=0),
+                "ksd_after_svgd_update": self.ksd_squared(kernel_params, *subsamples),
+                "validation_mean": np.mean(updated_particles[validation_idx], axis=0),
+                "validation_var": np.var(updated_particles[validation_idx], axis=0),
+                "ksd_after_svgd_update_val": self.ksd_squared(kernel_params, *validation_subsamples),
+            })
+            return updated_opt_svgd_state
+
+        def train(key):
             nonlocal opt_svgd_state
             nonlocal opt_ksd_state
-            nonlocal log
-            log["kernel_params"] = []
-            rkey = key
+            nonlocal rundata
+
+            rundata["kernel_params"] = [] # works only with small nets
+            kernel_params = opt_ksd.get_params(opt_ksd_state)
+            metrics.append_to_log(rundata, {
+                "kernel_params": kernel_params,
+                "bandwidth": np.exp(kernel_params["ard"]["logh"])**2, # h = sqrt(bandwith)
+            })
             particles = self.opt.get_params(opt_svgd_state)
             particle_batch = [particles]
             for i in tqdm(range(n_iter)):
-                # update kernel_params:
                 particle_batch = np.asarray(particle_batch, dtype=np.float64) # large batch
                 for j in range(ksd_steps):
                     step = current_step(i, j, ksd_steps)
-                    kernel_params = opt_ksd.get_params(opt_ksd_state)
+                    key, subkey = random.split(key)
+                    opt_ksd_state = update_kernel(subkey, opt_ksd_state, particle_batch, step)
 
-                    rkey = random.split(rkey)[0]
-                    subsamples = utils.subsample(rkey, particle_batch[:, train_idx, :], self.n_subsamples*2, replace=False, axis=1).split(2, axis=1)
-                    ksd_batched, gk = value_and_grad(self.negative_ksd_squared_batched)(kernel_params, *subsamples)
-                    opt_ksd_state = opt_ksd.update(step, gk, opt_ksd_state)
-
-                    log["ksd_after_kernel_update"].append(-ksd_batched)
-                    rkey = random.split(rkey)[0]
-                    validation_subsamples = utils.subsample(rkey, particle_batch[:, validation_idx, :], self.n_subsamples*2, replace=False, axis=1).split(2, axis=1)
-                    log["ksd_after_kernel_update_val"].append(-self.negative_ksd_squared_batched(kernel_params, *validation_subsamples))
-
-                    bandwidth = np.exp(kernel_params["ard"]["logh"])**2 # h = sqrt(bandwith)
-                    log["bandwidth"].append(bandwidth)
-                    log["kernel_params"].append(kernel_params)
-
-
-                # update particles:
-                kernel_params = opt_ksd.get_params(opt_ksd_state)
                 particle_batch = []
-                ksd_after_kernel_update = []
+                kernel_params = opt_ksd.get_params(opt_ksd_state)
                 for j in range(svgd_steps):
                     step = current_step(i, j, svgd_steps)
-                    particles = self.opt.get_params(opt_svgd_state)
-
-                    rkey = random.split(rkey)[0]
-                    subsample = utils.subsample(rkey, particles[train_idx], self.n_subsamples, replace=False)
-
-                    gp = -self.phistar(particles, subsample, kernel_params)
-                    opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
-
-                    rkey_a, rkey_b = random.split(rkey)
-                    subsample_a = utils.subsample(rkey_a, particles, self.n_subsamples, replace=False, axis=0)
-                    subsample_b = utils.subsample(rkey_b, particles, self.n_subsamples, replace=False, axis=0)
-                    rkey = rkey_a
-                    particle_batch.append(particles)
-                    metrics.append_to_log(log, self.target.compute_metrics(particles))
-                    metrics.append_to_log(log, {"mean": np.mean(particles, axis=0),
-                                                "var": np.var(particles, axis=0),
-                                                "ksd_after_svgd_update": self.ksd_squared(kernel_params, subsample_a, subsample_b)})
-
-            log["particles"] = particles
+                    key, subkey = random.split(key)
+                    opt_svgd_state = update_particles(subkey, opt_svgd_state, kernel_params, step)
+                    particle_batch.append(self.opt.get_params(opt_svgd_state))
             return None
 
         try:
-            train()
-            log["Interrupted because of NaN"] = False
+            key, subkey = random.split(key)
+            train(subkey)
+            rundata["Interrupted because of NaN"] = False
         except FloatingPointError as e:
             print("printing traceback:")
             traceback.print_exc()
-            log["Interrupted because of NaN"] = True
+            rundata["Interrupted because of NaN"] = True
 
-        log = utils.dict_asarray(log)
-        return kernel_params, log
+        rundata["particles"] = self.opt.get_params(opt_svgd_state)
+        rundata = utils.dict_asarray(rundata)
+        return opt_ksd.get_params(opt_ksd_state), rundata
 
     # @partial(jit, static_argnums=(0, 3))
     def sample(self, kernel_params, key, n_iter):
         """Sample from the (approximation of the) target distribution using the current kernel parameters."""
-        particles = init_svgd(key, self.particle_shape)
+        key, subkey = random.split(key)
+        particles = init_svgd(subkey, self.particle_shape)
         opt_svgd_state = self.opt.init(particles)
-
-        log = dict()
+        rundata = dict()
         for i in tqdm(range(n_iter)):
             particles = self.opt.get_params(opt_svgd_state)
             gp = -self.phistar(particles, kernel_params)
             opt_svgd_state = self.opt.update(i, gp, opt_svgd_state)
-            metrics.append_to_log(log, {"mean": np.mean(particles, axis=0),
+            metrics.append_to_log(rundata, {"mean": np.mean(particles, axis=0),
                                         "var": np.var(particles, axis=0)})
-
-        return self.opt.get_params(opt_svgd_state), log
+        return self.opt.get_params(opt_svgd_state), rundata

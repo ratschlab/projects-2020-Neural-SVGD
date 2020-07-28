@@ -248,7 +248,7 @@ def dict_concatenate(dict_list):
 
     for k, v in out.items():
         try:
-            out[k] = np.array(v)
+            out[k] = np.asarray(v)
         except TypeError:
             out[k] = dict_concatenate(v)
 
@@ -285,7 +285,7 @@ def dict_asarray(dct: dict):
     for k, v in dct.items():
         try:
             dct[k] = np.asarray(v)
-        except TypeError:
+        except:
             try:
                 dct[k] = dict_asarray(dct[k])
             except AttributeError:
@@ -359,4 +359,27 @@ def subsample(key, array, n_subsamples, replace=True, axis=0):
     subsample_idx = random.choice(key, array.shape[axis], shape=(n_subsamples,), replace=replace)
     subsample = array.take(indices=subsample_idx, axis=axis)
     return subsample
+
+def compute_update_to_weight_ratio(params_pre, params_post):
+    """
+    Arguments
+    ---------
+    * params_pre, params_post are frozendicts containing parameters
+
+    Returns
+    --------
+    dict with same keys containing one scalar per layer: ||dw|| / ||w||
+    """
+    assert params_pre.keys() == params_post.keys()
+    # recurse until we find np arrays
+    ratios = dict()
+    for k, v in params_pre.items():
+        if type(v) is jax.interpreters.xla.DeviceArray:
+            try:
+                ratios[k] =  np.linalg.norm(params_post[k] - v) / np.linalg.norm(v)
+            except FloatingPointError:
+                pass
+        elif isinstance(v, collections.Mapping):
+            ratios[k] = compute_update_to_weight_ratio(v, params_post[k])
+    return ratios
 

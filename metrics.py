@@ -315,3 +315,10 @@ def wasserstein_distance(s1, s2):
     a = np.ones(len(s1)) / len(s1)
     b = np.ones(len(s2)) / len(s2)
     return np.sqrt(ot.emd2(a, b, M))
+
+def sqrt_kxx(kernel: callable, particles_a, particles_b):
+    """Approximate E[k(x, x)] in O(n)"""
+    def sqrt_k(x, y): return np.sqrt(kernel(x, y))
+#    sv  = vmap(sqrt_k, (0, None))
+#    svv = vmap(sv,     (None, 0))
+    return np.mean(vmap(sqrt_k)(particles_a, particles_b))

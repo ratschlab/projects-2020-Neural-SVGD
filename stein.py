@@ -38,6 +38,28 @@ def stein_operator(fun, x, logp, transposed=False):
 
 def ksd_squared(xs, ys, logp, k):
     """
+    O(n)
+    Arguments:
+    * xs: np.array of shape (n, d)
+    * ys: np.array of shape (n, d) (can be the same array as xs)
+    * logp: callable
+    * k: callable, computes scalar-valued kernel k(x, y) given two input arguments.
+
+    Returns:
+    The square of the stein discrepancy KSD(q, p).
+    KSD is approximated as $\sum_i g(x_i, y_i)$, where the x and y are iid distributed as q
+    """
+    def g(x, y):
+        """x, y: np.arrays of shape (d,)"""
+        def inner(x):
+            kx = lambda y_: k(x, y_)
+            return stein_operator(kx, y, logp)
+        return stein_operator(inner, x, logp, transposed=True)
+    return np.mean(vmap(g)(xs, ys))
+
+def _ksd_squared(xs, ys, logp, k):
+    """
+    O(n*m)
     Arguments:
     * xs: np.array of shape (n, d)
     * ys: np.array of shape (m, d) (can be the same array as xs)
@@ -58,10 +80,6 @@ def ksd_squared(xs, ys, logp, k):
     gv  = vmap(g,  (0, None))
     gvv = vmap(gv, (None, 0))
     ksd_matrix = gvv(xs, ys)
-
-#    n = xs.shape[0]
-#    trace_indices = [list(range(n))]*2
-#    ksd_matrix = index_update(ksd_matrix, trace_indices, 0)
 
     return np.mean(ksd_matrix)
 
