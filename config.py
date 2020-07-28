@@ -9,12 +9,13 @@ import utils
 config = dict()
 config["svgd"] = {
     "target": "Gaussian",  # one of ["Gaussian", "Gaussian Mixture"]
-    "target_args": [[-1, 1], [2, 5]],  # either [mean, cov] or [means, covs, weights]
+    "target_args": [[-2, 3], [1, 6]],  # either [mean, cov] or [means, covs, weights]
     "n_particles": 1000,
-    "n_subsamples": 200,
+    "n_subsamples": 300,
     "optimizer_svgd": "Adagrad",  # One of ["Adam", "Adagrad", "SGD"]
     "optimizer_svgd_args": [1.0],
     "subsample_with_replacement": False,
+    "lam": 1.0,
 }
 
 config["kernel"] = {
@@ -62,7 +63,8 @@ def get_svgd_args(config):
         "subsample_with_replacement": cfg["subsample_with_replacement"],
         "optimizer_svgd": svgd.Optimizer(
             *optimizer(*cfg["optimizer_svgd_args"])),
-        "kernel": hk.transform(kernel_fn)
+        "kernel": hk.transform(kernel_fn),
+        "lam": cfg["lam"],
     }
     return kwargs
 

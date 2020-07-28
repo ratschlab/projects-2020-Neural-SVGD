@@ -36,14 +36,14 @@ def stein_operator(fun, x, logp, transposed=False):
         else:
             raise ValueError(f"Output of input function {fun.__name__} needs to be a scalar, a vector, or a square matrix. Instead got output of shape {fx.shape}")
 
-def ksd_squared(xs, ys, logp, k):
+def _ksd_squared(xs, ys, logp, k):
     """
     O(n)
     Arguments:
     * xs: np.array of shape (n, d)
     * ys: np.array of shape (n, d) (can be the same array as xs)
     * logp: callable
-    * k: callable, computes scalar-valued kernel k(x, y) given two input arguments.
+    * k: callable, computes scalar-valued kernel k(x, y) given two input arguments of shape (d,).
 
     Returns:
     The square of the stein discrepancy KSD(q, p).
@@ -57,7 +57,7 @@ def ksd_squared(xs, ys, logp, k):
         return stein_operator(inner, x, logp, transposed=True)
     return np.mean(vmap(g)(xs, ys))
 
-def _ksd_squared(xs, ys, logp, k):
+def ksd_squared(xs, ys, logp, k):
     """
     O(n*m)
     Arguments:

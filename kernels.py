@@ -37,17 +37,11 @@ def make_mlp_ard(sizes):
         mlp = hk.nets.MLP(output_sizes=sizes,
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
                           activation=jax.nn.relu,
-                          activate_final=False)
-        ard = ARD()
+                          activate_final=False,
+                          name="encoder")
+        ard = ARD(name="ard")
         return ard(mlp(x), mlp(y))
     return mlp_ard
-
-def autoencoder(x): # TODO: feed kernel_params to autoencoder, get mlp params
-    decoder = hk.nets.MLP(output_sizes=sizes,
-                        w_init=hk.initializers.VarianceScaling(scale=2.0),
-                        activation=jax.nn.relu,
-                        activate_final=False)
-    return decoder(mlp(x))
 
 def mlp_ard_classic(x, y):
     mlp = hk.Sequential([
@@ -121,10 +115,10 @@ def _ard(x, y, logh):
 
     h = np.exp(logh)
     if h.ndim == 0:
-        return np.exp(- np.sum((x - y)**2 / h) / 2) / np.sqrt(2 * np.pi * h)
+        return np.exp(- np.sum((x - y)**2 / h) / 2)# / np.sqrt(2 * np.pi * h)
     else:
         d = h.shape[0]
-        return np.exp(- np.sum((x - y)**2 / h) / 2) / (2 * np.pi)**(d / 2) / np.sqrt(np.prod(h))
+        return np.exp(- np.sum((x - y)**2 / h) / 2)# / (2 * np.pi)**(d / 2) / np.sqrt(np.prod(h))
 
 def ard(logh):
     return lambda x, y: _ard(x, y, logh)
