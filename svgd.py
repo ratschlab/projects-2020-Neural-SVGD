@@ -27,36 +27,16 @@ class Optimizer():
 def init_svgd(key, particle_shape):
     return random.normal(key, particle_shape) * 2 - 6
 
-def encoder_fn(x):
-    """can take kernel_params"""
-    layer_sizes = [16, 32, 32, 2]
-    encoder = hk.nets.MLP(output_sizes=layer_sizes,
-                    w_init=hk.initializers.VarianceScaling(scale=2.0),
-                    activation=jax.nn.relu,
-                    activate_final=False,
-                    name="encoder")
-    return encoder(x)
-encoder = hk.transform(encoder_fn)
-
-def decoder_fn(x):
-    decoder = hk.nets.MLP(output_sizes=[4, 4, 2],
-                    w_init=hk.initializers.VarianceScaling(scale=2.0),
-                    activation=jax.nn.relu,
-                    activate_final=False,
-                    name="decoder")
-    return decoder(x)
-decoder = hk.transform(decoder_fn)
-
 class SVGD():
-    def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel, subsample_with_replacement: bool, lam: float):
+    def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel, encoder, decoder, subsample_with_replacement: bool, lam: float):
         """
         Arguments
         ----------
         target: instance of class metrics.Distribution
 
-        kernel needs to have pure methods
-           kernel.init(key, x, y) -> params
-           kernel.apply(params, x, y) -> scalar
+        encoder / decoder need to have pure methods
+           encoder.init(key, x, y) -> params
+           encoder.apply(params, x, y) -> scalar
 
         optimizer_svgd needs to have pure methods
            optimizer_svgd.init(params) -> state
@@ -67,6 +47,8 @@ class SVGD():
         self.n_particles = n_particles
         self.n_subsamples = n_subsamples
         self.subsample_with_replacement = subsample_with_replacement
+        self.encoder = encoder
+        self.decoder = decoder
         self.kernel = kernel
         self.opt = optimizer_svgd
 
@@ -74,38 +56,43 @@ class SVGD():
         self.particle_shape = (self.n, self.target.d)
         self.lam = lam
 
+        def get_kernel_fn(encoder_params):
+            """Returns kernel_fn: x, y --> scalar"""
+            def kernel_fn(x, y):
+                def enc(x): return self.encoder.apply(encoder_params, x)
+                return self.kernel(enc(x), enc(y))
+            return kernel_fn
+        self.get_kernel_fn = get_kernel_fn
 
     # can't jit this I think
-    def phistar(self, particles, subsample, kernel_params):
-        kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
-        return stein.phistar(particles, subsample, self.target.logpdf, kernel_fn)
+    def phistar(self, particles, subsample, encoder_params):
+        return stein.phistar(particles, subsample, self.target.logpdf, self.get_kernel_fn(encoder_params))
 
-    def ksd_squared(self, kernel_params, particles_a, particles_b):
+    def ksd_squared(self, encoder_params, particles_a, particles_b):
         """particles_a and particles_b are two bootstrap samples from the particles."""
-        kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
-        return stein.ksd_squared(particles_a, particles_b, self.target.logpdf, kernel_fn)
+        return stein.ksd_squared(particles_a, particles_b, self.target.logpdf, self.get_kernel_fn(encoder_params))
 
     @partial(jit, static_argnums=0)
-    def negative_ksd_squared_batched(self, kernel_params, particles_a, particles_b):
+    def negative_ksd_squared_batched(self, encoder_params, particles_a, particles_b):
         """The mean -KSD^2 for a (k, n, d)-sized batch of particles.
         particles_a and particles_b are two bootstrap samples of shape (k, n, d)."""
         if particles_a.ndim < 3 and particles_b.ndim < 3:
             particles_a, particles_b = [np.expand_dims(particles, 0) for particles in (particles_a, particles_b)]  # batch dimension
-        return - np.mean(vmap(self.ksd_squared, (None, 0, 0))(kernel_params, particles_a, particles_b))
+        return - np.mean(vmap(self.ksd_squared, (None, 0, 0))(encoder_params, particles_a, particles_b))
 
-    def kernel_loss_batched(self, kernel_params, decoder_params, particles_a, particles_b, lam):
+    def kernel_loss_batched(self, encoder_params, decoder_params, particles_a, particles_b, lam):
         """Regularized KSD
         lam: regularization parameter
         particles have shape (k, n, d)"""
         k, n, d = particles_a.shape
         all_particles = np.concatenate([particles_a, particles_b]).reshape(2*k*n, d)
-        def enc(x): return encoder.apply(kernel_params, x)
-        def dec(z): return decoder.apply(decoder_params, z)
+        def enc(x): return self.encoder.apply(encoder_params, x)
+        def dec(z): return self.decoder.apply(decoder_params, z)
         def autoencoder_loss(x): return np.linalg.norm(x - dec(enc(x)))**2
-        neg_ksd = self.negative_ksd_squared_batched(kernel_params, particles_a, particles_b)
-        autoloss = np.mean(vmap(autoencoder_loss)(all_particles))
-        aux = [-neg_ksd, autoloss]
-        return neg_ksd + lam * autoloss, aux
+        neg_ksd = self.negative_ksd_squared_batched(encoder_params, particles_a, particles_b)
+        autoenc_loss = np.mean(vmap(autoencoder_loss)(all_particles))
+        aux = [-neg_ksd, autoenc_loss]
+        return neg_ksd + lam * autoenc_loss, aux
 
     def train_kernel(self, key, n_iter, ksd_steps, svgd_steps, opt_ksd):
         """Train the kernel parameters
@@ -134,56 +121,53 @@ class SVGD():
         x_dummy = self.target.sample(1)
         x_dummy = np.reshape(x_dummy, newshape=(self.target.d,))
         key, key1, key2 = random.split(key, 3)
-        kernel_params = self.kernel.init(key1, x_dummy, x_dummy)
-        decoder_params = decoder.init(key2, x_dummy)
-        opt_ksd_state = opt_ksd.init(kernel_params)
+        encoder_params = self.encoder.init(key1, x_dummy)
+        decoder_params = self.decoder.init(key2, x_dummy)
+        opt_enc_state = opt_ksd.init(encoder_params)
         opt_dec_state = opt_ksd.init(decoder_params)
 
-        rundata = dict(bandwidth = [], ksd_after_kernel_update=[],
-                       ksd_after_kernel_update_val=[],
+        rundata = dict(
                        update_to_weight_ratio=[],
                        mean=[], var=[], ksd_after_svgd_update=[])
 
-        def update_kernel(key, opt_ksd_state, opt_dec_state, particle_batch, step: int):
+        def update_kernel(key, opt_enc_state, opt_dec_state, particle_batch, step: int):
             """performs a single ksd update and logs results.
             Returns updated_opt_ksd_state: container for the updated ksd particles and optimizer state
             """
-            kernel_params_pre_update  = opt_ksd.get_params(opt_ksd_state)
+            encoder_params_pre_update = opt_ksd.get_params(opt_enc_state)
             decoder_params_pre_update = opt_ksd.get_params(opt_dec_state)
 
             # Update
             key, subkey = random.split(key)
             subsamples = utils.subsample(subkey, particle_batch[:, train_idx, :], self.n_subsamples*2, replace=self.subsample_with_replacement, axis=1).split(2, axis=1)
-            [regularized_loss, aux], [dkernel, ddecoder] = value_and_grad(self.kernel_loss_batched, argnums=(0,1), has_aux=True)(kernel_params_pre_update, decoder_params_pre_update, *subsamples, self.lam)
-            updated_opt_ksd_state = opt_ksd.update(step, dkernel, opt_ksd_state)
-            updated_opt_dec_state = opt_ksd.update(step, ddecoder, opt_dec_state)
+            [regularized_loss, aux], [d_enc, d_dec] = value_and_grad(self.kernel_loss_batched, argnums=(0,1), has_aux=True)(encoder_params_pre_update, decoder_params_pre_update, *subsamples, self.lam)
+            updated_opt_enc_state = opt_ksd.update(step, d_enc, opt_enc_state)
+            updated_opt_dec_state = opt_ksd.update(step, d_dec, opt_dec_state)
 
             # Compute KSD, validation KSD and log rundata
             ksd_pre_update, autoencoder_loss = aux
-            kernel_params = opt_ksd.get_params(updated_opt_ksd_state)
+            encoder_params = opt_ksd.get_params(updated_opt_enc_state)
             key, subkey = random.split(key)
             validation_subsamples = utils.subsample(subkey, particle_batch[:, validation_idx, :], self.n_subsamples*2, replace=self.subsample_with_replacement, axis=1).split(2, axis=1)
-            bandwidth = np.exp(kernel_params["ard"]["logh"])**2 # h = sqrt(bandwith)
-            kernel_fn = lambda x, y: self.kernel.apply(kernel_params, x, y)
+            kernel_fn = self.get_kernel_fn(encoder_params)
             metrics.append_to_log(rundata, {
                 "ksd_before_kernel_update": ksd_pre_update,
-                "ksd_before_kernel_update_val": -self.negative_ksd_squared_batched(kernel_params_pre_update, *validation_subsamples),
-                "update_to_weight_ratio": utils.compute_update_to_weight_ratio(kernel_params_pre_update, kernel_params),
-                "kernel_params": kernel_params,
-                "bandwidth": bandwidth,
+                "ksd_before_kernel_update_val": -self.negative_ksd_squared_batched(encoder_params_pre_update, *validation_subsamples),
+                "update_to_weight_ratio": utils.compute_update_to_weight_ratio(encoder_params_pre_update, encoder_params),
+                "encoder_params": encoder_params,
                 "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)]
                 "regularized_loss": regularized_loss,
                 "autoencoder_loss": autoencoder_loss,
             })
-            return updated_opt_ksd_state, updated_opt_dec_state
+            return updated_opt_enc_state, updated_opt_dec_state
 
-        def update_particles(key, opt_svgd_state, kernel_params, step: int):
+        def update_particles(key, opt_svgd_state, encoder_params, step: int):
             """performs a single svgd update and logs results."""
             # Update
             particles = self.opt.get_params(opt_svgd_state)
             key, subkey = random.split(key)
             subsample = utils.subsample(subkey, particles[train_idx], self.n_subsamples, replace=self.subsample_with_replacement)
-            gp = -self.phistar(particles, subsample, kernel_params)
+            gp = -self.phistar(particles, subsample, encoder_params)
             updated_opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
 
             # compute KSD, validation KSD, and log rundata
@@ -195,25 +179,21 @@ class SVGD():
             metrics.append_to_log(rundata, {
                 "training_mean": np.mean(updated_particles[train_idx], axis=0),
                 "training_var": np.var(updated_particles[train_idx], axis=0),
-                "ksd_after_svgd_update": self.ksd_squared(kernel_params, *subsamples),
+                "ksd_after_svgd_update": self.ksd_squared(encoder_params, *subsamples),
                 "validation_mean": np.mean(updated_particles[validation_idx], axis=0),
                 "validation_var": np.var(updated_particles[validation_idx], axis=0),
-                "ksd_after_svgd_update_val": self.ksd_squared(kernel_params, *validation_subsamples),
+                "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, *validation_subsamples),
             })
             return updated_opt_svgd_state
 
         def train(key):
             nonlocal opt_svgd_state
-            nonlocal opt_ksd_state
+            nonlocal opt_enc_state
             nonlocal opt_dec_state
             nonlocal rundata
 
-            rundata["kernel_params"] = [] # works only with small nets
-            kernel_params = opt_ksd.get_params(opt_ksd_state)
-            metrics.append_to_log(rundata, {
-                "kernel_params": kernel_params,
-                "bandwidth": np.exp(kernel_params["ard"]["logh"])**2, # h = sqrt(bandwith)
-            })
+            rundata["encoder_params"] = [] # works only with small nets
+            encoder_params = opt_ksd.get_params(opt_enc_state)
             particles = self.opt.get_params(opt_svgd_state)
             particle_batch = [particles]
             for i in tqdm(range(n_iter)):
@@ -221,10 +201,10 @@ class SVGD():
                 for j in range(ksd_steps):
                     step = current_step(i, j, ksd_steps)
                     key, subkey = random.split(key)
-                    opt_ksd_state, opt_dec_state = update_kernel(subkey, opt_ksd_state, opt_dec_state, particle_batch, step)
+                    opt_enc_state, opt_dec_state = update_kernel(subkey, opt_enc_state, opt_dec_state, particle_batch, step)
 
                 particle_batch = []
-                kernel_params = opt_ksd.get_params(opt_ksd_state)
+                kernel_params = opt_ksd.get_params(opt_enc_state)
                 for j in range(svgd_steps):
                     step = current_step(i, j, svgd_steps)
                     key, subkey = random.split(key)
@@ -242,8 +222,9 @@ class SVGD():
             rundata["Interrupted because of NaN"] = True
 
         rundata["particles"] = self.opt.get_params(opt_svgd_state)
+        rundata["decoder_params"] = opt_ksd.get_params(opt_enc_state)
         rundata = utils.dict_asarray(rundata)
-        return opt_ksd.get_params(opt_ksd_state), rundata
+        return opt_ksd.get_params(opt_enc_state), rundata
 
     # @partial(jit, static_argnums=(0, 3))
     def sample(self, kernel_params, key, n_iter):

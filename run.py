@@ -123,8 +123,7 @@ def grid_search(base_config, hparams, logdir, num_experiments="?"):
 
 
 if __name__ == "__main__":
-#    logdir = "./runs/dimension-sweep/"
-    logdir = "./runs/two-dim-float32/"
+    logdir = "./runs/new/"
     num_lr = 5
     d = 2
     k = None

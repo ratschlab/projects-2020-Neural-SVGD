@@ -19,8 +19,9 @@ config["svgd"] = {
 }
 
 config["kernel"] = {
-    "architecture": "MLP",  # One of ["MLP", "Vanilla"]
-    "layers": [4, 4, 2]  # Layer sizes
+    "encoder_layers": [4, 4, 2],
+    "decoder_layers": [4, 4, 2],
+    "kernel": "ard", # no alternatives atm
 }
 
 config["train_kernel"] = {
@@ -28,7 +29,7 @@ config["train_kernel"] = {
     "n_iter": 50,
     "ksd_steps": 1,
     "svgd_steps": 1,
-    "optimizer_ksd": "Adam",  # One of ["Adam", "Adagrad", "SGD"]
+    "optimizer_ksd": "Adam",  # One of ["Adam", "Adagrad", "SGD"]. optimizer for encoder and decoder
     "optimizer_ksd_args": [0.03]
 }
 
@@ -36,7 +37,8 @@ config["train_kernel"] = {
 opts = {
     "Adam": optimizers.adam,
     "Adagrad": optimizers.adagrad,
-    "SGD": optimizers.sgd
+    "SGD": optimizers.sgd,
+    "RMSProp": optimizers.rmsprop,
 }
 
 def get_svgd_args(config):
@@ -48,12 +50,8 @@ def get_svgd_args(config):
     cfg = config["svgd"]
     kcfg = config["kernel"]
 
-    if kcfg["architecture"] == "Vanilla":
-        kernel_fn = kernels.vanilla_ard
-    elif kcfg["architecture"] == "MLP":
-        kernel_fn = kernels.make_mlp_ard(kcfg["layers"])
-    else:
-        raise ValueError(f"Architecture must be either 'MLP' or 'Vanilla'. Instead received {kcfg['architecture']}.")
+    encoder = hk.transform(kernels.make_mlp(kcfg["encoder_layers"], name="encoder"))
+    decoder = hk.transform(kernels.make_mlp(kcfg["decoder_layers"], name="decoder"))
 
     optimizer = opts[cfg["optimizer_svgd"]]
     kwargs = {
@@ -63,7 +61,9 @@ def get_svgd_args(config):
         "subsample_with_replacement": cfg["subsample_with_replacement"],
         "optimizer_svgd": svgd.Optimizer(
             *optimizer(*cfg["optimizer_svgd_args"])),
-        "kernel": hk.transform(kernel_fn),
+        "kernel": kernels.ard(logh=0),
+        "encoder": encoder,
+        "decoder": decoder,
         "lam": cfg["lam"],
     }
     return kwargs

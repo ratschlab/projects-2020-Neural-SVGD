@@ -26,48 +26,21 @@ def vanilla_ard(x, y):
     ard = ARD()
     return(ard(x, y))
 
-def make_mlp_ard(sizes):
+def make_mlp(sizes, name=None):
     """
     * sizes is a list of integers representing layer dimension
 
     Network uses He initalization; see https://github.com/deepmind/dm-haiku/issues/6
     and https://sonnet.readthedocs.io/en/latest/api.html#variancescaling.
     """
-    def mlp_ard(x, y):
-        mlp = hk.nets.MLP(output_sizes=sizes,
+    def mlp(x):
+        lin = hk.nets.MLP(output_sizes=sizes,
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
                           activation=jax.nn.relu,
                           activate_final=False,
-                          name="encoder")
-        ard = ARD(name="ard")
-        return ard(mlp(x), mlp(y))
-    return mlp_ard
-
-def mlp_ard_classic(x, y):
-    mlp = hk.Sequential([
-        hk.Flatten(),
-        hk.Linear(32), jax.nn.relu,
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(2)
-    ])
-    ard = ARD()
-    return ard(mlp(x), mlp(y))
-
-
-def mlpa(x):
-    mlp = hk.Sequential([
-        hk.Flatten,
-        hk.Linear(32), jax.nn.relu,
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(64), jax.nn.relu,
-        hk.Linear(2)
-    ])
-    return mlp(x)
-
-
+                          name=name)
+        return lin(x)
+    return mlp
 
 
 
