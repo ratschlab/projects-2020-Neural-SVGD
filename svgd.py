@@ -28,7 +28,7 @@ def init_svgd(key, particle_shape):
     return random.normal(key, particle_shape) * 2 - 6
 
 class SVGD():
-    def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel, encoder, decoder, subsample_with_replacement: bool, lam: float):
+    def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel, encoder, decoder, subsample_with_replacement: bool):
         """
         Arguments
         ----------
@@ -54,7 +54,6 @@ class SVGD():
 
         self.n = self.n_particles
         self.particle_shape = (self.n, self.target.d)
-        self.lam = lam
 
         def get_kernel_fn(encoder_params):
             """Returns kernel_fn: x, y --> scalar"""
@@ -80,7 +79,7 @@ class SVGD():
             particles_a, particles_b = [np.expand_dims(particles, 0) for particles in (particles_a, particles_b)]  # batch dimension
         return - np.mean(vmap(self.ksd_squared, (None, 0, 0))(encoder_params, particles_a, particles_b))
 
-    def kernel_loss_batched(self, encoder_params, decoder_params, particles_a, particles_b, lam):
+    def kernel_loss_batched(self, encoder_params, decoder_params, particles_a, particles_b, lambda_reg):
         """Regularized KSD
         lam: regularization parameter
         particles have shape (k, n, d)"""
@@ -92,9 +91,9 @@ class SVGD():
         neg_ksd = self.negative_ksd_squared_batched(encoder_params, particles_a, particles_b)
         autoenc_loss = np.mean(vmap(autoencoder_loss)(all_particles))
         aux = [-neg_ksd, autoenc_loss]
-        return neg_ksd + lam * autoenc_loss, aux
+        return neg_ksd + lambda_reg * autoenc_loss, aux
 
-    def train_kernel(self, key, n_iter, ksd_steps, svgd_steps, opt_ksd):
+    def train_kernel(self, key, n_iter: int, ksd_steps: int, svgd_steps: int, opt_ksd, lambda_reg: float):
         """Train the kernel parameters
         Training goes over one SVGD run.
 
@@ -140,7 +139,7 @@ class SVGD():
             # Update
             key, subkey = random.split(key)
             subsamples = utils.subsample(subkey, particle_batch[:, train_idx, :], self.n_subsamples*2, replace=self.subsample_with_replacement, axis=1).split(2, axis=1)
-            [regularized_loss, aux], [d_enc, d_dec] = value_and_grad(self.kernel_loss_batched, argnums=(0,1), has_aux=True)(encoder_params_pre_update, decoder_params_pre_update, *subsamples, self.lam)
+            [regularized_loss, aux], [d_enc, d_dec] = value_and_grad(self.kernel_loss_batched, argnums=(0,1), has_aux=True)(encoder_params_pre_update, decoder_params_pre_update, *subsamples, lambda_reg)
             updated_opt_enc_state = opt_ksd.update(step, d_enc, opt_enc_state)
             updated_opt_dec_state = opt_ksd.update(step, d_dec, opt_dec_state)
 
@@ -153,11 +152,10 @@ class SVGD():
             metrics.append_to_log(rundata, {
                 "ksd_before_kernel_update": ksd_pre_update,
                 "ksd_before_kernel_update_val": -self.negative_ksd_squared_batched(encoder_params_pre_update, *validation_subsamples),
-                "update_to_weight_ratio": utils.compute_update_to_weight_ratio(encoder_params_pre_update, encoder_params),
-                "encoder_params": encoder_params,
-                "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)]
-                "regularized_loss": regularized_loss,
-                "autoencoder_loss": autoencoder_loss,
+#                "update_to_weight_ratio": utils.compute_update_to_weight_ratio(encoder_params_pre_update, encoder_params),
+#                "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)]
+#                "regularized_loss": regularized_loss,
+#                "autoencoder_loss": autoencoder_loss,
             })
             return updated_opt_enc_state, updated_opt_dec_state
 
@@ -179,9 +177,9 @@ class SVGD():
             metrics.append_to_log(rundata, {
                 "training_mean": np.mean(updated_particles[train_idx], axis=0),
                 "training_var": np.var(updated_particles[train_idx], axis=0),
-                "ksd_after_svgd_update": self.ksd_squared(encoder_params, *subsamples),
                 "validation_mean": np.mean(updated_particles[validation_idx], axis=0),
                 "validation_var": np.var(updated_particles[validation_idx], axis=0),
+                "ksd_after_svgd_update":     self.ksd_squared(encoder_params, *subsamples),
                 "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, *validation_subsamples),
             })
             return updated_opt_svgd_state
@@ -222,21 +220,22 @@ class SVGD():
             rundata["Interrupted because of NaN"] = True
 
         rundata["particles"] = self.opt.get_params(opt_svgd_state)
-        rundata["decoder_params"] = opt_ksd.get_params(opt_enc_state)
         rundata = utils.dict_asarray(rundata)
         return opt_ksd.get_params(opt_enc_state), rundata
 
     # @partial(jit, static_argnums=(0, 3))
-    def sample(self, kernel_params, key, n_iter):
-        """Sample from the (approximation of the) target distribution using the current kernel parameters."""
+    def sample(self, key, encoder_params, n_iter):
         key, subkey = random.split(key)
         particles = init_svgd(subkey, self.particle_shape)
         opt_svgd_state = self.opt.init(particles)
         rundata = dict()
         for i in tqdm(range(n_iter)):
             particles = self.opt.get_params(opt_svgd_state)
-            gp = -self.phistar(particles, kernel_params)
+            gp = -self.phistar(particles, encoder_params)
             opt_svgd_state = self.opt.update(i, gp, opt_svgd_state)
-            metrics.append_to_log(rundata, {"mean": np.mean(particles, axis=0),
-                                        "var": np.var(particles, axis=0)})
-        return self.opt.get_params(opt_svgd_state), rundata
+            metrics.append_to_log(rundata, {
+                "mean": np.mean(particles, axis=0),
+                "var": np.var(particles, axis=0)
+            })
+        rundata["particles"] = self.opt.get_params(opt_svgd_state)
+        return rundata

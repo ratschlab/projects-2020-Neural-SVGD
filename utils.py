@@ -288,7 +288,7 @@ def dict_asarray(dct: dict):
         except:
             try:
                 dct[k] = dict_asarray(dct[k])
-            except AttributeError:
+            except:
                 pass # be nice if value is neither np-ifiable nor a dictionary.
     return dct
 

@@ -296,16 +296,17 @@ def compute_final_metrics(particles, svgd):
     particles: np.array of shape (n, d)
     svgd: instance of svgd.SVGD
     """
-    n = len(particles) * 2
+    n = len(particles)
+
     target_sample = svgd.target.sample(n)
-#    emd = wasserstein_distance(particles, target_sample)
-    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
-    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
+    emd = wasserstein_distance(particles, target_sample)
+#    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
+#    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
     ksd = stein.ksd_squared(particles, particles, svgd.target.logpdf, kernels.ard(0))
 
     se_mean = np.mean((np.mean(particles, axis=0) - svgd.target.mean)**2)
     se_var = np.mean((np.cov(particles, rowvar=False) - svgd.target.cov)**2)
-    return dict(sinkhorn_divergence=sinkhorn_divergence, ksd=ksd, se_mean=se_mean, se_var=se_var)
+    return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_var=se_var)
 
 def wasserstein_distance(s1, s2):
     """
@@ -317,8 +318,9 @@ def wasserstein_distance(s1, s2):
     return np.sqrt(ot.emd2(a, b, M))
 
 def sqrt_kxx(kernel: callable, particles_a, particles_b):
-    """Approximate E[k(x, x)] in O(n)"""
+    """Approximate E[k(x, x)] in O(n^2)"""
     def sqrt_k(x, y): return np.sqrt(kernel(x, y))
-#    sv  = vmap(sqrt_k, (0, None))
-#    svv = vmap(sv,     (None, 0))
-    return np.mean(vmap(sqrt_k)(particles_a, particles_b))
+    sv  = vmap(sqrt_k, (0, None))
+    svv = vmap(sv,     (None, 0))
+    return np.mean(svv)
+#    return np.mean(vmap(sqrt_k)(particles_a, particles_b))

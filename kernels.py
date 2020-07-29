@@ -42,8 +42,6 @@ def make_mlp(sizes, name=None):
         return lin(x)
     return mlp
 
-
-
 ## utils
 
 def median_heuristic(x):
