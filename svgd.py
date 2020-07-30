@@ -36,7 +36,7 @@ class SVGD():
 
         encoder / decoder need to have pure methods
            encoder.init(key, x, y) -> params
-           encoder.apply(params, x, y) -> scalar
+           encoder.apply(params, key, x, y) -> scalar
 
         optimizer_svgd needs to have pure methods
            optimizer_svgd.init(params) -> state
@@ -58,7 +58,7 @@ class SVGD():
         def get_kernel_fn(encoder_params):
             """Returns kernel_fn: x, y --> scalar"""
             def kernel_fn(x, y):
-                def enc(x): return self.encoder.apply(encoder_params, x)
+                def enc(x): return self.encoder.apply(encoder_params, None, x)
                 return self.kernel(enc(x), enc(y))
             return kernel_fn
         self.get_kernel_fn = get_kernel_fn
@@ -85,8 +85,8 @@ class SVGD():
         particles have shape (k, n, d)"""
         k, n, d = particles_a.shape
         all_particles = np.concatenate([particles_a, particles_b]).reshape(2*k*n, d)
-        def enc(x): return self.encoder.apply(encoder_params, x)
-        def dec(z): return self.decoder.apply(decoder_params, z)
+        def enc(x): return self.encoder.apply(encoder_params, None, x)
+        def dec(z): return self.decoder.apply(decoder_params, None, z)
         def autoencoder_loss(x): return np.linalg.norm(x - dec(enc(x)))**2
         neg_ksd = self.negative_ksd_squared_batched(encoder_params, particles_a, particles_b)
         autoenc_loss = np.mean(vmap(autoencoder_loss)(all_particles))
