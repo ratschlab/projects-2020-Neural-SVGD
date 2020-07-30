@@ -71,8 +71,11 @@ def run(cfg: dict, logdir: str):
         with open(metricfile, "w") as f:
             json.dump(utils.tolist(metrics), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
 
-    svgd = SVGD(**config.get_svgd_args(cfg["svgd"]))
-    encoder_params, rundata = svgd.train_kernel(**config.get_train_args(cfg["train_kernel"]))
+    svgd = SVGD(**config.get_svgd_args(cfg))
+    if cfg["train_kernel"]["train"]:
+        _, rundata = svgd.train_kernel(**config.get_train_args(cfg["train_kernel"]))
+    else:
+        rundata = svgd.sample(**config.get_sample_args(cfg["train_kernel"]))
     if not rundata["Interrupted because of NaN"]:
         metrics_dict = metrics.compute_final_metrics(rundata["particles"], svgd)
     else:
@@ -124,7 +127,7 @@ def make_config(base_config: dict, run_options: dict):
         return base_config[key]
 
     run_config = dict()
-    for k, v in utils.flatten_dict(base_config).items():
+    for k, v in base_config.items():
         if k in run_options:
             run_config[k] = run_options[k]
         else:
@@ -150,7 +153,7 @@ def grid_search(base_config, sweep_config, logdir, num_experiments="?"):
         counter += 1
 
 if __name__ == "__main__":
-    logdir = "./runs/new/"
+    logdir = "./runs/two-dim/"
     num_lr = 7
     d = 2
     k = None
@@ -167,9 +170,10 @@ if __name__ == "__main__":
     ]
 
     optimizer_ksd_args = onp.logspace(-2, 1, num=num_lr).reshape((num_lr,1))
-    lambda_reg = onp.logspace(-3, 3, num=num_lr).reshape((num_lr,1))
+    lambda_reg = onp.logspace(-2, 3, num=num_lr).reshape((num_lr,1))
     svgd_steps = [1]
-    ksd_steps = [1]
+    ksd_steps = [1, 2, 5]
+    n_iter = [50]
 
     onp.random.seed(0)
     target_args=[utils.generate_parameters_for_gaussian(d, k)]
@@ -186,6 +190,7 @@ if __name__ == "__main__":
         target_args=target_args,
         n_particles=n_particles,
         n_subsamples=n_subsamples,
+        n_iter=n_iter,
     ))
 
     num_experiments = onp.prod([len(v) for v in utils.flatten_dict(sweep_config).values()])
@@ -199,7 +204,7 @@ if __name__ == "__main__":
     print(f"Number of modes in mixture: {k if k is not None else 1}")
     print(f"Number of experiments: {num_experiments}")
     print()
-    grid_search(config.config, sweep_config, logdir, num_experiments)
+    #grid_search(config.config, sweep_config, logdir, num_experiments)
 
     # vanilla runs
     vanilla_config = config.flat_to_nested(dict(
@@ -209,9 +214,10 @@ if __name__ == "__main__":
         target_args=target_args,
         n_particles=n_particles,
         n_subsamples=n_subsamples,
+        n_iter=n_iter,
     ))
     num_experiments = onp.prod([len(v) for v in utils.flatten_dict(vanilla_config).values()])
     print("Starting vanilla runs:")
     print(f"Number of runs: {num_experiments}")
     print()
-    grid_search(config.config, sweep_config, logdir, num_experiments)
+    grid_search(config.config, vanilla_config, logdir, num_experiments)

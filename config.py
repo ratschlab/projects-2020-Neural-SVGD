@@ -44,7 +44,7 @@ opts = {
 def get_svgd_args(config):
     """config is entire config (tho also works if you only pass the svgd subdict)"""
     if "svgd" in config:
-        svgd_config = svgd_config["svgd"]
+        svgd_config = config["svgd"]
         train = config["train_kernel"]["train"]
     else:
         svgd_config = config
@@ -73,13 +73,15 @@ def get_svgd_args(config):
         "encoder": encoder,
         "decoder": decoder,
     }
-    if kwargs["target"].d != svgd_config["decoder_layers"][-1] and train:
-        warnings.warn(f"The size of the last layer of the decoder must equal"
-        "the target particle dimension d={kwargs['target'].d}."
-        "Instead received layer size {svgd_config[\"decoder_layers\"][-1]}. I'm"
-        "modifying the last decoder layer so that it fits.")
-        svgd_config["decoder_layers"][-1] = kwargs["target"].d
-        kwargs["decoder"] = hk.transform(kernels.make_mlp(svgd_config["decoder_layers"], name="decoder"))
+    if train:
+        print(train)
+        if kwargs["target"].d != svgd_config["decoder_layers"][-1]:
+            warnings.warn(f"The size of the last layer of the decoder must equal"
+            "the target particle dimension d={kwargs['target'].d}."
+            "Instead received layer size {svgd_config[\"decoder_layers\"][-1]}. I'm"
+            "modifying the last decoder layer so that it fits.")
+            svgd_config["decoder_layers"][-1] = kwargs["target"].d
+            kwargs["decoder"] = hk.transform(kernels.make_mlp(svgd_config["decoder_layers"], name="decoder"))
     return kwargs
 
 def get_train_args(train_config):

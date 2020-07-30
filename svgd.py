@@ -227,15 +227,22 @@ class SVGD():
     def sample(self, key, encoder_params, n_iter):
         key, subkey = random.split(key)
         particles = init_svgd(subkey, self.particle_shape)
+        key, subkey = random.split(key)
+        train_idx, validation_idx = random.permutation(subkey, np.arange(self.n_particles)).split(2)
         opt_svgd_state = self.opt.init(particles)
         rundata = dict()
         for i in tqdm(range(n_iter)):
             particles = self.opt.get_params(opt_svgd_state)
-            gp = -self.phistar(particles, encoder_params)
+            key, subkey = random.split(key)
+            subsample = utils.subsample(subkey, particles[train_idx], self.n_subsamples, replace=self.subsample_with_replacement)
+            gp = -self.phistar(particles, subsample, encoder_params)
             opt_svgd_state = self.opt.update(i, gp, opt_svgd_state)
             metrics.append_to_log(rundata, {
-                "mean": np.mean(particles, axis=0),
-                "var": np.var(particles, axis=0)
+                "mean": np.mean(particles[train_idx], axis=0),
+                "var":  np.var(particles[train_idx], axis=0),
+                "validation_mean": np.mean(particles[validation_idx], axis=0),
+                "validation_var":  np.var(particles[validation_idx], axis=0),
             })
         rundata["particles"] = self.opt.get_params(opt_svgd_state)
+        rundata["Interrupted because of NaN"] = False
         return rundata
