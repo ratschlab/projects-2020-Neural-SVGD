@@ -5,17 +5,20 @@ import metrics
 import kernels
 import svgd
 import utils
+import warnings
 
 config = dict()
 config["svgd"] = {
     "target": "Gaussian",  # one of ["Gaussian", "Gaussian Mixture"]
-    "target_args": [[-2, 3], [1, 6]],  # either [mean, cov] or [means, covs, weights]
-    "n_particles": 1000,
+    "target_args": [
+        [0, 1], # mean
+        [5, 1], # covariance
+    ],  # either [mean, cov] or [means, covs, weights]
+    "n_particles": 2000,
     "n_subsamples": 300,
     "optimizer_svgd": "Adagrad",  # One of ["Adam", "Adagrad", "SGD"]
-    "optimizer_svgd_args": [1.0],
+    "lr_svgd": 1.0,
     "subsample_with_replacement": False,
-
     "encoder_layers": [4, 4, 2],
     "decoder_layers": [4, 4, 2],
     "kernel": "ard", # no alternatives atm
@@ -27,9 +30,9 @@ config["train_kernel"] = {
     "ksd_steps": 1,
     "svgd_steps": 1,
     "optimizer_ksd": "Adam",  # One of ["Adam", "Adagrad", "SGD"]. optimizer for encoder and decoder
-    "optimizer_ksd_args": [0.03],
+    "lr_ksd": 0.03,
     "lambda_reg": 1.0,
-    "train": True # if false, set some args to null and
+    "train": True, # if false, set some args to null and
                   # just do a vanilla run w/o kernel learning.
 }
 
@@ -68,7 +71,7 @@ def get_svgd_args(config):
         "n_subsamples": svgd_config["n_subsamples"],
         "subsample_with_replacement": svgd_config["subsample_with_replacement"],
         "optimizer_svgd": svgd.Optimizer(
-            *optimizer(*svgd_config["optimizer_svgd_args"])),
+            *optimizer(svgd_config["lr_svgd"])),
         "kernel": kernels.ard(logh=0),
         "encoder": encoder,
         "decoder": decoder,
@@ -94,7 +97,7 @@ def get_train_args(train_config):
     optimizer = opts[train_config["optimizer_ksd"]]
     kwargs = {key: train_config[key] for key in ["n_iter", "ksd_steps", "svgd_steps"]}
     kwargs["key"] = random.PRNGKey(train_config["key"])
-    kwargs["opt_ksd"] = svgd.Optimizer(*optimizer(*train_config["optimizer_ksd_args"]))
+    kwargs["opt_ksd"] = svgd.Optimizer(*optimizer(train_config["lr_ksd"]))
     kwargs["lambda_reg"] = train_config["lambda_reg"]
     return kwargs
 

@@ -9,6 +9,7 @@ import itertools
 
 from collections.abc import Iterable
 from collections import Mapping
+import collections
 import warnings
 
 import numpy as onp
@@ -327,8 +328,21 @@ def nested_dict_contains_key(ndict: collections.Mapping, key):
                     return True
         return False
 
-def tolist(dictionary):
-    return {k: onp.asarray(v).tolist() for k, v in dictionary.items()}
+def tolist(dictionary): # alternatively, just remove the .tolist and make all onp
+    """recursively turn all jax arrays or np arrays into lists."""
+    out = {}
+    for k, v in dictionary.items():
+        if isinstance(v, collections.Mapping):
+            out[k] = tolist(v)
+        elif type(v) is list and len(v) < 30:
+            try:
+                out[k] = [tolist(element) for element in v] # v might be a list of dicts...
+            except AttributeError: # ...or not.
+                out[k] = onp.asarray(v).tolist()
+        else:
+            out[k] = onp.asarray(v).tolist()
+    return out
+
 
 def generate_pd_matrix(dim):
     A = onp.random.rand(dim, dim) * 2

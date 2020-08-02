@@ -8,6 +8,7 @@ enable_float64 = False
 from jax.config import config
 config.update("jax_enable_x64", enable_float64)
 config.update("jax_debug_nans", True)
+from jax import random
 
 from svgd import SVGD
 import numpy as onp
@@ -54,7 +55,7 @@ def run(cfg: dict, logdir: str):
         except FileExistsError:
             rundir = rundir[:-1] + datetime.datetime.now().strftime(".%f/")
             os.makedirs(rundir)
-        print(f"Running. Writing to {logdir}.")
+        print(f"Writing results to {logdir}.")
         files = [rundir + f for f in ["config.json", "rundata.json", "metrics.json"]]
         return files
 
@@ -66,6 +67,8 @@ def run(cfg: dict, logdir: str):
         #duration= time.strftime("%H:%M:%S", time.gmtime(et - t))
         with open(configfile, "w") as f:
             json.dump(cfg,                   f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
+        del rundata["particles"]
+        print(utils.tolist(rundata))
         with open(rundatafile, "w") as f:
             json.dump(utils.tolist(rundata), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
         with open(metricfile, "w") as f:
@@ -152,10 +155,73 @@ def grid_search(base_config, sweep_config, logdir, num_experiments="?"):
         run(run_config, logdir)
         counter += 1
 
+def random_search(key, base_config: dict, sweep_config: dict, hparams: list,
+                  logdir: str, n_random_samples: int):
+    """
+    Arguments:
+    * key: PRNGKey
+    * base_config: complete base config (eg the one in config.py)
+    * sweep_config: same tree structure as base_config, but potentially missing entries.
+      All entries are lists of values.
+    * hparams: list of strings, e.g. ["lr_ksd", "lambda_reg"]
+    * logdir: where to log runs
+    * n_random_samples: number of randomly sampled hparams per sweep config
+
+    1) Iterate through values in sweep_config
+    2) For each config, sample hparams randomly and run. repeat this x times
+
+    config parameters:
+    * encoder_layers
+    * decoder_layers
+    * target_args
+    * ...
+
+    hparams:
+    * lr_ksd
+    * lr_svgd
+    * lambda_reg
+    """
+    num_experiments = onp.prod([len(v) for v in utils.flatten_dict(sweep_config).values()])
+    num_experiments *= n_random_samples
+
+    os.makedirs(logdir, exist_ok=True)
+    starttime = time.strftime("%Y-%m-%d__%H:%M:%S__sweep-config")
+    with open(logdir + starttime + ".json", "w") as f:
+        json.dump([base_config, sweep_config], f, ensure_ascii=False,
+                  indent=4, sort_keys=True)
+
+    svgd_configs  = utils.dict_cartesian_product(**sweep_config["svgd"])
+    train_configs = utils.dict_cartesian_product(**sweep_config["train_kernel"])
+    counter=1
+    for svgd_config, train_config in itertools.product(svgd_configs, train_configs):
+        key, subkey = random.split(key)
+        for subkey in random.split(subkey, n_random_samples):
+            print()
+            print(f"Run {counter}/{num_experiments}")
+            run_options = {}
+            run_options.update(svgd_config)
+            run_options.update(train_config)
+            run_options.update(sample_hparams(subkey, *hparams))
+            run_options = config.flat_to_nested(run_options)
+
+            run_config = make_config(base_config, run_options)
+            run(run_config, logdir)
+            counter += 1
+
+def sample_hparams(key, *names):
+    keys = random.split(key, len(names))
+    samplers = {
+        "lr_ksd":     lambda key: 10**random.uniform(key, minval=-3, maxval=1),
+        "lr_svgd":    lambda key: 10**random.uniform(key, minval=-2, maxval=2),
+        "lambda_reg": lambda key: 10**random.uniform(key, minval=-2, maxval=2),
+    }
+    return {name: float(samplers[name](key)) for name, key in zip(names, keys)}
+
+
 if __name__ == "__main__":
-    logdir = "./runs/two-dim/"
-    num_lr = 7
-    d = 2
+    key = random.PRNGKey(0)
+    logdir = "./test-runs/two-dim/"
+    d = 1
     k = None
     if k is None:
         target = ["Gaussian"]
@@ -169,20 +235,17 @@ if __name__ == "__main__":
         [16, 16, 16, 2],
     ]
 
-    optimizer_ksd_args = onp.logspace(-2, 1, num=num_lr).reshape((num_lr,1))
-    lambda_reg = onp.logspace(-2, 3, num=num_lr).reshape((num_lr,1))
     svgd_steps = [1]
     ksd_steps = [1, 2, 5]
-    n_iter = [50]
+    n_iter = [5]
 
     onp.random.seed(0)
     target_args=[utils.generate_parameters_for_gaussian(d, k)]
-    n_particles = [5000]
+    n_particles = [3000]
     n_subsamples = [200]
 
     sweep_config = config.flat_to_nested(dict(
         train=[True],
-        optimizer_ksd_args=optimizer_ksd_args,
         encoder_layers=encoder_layers,
         svgd_steps=svgd_steps,
         ksd_steps=ksd_steps,
@@ -204,7 +267,10 @@ if __name__ == "__main__":
     print(f"Number of modes in mixture: {k if k is not None else 1}")
     print(f"Number of experiments: {num_experiments}")
     print()
-    #grid_search(config.config, sweep_config, logdir, num_experiments)
+    key, subkey = random.split(key)
+    hparams = ["lr_ksd", "lambda_reg"]
+    n_random_samples = 5
+    random_search(subkey, config.config, sweep_config, hparams, logdir, n_random_samples)
 
     # vanilla runs
     vanilla_config = config.flat_to_nested(dict(

@@ -322,5 +322,5 @@ def sqrt_kxx(kernel: callable, particles_a, particles_b):
     def sqrt_k(x, y): return np.sqrt(kernel(x, y))
     sv  = vmap(sqrt_k, (0, None))
     svv = vmap(sv,     (None, 0))
-    return np.mean(svv)
+    return np.mean(svv(particles_a, particles_b))
 #    return np.mean(vmap(sqrt_k)(particles_a, particles_b))

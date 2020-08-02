@@ -65,6 +65,7 @@ class SVGD():
 
     # can't jit this I think
     def phistar(self, particles, subsample, encoder_params):
+        """Returns tuple (particle_updates, auxdata)"""
         return stein.phistar(particles, subsample, self.target.logpdf, self.get_kernel_fn(encoder_params))
 
     def ksd_squared(self, encoder_params, particles_a, particles_b):
@@ -115,20 +116,17 @@ class SVGD():
         key, key1, key2 = random.split(key, 3)
         particles = init_svgd(key1, self.particle_shape)
         opt_svgd_state = self.opt.init(particles)
-        train_idx, validation_idx = random.permutation(key2, np.arange(self.n_particles)).split(2)
+        leader_idx, train_idx, validation_idx = random.permutation(key2, np.arange(self.n_particles)).split(3)
 
         x_dummy = self.target.sample(1)
         x_dummy = np.reshape(x_dummy, newshape=(self.target.d,))
         key, key1, key2 = random.split(key, 3)
         encoder_params = self.encoder.init(key1, x_dummy)
-        decoder_params = self.decoder.init(key2, x_dummy)
+        decoder_params = self.decoder.init(key2, self.encoder.apply(encoder_params, None, x_dummy))
         opt_enc_state = opt_ksd.init(encoder_params)
         opt_dec_state = opt_ksd.init(decoder_params)
 
-        rundata = dict(
-                       update_to_weight_ratio=[],
-                       mean=[], var=[], ksd_after_svgd_update=[])
-
+        rundata = dict()
         def update_kernel(key, opt_enc_state, opt_dec_state, particle_batch, step: int):
             """performs a single ksd update and logs results.
             Returns updated_opt_ksd_state: container for the updated ksd particles and optimizer state
@@ -152,10 +150,10 @@ class SVGD():
             metrics.append_to_log(rundata, {
                 "ksd_before_kernel_update": ksd_pre_update,
                 "ksd_before_kernel_update_val": -self.negative_ksd_squared_batched(encoder_params_pre_update, *validation_subsamples),
-#                "update_to_weight_ratio": utils.compute_update_to_weight_ratio(encoder_params_pre_update, encoder_params),
-#                "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)]
-#                "regularized_loss": regularized_loss,
-#                "autoencoder_loss": autoencoder_loss,
+                "update_to_weight_ratio": utils.compute_update_to_weight_ratio(encoder_params_pre_update, encoder_params),
+                "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)] (has to be finite)
+                "regularized_loss": regularized_loss,
+                "autoencoder_loss": autoencoder_loss,
             })
             return updated_opt_enc_state, updated_opt_dec_state
 
@@ -165,22 +163,28 @@ class SVGD():
             particles = self.opt.get_params(opt_svgd_state)
             key, subkey = random.split(key)
             subsample = utils.subsample(subkey, particles[train_idx], self.n_subsamples, replace=self.subsample_with_replacement)
-            gp = -self.phistar(particles, subsample, encoder_params)
-            updated_opt_svgd_state = self.opt.update(step, gp, opt_svgd_state)
+            negdKL, auxdata = self.phistar(particles, subsample, encoder_params) # auxdata has shape (n_particles, 2, d)
+            dKL = -negdKL
+            updated_opt_svgd_state = self.opt.update(step, dKL, opt_svgd_state)
 
             # compute KSD, validation KSD, and log rundata
             updated_particles = self.opt.get_params(updated_opt_svgd_state)
             key1, key2, key = random.split(key, 3)
-            subsamples            = utils.subsample(key1, updated_particles[train_idx],      self.n_subsamples*2, replace=self.subsample_with_replacement).split(2)
+            subsamples            = utils.subsample(key1, updated_particles[leader_idx],      self.n_subsamples*2, replace=self.subsample_with_replacement).split(2)
             validation_subsamples = utils.subsample(key2, updated_particles[validation_idx], self.n_subsamples*2, replace=self.subsample_with_replacement).split(2)
+            mean_auxdata = np.mean(auxdata, axis=0)
             metrics.append_to_log(rundata, self.target.compute_metrics(updated_particles))
             metrics.append_to_log(rundata, {
-                "training_mean": np.mean(updated_particles[train_idx], axis=0),
-                "training_var": np.var(updated_particles[train_idx], axis=0),
+                "leader_mean":     np.mean(updated_particles[leader_idx], axis=0),
+                "training_mean":   np.mean(updated_particles[train_idx], axis=0),
                 "validation_mean": np.mean(updated_particles[validation_idx], axis=0),
-                "validation_var": np.var(updated_particles[validation_idx], axis=0),
+                "leader_var":      np.var(updated_particles[leader_idx], axis=0),
+                "training_var":    np.var(updated_particles[train_idx], axis=0),
+                "validation_var":  np.var(updated_particles[validation_idx], axis=0),
                 "ksd_after_svgd_update":     self.ksd_squared(encoder_params, *subsamples),
                 "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, *validation_subsamples),
+                "mean_drift": mean_auxdata[0],
+                "mean_repulsion": mean_auxdata[1],
             })
             return updated_opt_svgd_state
 
@@ -228,20 +232,30 @@ class SVGD():
         key, subkey = random.split(key)
         particles = init_svgd(subkey, self.particle_shape)
         key, subkey = random.split(key)
-        train_idx, validation_idx = random.permutation(subkey, np.arange(self.n_particles)).split(2)
+        leader_idx, validation_idx = random.permutation(subkey, np.arange(self.n_particles)).split(2)
         opt_svgd_state = self.opt.init(particles)
         rundata = dict()
         for i in tqdm(range(n_iter)):
             particles = self.opt.get_params(opt_svgd_state)
             key, subkey = random.split(key)
-            subsample = utils.subsample(subkey, particles[train_idx], self.n_subsamples, replace=self.subsample_with_replacement)
-            gp = -self.phistar(particles, subsample, encoder_params)
-            opt_svgd_state = self.opt.update(i, gp, opt_svgd_state)
+            subsample = utils.subsample(subkey, particles[leader_idx], self.n_subsamples, replace=self.subsample_with_replacement)
+            negdKL, auxdata = self.phistar(particles, subsample, encoder_params)
+            dKL = -negdKL
+            opt_svgd_state = self.opt.update(i, dKL, opt_svgd_state)
+            # subsamples for ksd
+            key1, key2, key = random.split(key, 3)
+            subsamples            = utils.subsample(key1, particles[leader_idx],     self.n_subsamples*2, replace=self.subsample_with_replacement).split(2)
+            validation_subsamples = utils.subsample(key2, particles[validation_idx], self.n_subsamples*2, replace=self.subsample_with_replacement).split(2)
+            mean_auxdata = np.mean(auxdata, axis=0)
             metrics.append_to_log(rundata, {
-                "mean": np.mean(particles[train_idx], axis=0),
-                "var":  np.var(particles[train_idx], axis=0),
+                "training_mean": np.mean(particles[leader_idx], axis=0),
+                "training_var":  np.var(particles[leader_idx], axis=0),
                 "validation_mean": np.mean(particles[validation_idx], axis=0),
                 "validation_var":  np.var(particles[validation_idx], axis=0),
+                "ksd_after_svgd_update":     self.ksd_squared(encoder_params, *subsamples),
+                "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, *validation_subsamples),
+                "mean_drift": mean_auxdata[0],
+                "mean_repulsion": mean_auxdata[1],
             })
         rundata["particles"] = self.opt.get_params(opt_svgd_state)
         rundata["Interrupted because of NaN"] = False
