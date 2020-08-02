@@ -68,7 +68,6 @@ def run(cfg: dict, logdir: str):
         with open(configfile, "w") as f:
             json.dump(cfg,                   f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
         del rundata["particles"]
-        print(utils.tolist(rundata))
         with open(rundatafile, "w") as f:
             json.dump(utils.tolist(rundata), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
         with open(metricfile, "w") as f:
@@ -173,6 +172,7 @@ def random_search(key, base_config: dict, sweep_config: dict, hparams: list,
     config parameters:
     * encoder_layers
     * decoder_layers
+    * ksd_steps
     * target_args
     * ...
 
@@ -220,7 +220,7 @@ def sample_hparams(key, *names):
 
 if __name__ == "__main__":
     key = random.PRNGKey(0)
-    logdir = "./test-runs/two-dim/"
+    logdir = "./runs/two-dim/"
     d = 1
     k = None
     if k is None:
@@ -267,9 +267,9 @@ if __name__ == "__main__":
     print(f"Number of modes in mixture: {k if k is not None else 1}")
     print(f"Number of experiments: {num_experiments}")
     print()
-    key, subkey = random.split(key)
     hparams = ["lr_ksd", "lambda_reg"]
-    n_random_samples = 5
+    n_random_samples = 30
+    key, subkey = random.split(key)
     random_search(subkey, config.config, sweep_config, hparams, logdir, n_random_samples)
 
     # vanilla runs
@@ -286,4 +286,7 @@ if __name__ == "__main__":
     print("Starting vanilla runs:")
     print(f"Number of runs: {num_experiments}")
     print()
-    grid_search(config.config, vanilla_config, logdir, num_experiments)
+    key, subkey = random.split(key)
+    vanilla_hparams = []
+    n_random_samples = 1
+    random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples)

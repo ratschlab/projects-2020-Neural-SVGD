@@ -13,6 +13,9 @@ import utils
 import metrics
 import stein
 
+import os
+on_cluster = not os.getenv("HOME") == "/home/lauro"
+disable_tqdm = on_cluster
 
 class Optimizer():
     def __init__(self, opt_init, opt_update, get_params):
@@ -198,7 +201,7 @@ class SVGD():
             encoder_params = opt_ksd.get_params(opt_enc_state)
             particles = self.opt.get_params(opt_svgd_state)
             particle_batch = [particles]
-            for i in tqdm(range(n_iter)):
+            for i in tqdm(range(n_iter), disable=disable_tqdm):
                 particle_batch = np.asarray(particle_batch, dtype=np.float64) # large batch
                 for j in range(ksd_steps):
                     step = current_step(i, j, ksd_steps)
@@ -235,7 +238,7 @@ class SVGD():
         leader_idx, validation_idx = random.permutation(subkey, np.arange(self.n_particles)).split(2)
         opt_svgd_state = self.opt.init(particles)
         rundata = dict()
-        for i in tqdm(range(n_iter)):
+        for i in tqdm(range(n_iter), disable=disable_tqdm):
             particles = self.opt.get_params(opt_svgd_state)
             key, subkey = random.split(key)
             subsample = utils.subsample(subkey, particles[leader_idx], self.n_subsamples, replace=self.subsample_with_replacement)
