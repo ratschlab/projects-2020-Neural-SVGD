@@ -220,7 +220,7 @@ def sample_hparams(key, *names):
 
 if __name__ == "__main__":
     key = random.PRNGKey(0)
-    logdir = "./test-runs/two-dim/"
+    logdir = "./runs/two-dim/"
     d = 2
     k = None
     if k is None:
@@ -236,8 +236,8 @@ if __name__ == "__main__":
     ]
 
     svgd_steps = [1]
-    ksd_steps = [1, 5]
-    n_iter = [5]
+    ksd_steps = [5, 10]
+    n_iter = [70]
 
     onp.random.seed(0)
     target_args=[utils.generate_parameters_for_gaussian(d, k)]
@@ -270,7 +270,7 @@ if __name__ == "__main__":
     print(f"Number of experiments: {num_experiments}")
     print()
     hparams = ["lr_ksd", "lambda_reg"]
-    n_random_samples = 30
+    n_random_samples = 50
     key, subkey = random.split(key)
     random_search(subkey, config.config, sweep_config, hparams, logdir, n_random_samples)
 
