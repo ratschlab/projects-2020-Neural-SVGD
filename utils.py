@@ -8,7 +8,6 @@ from functools import wraps
 import itertools
 
 from collections.abc import Iterable
-from collections import Mapping
 import collections
 import warnings
 
@@ -239,7 +238,7 @@ def dict_concatenate(dict_list):
     arrays consisting of the concatenation of the values in the input dictionaries.
     """
     for d in dict_list:
-        if type(d) is not dict:
+        if not isinstance(d, collections.Mapping):
             raise TypeError("Input has to be a list consisting of dictionaries.")
         elif not all([dict_list[i].keys() == dict_list[i+1].keys() for i in range(len(dict_list)-1)]):
             raise ValueError("The keys of all input dictionaries need to match.")
@@ -252,7 +251,6 @@ def dict_concatenate(dict_list):
             out[k] = np.asarray(v)
         except TypeError:
             out[k] = dict_concatenate(v)
-
     return out
 
 def dict_mean(dict_list):
@@ -298,7 +296,7 @@ def flatten_dict(d):
     def visit(subdict):
         flat = []
         for k, v in subdict.items():
-            if isinstance(v, Mapping):
+            if isinstance(v, collections.Mapping):
                 flat.extend(visit(v))
             else:
                 flat.append((k, v))
@@ -334,7 +332,7 @@ def tolist(dictionary): # alternatively, just remove the .tolist and make all on
     for k, v in dictionary.items():
         if isinstance(v, collections.Mapping):
             out[k] = tolist(v)
-        elif type(v) is list and len(v) < 30:
+        elif type(v) is list and len(v) < 4:
             try:
                 out[k] = [tolist(element) for element in v] # v might be a list of dicts...
             except AttributeError: # ...or not.

@@ -1,3 +1,4 @@
+# coding: utf-8
 import os
 import time
 import datetime
@@ -67,7 +68,6 @@ def run(cfg: dict, logdir: str):
         #duration= time.strftime("%H:%M:%S", time.gmtime(et - t))
         with open(configfile, "w") as f:
             json.dump(cfg,                   f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
-        del rundata["particles"]
         with open(rundatafile, "w") as f:
             json.dump(utils.tolist(rundata), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
         with open(metricfile, "w") as f:
@@ -220,7 +220,7 @@ def sample_hparams(key, *names):
 
 if __name__ == "__main__":
     key = random.PRNGKey(0)
-    logdir = "./runs/two-dim/"
+    logdir = "./test-runs/two-dim/"
     d = 2
     k = None
     if k is None:

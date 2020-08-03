@@ -246,6 +246,7 @@ class SVGD():
             traceback.print_exc()
             rundata["Interrupted because of NaN"] = True
 
+        rundata["update_to_weight_ratio"] = utils.dict_concatenate(rundata["update_to_weight_ratio"])
         rundata["particles"] =     self.opt.get_params(opt_svgd_state)
         rundata["encoder_params"] = opt_ksd.get_params(opt_enc_state)
         rundata["decoder_params"] = opt_ksd.get_params(opt_dec_state)
