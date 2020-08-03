@@ -22,6 +22,7 @@ config["svgd"] = {
     "encoder_layers": [4, 4, 2],
     "decoder_layers": [4, 4, 2],
     "kernel": "ard", # no alternatives atm
+    "minimize_ksd_variance": True,
 }
 
 config["train_kernel"] = {
@@ -70,6 +71,7 @@ def get_svgd_args(config):
         "n_particles": svgd_config["n_particles"],
         "n_subsamples": svgd_config["n_subsamples"],
         "subsample_with_replacement": svgd_config["subsample_with_replacement"],
+        "minimize_ksd_variance": svgd_config["minimize_ksd_variance"],
         "optimizer_svgd": svgd.Optimizer(
             *optimizer(svgd_config["lr_svgd"])),
         "kernel": kernels.ard(logh=0),

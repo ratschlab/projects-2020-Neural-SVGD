@@ -79,7 +79,7 @@ def run(cfg: dict, logdir: str):
     else:
         rundata = svgd.sample(**config.get_sample_args(cfg["train_kernel"]))
     if not rundata["Interrupted because of NaN"]:
-        metrics_dict = metrics.compute_final_metrics(rundata["particles"], svgd)
+        metrics_dict = metrics.compute_final_metrics(rundata["particles"][rundata["validation_idx"]], svgd)
     else:
         metrics_dict = dict()
     write_results(rundata, metrics_dict)
@@ -213,15 +213,15 @@ def sample_hparams(key, *names):
     samplers = {
         "lr_ksd":     lambda key: 10**random.uniform(key, minval=-3, maxval=1),
         "lr_svgd":    lambda key: 10**random.uniform(key, minval=-2, maxval=2),
-        "lambda_reg": lambda key: 10**random.uniform(key, minval=-2, maxval=2),
+        "lambda_reg": lambda key: 10**random.uniform(key, minval=-5, maxval=2),
     }
     return {name: float(samplers[name](key)) for name, key in zip(names, keys)}
 
 
 if __name__ == "__main__":
     key = random.PRNGKey(0)
-    logdir = "./runs/two-dim/"
-    d = 1
+    logdir = "./test-runs/two-dim/"
+    d = 2
     k = None
     if k is None:
         target = ["Gaussian"]
@@ -231,18 +231,19 @@ if __name__ == "__main__":
     # sweep_config
     encoder_layers = [
         [4, 4, 2],
-        [16, 16, 2],
-        [16, 16, 16, 2],
+        [4, 4, 1],
+        [16, 32, 32, 32, 2],
     ]
 
     svgd_steps = [1]
-    ksd_steps = [1, 2, 5]
+    ksd_steps = [1, 5]
     n_iter = [5]
 
     onp.random.seed(0)
     target_args=[utils.generate_parameters_for_gaussian(d, k)]
-    n_particles = [3000]
-    n_subsamples = [200]
+    n_particles = [6000]
+    n_subsamples = [100] # recall subsamples for ksd are 20x this
+    minimize_ksd_variance = [True]
 
     sweep_config = config.flat_to_nested(dict(
         train=[True],
@@ -254,6 +255,7 @@ if __name__ == "__main__":
         n_particles=n_particles,
         n_subsamples=n_subsamples,
         n_iter=n_iter,
+        minimize_ksd_variance=minimize_ksd_variance,
     ))
 
     num_experiments = onp.prod([len(v) for v in utils.flatten_dict(sweep_config).values()])
@@ -281,6 +283,7 @@ if __name__ == "__main__":
         n_particles=n_particles,
         n_subsamples=n_subsamples,
         n_iter=n_iter,
+        minimize_ksd_variance=minimize_ksd_variance,
     ))
     num_experiments = onp.prod([len(v) for v in utils.flatten_dict(vanilla_config).values()])
     print("Starting vanilla runs:")

@@ -1,5 +1,6 @@
+from functools import partial
 import jax.numpy as np
-from jax import grad, vmap, random, jacfwd
+from jax import grad, vmap, random, jacfwd, jit
 from jax.ops import index_update, index
 
 def stein_operator(fun, x, logp, transposed=False, aux=False):
@@ -113,6 +114,36 @@ def phistar(followers, leaders, logp, kernel):
 #
 #     return np.mean(phi_matrix, axis=1)
 
+@partial(jit, static_argnums=(1,2))
+def ksd_squared_u(xs, logp, k):
+    """
+    U-statistic for KSD^2. Computation in O(n^2)
+    Arguments:
+    * xs: np.array of shape (n, d)
+    * logp: callable
+    * k: callable, computes scalar-valued kernel k(x, y) given two input arguments.
+
+    Returns:
+    The square of the stein discrepancy KSD(q, p).
+    KSD is approximated as $1 / n(n-1) \sum_{i \neq j} g(x_i, x_j)$, where the x are iid distributed as q
+    """
+    def g(x, y):
+        """x, y: np.arrays of shape (d,)"""
+        def inner(x):
+            kx = lambda y_: k(x, y_)
+            return stein_operator(kx, y, logp)
+        return stein_operator(inner, x, logp, transposed=True)
+    gv  = vmap(g,  (0, None))
+    gvv = vmap(gv, (None, 0))
+    ksd_matrix = gvv(xs, xs)
+
+    n = xs.shape[0]
+    diagonal_indices = [list(range(n))]*2
+    ksd_matrix = index_update(ksd_matrix, diagonal_indices, 0)
+
+    return np.sum(ksd_matrix) / (n * (n-1))
+
+@partial(jit, static_argnums=(2,3))
 def ksd_squared(xs, ys, logp, k):
     """
     O(n*m)
@@ -137,9 +168,10 @@ def ksd_squared(xs, ys, logp, k):
     ksd_matrix = gvv(xs, ys)
     return np.mean(ksd_matrix)
 
-def _ksd_squared(xs, ys, logp, k):
+@partial(jit, static_argnums=(2,3,4))
+def ksd_squared_l(xs, ys, logp, k, return_variance=False):
     """
-    O(n)
+    O(n) time estimator for the KSD.
     Arguments:
     * xs: np.array of shape (n, d)
     * ys: np.array of shape (n, d) (can be the same array as xs)
@@ -147,13 +179,31 @@ def _ksd_squared(xs, ys, logp, k):
     * k: callable, computes scalar-valued kernel k(x, y) given two input arguments of shape (d,).
 
     Returns:
-    The square of the stein discrepancy KSD(q, p).
+    * The square of the stein discrepancy KSD(q, p).
     KSD is approximated as $\sum_i g(x_i, y_i)$, where the x and y are iid distributed as q
+    * The approximate variance of h(X, Y)
     """
-    def g(x, y):
+    if xs.shape != ys.shape: raise ValueError(f"xs and ys must have same shape. Instead, received shapes {xs.shape} and {ys.shape}.")
+    def h(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):
             kx = lambda y_: k(x, y_)
             return stein_operator(kx, y, logp)
         return stein_operator(inner, x, logp, transposed=True)
-    return np.mean(vmap(g)(xs, ys))
+    outs = vmap(h)(xs, ys)
+    if return_variance:
+        return np.mean(outs), np.var(outs, ddof=1) / xs.shape[0]
+    else:
+        return np.mean(outs)
+
+@partial(jit, static_argnums=(2,3))
+def h_var(xs, ys, logp, k):
+    """Estimate for Var(h(X, Y))
+    Recall Var(KSD_L) = 1/n Var(h(X, Y))"""
+    def h(x, y):
+        """x, y: np.arrays of shape (d,)"""
+        def inner(x):
+            kx = lambda y_: k(x, y_)
+            return stein_operator(kx, y, logp)
+        return stein_operator(inner, x, logp, transposed=True)
+    return np.var(vmap(h)(xs, ys), ddof=1) # unbiased variance

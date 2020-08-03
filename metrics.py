@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jacrev
 from jax.scipy import stats, special
@@ -20,14 +22,13 @@ class Distribution():
         self.expectations = None
         self.sample_metrics = None
         self.d = None
-        self.ksd_grid = (0.1, 1, 10)
         self.initialize_metric_names()
         pass
 
-    key = random.PRNGKey(0)
+    threadkey = random.PRNGKey(0)
 
     def newkey(self):
-        self.key = random.split(self.key)[0]
+        self.threadkey, self.key = random.split(self.threadkey)
 
     def sample(self, shape):
         raise NotImplementedError()
@@ -59,7 +60,6 @@ class Distribution():
     def get_metrics_shape(self):
         shapes = {
             "square_errors": (4, self.d)
-            #        "ksds": (len(self.ksd_grid),)
         }
         if self.d == 1:
             shapes["KL Divergence"] = (1,)
@@ -68,7 +68,6 @@ class Distribution():
     def initialize_metric_names(self):
         self.metric_names = {
             "square_errors": [f"SE for {val}" for val in ["X", "X^2", "cos(X)", "sin(X)"]]
-#            "ksds": [f"KSD for h = {h}" for h in self.ksd_grid]
         }
         if self.d == 1:
             self.metric_names["KL Divergence"] = "Estimated KL Divergence"
@@ -134,7 +133,6 @@ class Gaussian(Distribution):
         self.key = random.PRNGKey(0)
         self.sample_metrics = dict()
 
-        self.ksd_grid = (0.1, 1, 10)
         self.initialize_metric_names()
         return None
 
@@ -217,7 +215,6 @@ class GaussianMixture(Distribution):
         self.cov = np.average(covs + mumut, weights=weights, axis=0) - np.outer(mean, mean)
         self.sample_metrics = dict()
 
-        self.ksd_grid = (0.1, 1, 10)
         self.initialize_metric_names()
         return None
 
