@@ -290,6 +290,10 @@ class SVGD():
                 "mean_drift": mean_auxdata[0],
                 "mean_repulsion": mean_auxdata[1],
             })
+
+        rundata.update({
+            k: v for k, v in zip(("leader_idx", "validation_idx"), (leader_idx, validation_idx))
+        })
         rundata["particles"] = self.opt.get_params(opt_svgd_state)
         rundata["Interrupted because of NaN"] = False
         return rundata

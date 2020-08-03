@@ -39,7 +39,7 @@ containing, respectively,
 """
 
 
-def run(cfg: dict, logdir: str):
+def run(key, cfg: dict, logdir: str):
     """Run experiment based on cfg. Log results in logdir.
     Arguments:
     * cfg: entire config (including svgd config) - this will be logged.
@@ -75,9 +75,9 @@ def run(cfg: dict, logdir: str):
 
     svgd = SVGD(**config.get_svgd_args(cfg))
     if cfg["train_kernel"]["train"]:
-        _, rundata = svgd.train_kernel(**config.get_train_args(cfg["train_kernel"]))
+        _, rundata = svgd.train_kernel(key, **config.get_train_args(cfg["train_kernel"]))
     else:
-        rundata = svgd.sample(**config.get_sample_args(cfg["train_kernel"]))
+        rundata = svgd.sample(key, **config.get_sample_args(cfg["train_kernel"]))
     if not rundata["Interrupted because of NaN"]:
         metrics_dict = metrics.compute_final_metrics(rundata["particles"][rundata["validation_idx"]], svgd)
     else:
@@ -204,8 +204,9 @@ def random_search(key, base_config: dict, sweep_config: dict, hparams: list,
             run_options.update(sample_hparams(subkey, *hparams))
             run_options = config.flat_to_nested(run_options)
 
+            key, skey = random.split(key)
             run_config = make_config(base_config, run_options)
-            run(run_config, logdir)
+            run(skey, run_config, logdir)
             counter += 1
 
 def sample_hparams(key, *names):
@@ -220,8 +221,9 @@ def sample_hparams(key, *names):
 
 if __name__ == "__main__":
     key = random.PRNGKey(0)
-    logdir = "./test-runs/two-dim/"
     d = 2
+    logdir = "./test-runs/two-dim/"
+    n_iter = [3]
     k = None
     if k is None:
         target = ["Gaussian"]
@@ -232,12 +234,11 @@ if __name__ == "__main__":
     encoder_layers = [
         [4, 4, 2],
         [4, 4, 1],
-        [16, 32, 32, 32, 2],
+        [16, 16, 32, 16, 2],
     ]
 
     svgd_steps = [1]
     ksd_steps = [5, 10]
-    n_iter = [70]
 
     onp.random.seed(0)
     target_args=[utils.generate_parameters_for_gaussian(d, k)]
@@ -258,23 +259,6 @@ if __name__ == "__main__":
         minimize_ksd_variance=minimize_ksd_variance,
     ))
 
-    num_experiments = onp.prod([len(v) for v in utils.flatten_dict(sweep_config).values()])
-
-    print()
-    print("Starting experiment:")
-    print(f"Target dimension: {d}")
-    if target == ["Gaussian"]:
-        print(f"Target shape: Gaussian with parameters:\n* mean {target_args[0][0]}\n* variance {target_args[0][1]}")
-    print(f"Float64 enabled: {enable_float64}")
-    print(f"Number of modes in mixture: {k if k is not None else 1}")
-    print(f"Number of experiments: {num_experiments}")
-    print()
-    hparams = ["lr_ksd", "lambda_reg"]
-    n_random_samples = 50
-    key, subkey = random.split(key)
-    random_search(subkey, config.config, sweep_config, hparams, logdir, n_random_samples)
-
-    # vanilla runs
     vanilla_config = config.flat_to_nested(dict(
         train=[False],
         svgd_steps=svgd_steps,
@@ -285,11 +269,22 @@ if __name__ == "__main__":
         n_iter=n_iter,
         minimize_ksd_variance=minimize_ksd_variance,
     ))
-    num_experiments = onp.prod([len(v) for v in utils.flatten_dict(vanilla_config).values()])
-    print("Starting vanilla runs:")
-    print(f"Number of runs: {num_experiments}")
-    print()
+
+    hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
+    vanilla_hparams = ["lr_svgd"]
+    n_random_samples = 20
     key, subkey = random.split(key)
-    vanilla_hparams = []
-    n_random_samples = 1
-    random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples)
+
+    # vanilla runs
+    key, subkey = random.split(key)
+    n_random_samples_vanilla = 15
+
+    print("Starting experiments.")
+    print(f"Target dimension: {d}")
+    if target == ["Gaussian"]:
+        print(f"Target shape: Gaussian with parameters:\n* mean {target_args[0][0]}\n* variance {target_args[0][1]}")
+    print(f"Float64 enabled: {enable_float64}")
+    print(f"Number of modes in mixture: {k if k is not None else 1}")
+    print()
+    random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
+    random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)

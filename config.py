@@ -26,7 +26,6 @@ config["svgd"] = {
 }
 
 config["train_kernel"] = {
-    "key": 0,
     "n_iter": 5,
     "ksd_steps": 1,
     "svgd_steps": 1,
@@ -98,7 +97,6 @@ def get_train_args(train_config):
         "want to train the encoder, but it's currently set to False.")
     optimizer = opts[train_config["optimizer_ksd"]]
     kwargs = {key: train_config[key] for key in ["n_iter", "ksd_steps", "svgd_steps"]}
-    kwargs["key"] = random.PRNGKey(train_config["key"])
     kwargs["opt_ksd"] = svgd.Optimizer(*optimizer(train_config["lr_ksd"]))
     kwargs["lambda_reg"] = train_config["lambda_reg"]
     return kwargs
@@ -109,7 +107,6 @@ def get_sample_args(train_config):
     if "train_kernel" in train_config:
         train_config = train_config["train_kernel"]
     kwargs = {
-        "key": random.PRNGKey(train_config["key"]),
         "n_iter": train_config["n_iter"] * train_config["svgd_steps"]
     }
     if not train_config["train"]:
