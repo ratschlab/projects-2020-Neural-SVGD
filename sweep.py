@@ -181,10 +181,11 @@ def random_search(key, base_config: dict, sweep_config: dict, hparams: list,
 
     svgd_configs  = utils.dict_cartesian_product(**sweep_config["svgd"])
     train_configs = utils.dict_cartesian_product(**sweep_config["train_kernel"])
+    product_config = list(itertools.product(svgd_configs, train_configs))
     counter=1
-    key, subkey = random.split(key)
-    for subkey in random.split(subkey, n_random_samples):
-        for svgd_config, train_config in itertools.product(svgd_configs, train_configs):
+    key, skey = random.split(key)
+    for subkey in random.split(skey, n_random_samples):
+        for svgd_config, train_config in product_config:
             print()
             print(f"Run {counter}/{num_experiments}")
             run_options = {}
@@ -274,7 +275,7 @@ if __name__ == "__main__":
 
     # vanilla runs
     key, subkey = random.split(key)
-    n_random_samples_vanilla = 1
+    n_random_samples_vanilla = 15
 
     print("Starting experiments.")
     print(f"Target dimension: {d}")
