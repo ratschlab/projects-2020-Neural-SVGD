@@ -321,3 +321,13 @@ def sqrt_kxx(kernel: callable, particles_a, particles_b):
     svv = vmap(sv,     (None, 0))
     return np.mean(svv(particles_a, particles_b))
 #    return np.mean(vmap(sqrt_k)(particles_a, particles_b))
+
+### Some nice target distributions
+# 2D
+l = np.asarray((1, 2, 1.5, 3, 3.3, 3.8))
+l = onp.concatenate([-l, [0], l])
+means = list(zip(l, (l**2)**0.8))
+variances = [[1,1]]*len(means)
+weights = [1]*len(means)
+#bent = GaussianMixture(means, variances, weights)
+bent_args = [means, variances, weights]

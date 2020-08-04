@@ -28,7 +28,7 @@ class Optimizer():
 
 @partial(jit, static_argnums=1)
 def init_svgd(key, particle_shape):
-    return random.normal(key, particle_shape) * 2 - 6
+    return random.normal(key, particle_shape) * 2 - 3 # -6
 
 class SVGD():
     def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel, encoder, decoder, subsample_with_replacement: bool, minimize_ksd_variance: bool):

@@ -224,12 +224,14 @@ if __name__ == "__main__":
     d = 2
     logdir = "./test-runs/two-dim/"
     n_iter = [3]
-    k = None
-    if k is None:
-        target = ["Gaussian"]
-    else:
-        target=["Gaussian Mixture"]
-
+#    k = None
+#    if k is None:
+#        target = ["Gaussian"]
+#    else:
+#        target=["Gaussian Mixture"]
+#    target_args=[utils.generate_parameters_for_gaussian(d, k)]
+    target = ["Gaussian Mixture"]
+    target_args = [metrics.bent_args]
     # sweep_config
     encoder_layers = [
         [4, 4, 2],
@@ -241,7 +243,6 @@ if __name__ == "__main__":
     ksd_steps = [5, 10]
 
     onp.random.seed(0)
-    target_args=[utils.generate_parameters_for_gaussian(d, k)]
     n_particles = [6000]
     n_subsamples = [100] # recall subsamples for ksd are 20x this
     minimize_ksd_variance = [True]
@@ -284,7 +285,6 @@ if __name__ == "__main__":
     if target == ["Gaussian"]:
         print(f"Target shape: Gaussian with parameters:\n* mean {target_args[0][0]}\n* variance {target_args[0][1]}")
     print(f"Float64 enabled: {enable_float64}")
-    print(f"Number of modes in mixture: {k if k is not None else 1}")
     print()
     random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
     random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)

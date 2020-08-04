@@ -163,7 +163,7 @@ def plot_3d(x, y, z):
     if ax is None: print("huh?")
     return ax
 
-def plot_pdf(pdf, lims, type="3d", num_gridpoints=150):
+def plot_pdf(pdf, lims, type="contour", num_gridpoints=150):
     """
     Arguments
     * pdf: callable, computes a distribution on R2.
