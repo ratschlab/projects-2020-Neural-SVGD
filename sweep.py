@@ -4,6 +4,7 @@ import time
 import datetime
 import json_tricks as json
 import copy
+import argparse
 
 enable_float64 = False
 from jax.config import config
@@ -37,7 +38,13 @@ containing, respectively,
 * text log with references to other files
 * json dumps of rundata collected during run (eg loss, metrics)
 """
-
+parser = argparse.ArgumentParser()
+parser.add_argument("--key", type=int, default=0, help="Random seed")
+parser.add_argument("--target", type=str, default="", help="Name of target."
+                    "Must be either 'banana' or the emtpy string.")
+parser.add_argument("--dim", type=int, default=2, help="Dimension of target."
+                    "Only needed when --target='', otherwise it is ignored.")
+args = parser.parse_args()
 
 def run(key, cfg: dict, logdir: str):
     """Run experiment based on cfg. Log results in logdir.
@@ -69,9 +76,9 @@ def run(key, cfg: dict, logdir: str):
         with open(configfile, "w") as f:
             json.dump(cfg,                   f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
         with open(rundatafile, "w") as f:
-            json.dump(utils.tolist(rundata), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
+            json.dump(utils.dict_dejaxify(rundata), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
         with open(metricfile, "w") as f:
-            json.dump(utils.tolist(metrics), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
+            json.dump(utils.dict_dejaxify(metrics), f, ensure_ascii=False, indent=4, sort_keys=True, allow_nan=True)
 
     svgd = SVGD(**config.get_svgd_args(cfg))
     if cfg["train_kernel"]["train"]:
@@ -136,24 +143,6 @@ def make_config(base_config: dict, run_options: dict):
             run_config[k] = infer_value(k)
     return config.flat_to_nested(run_config)
 
-def grid_search(base_config, sweep_config, logdir, num_experiments="?"):
-    """traverse cartesian product of lists in sweep_config"""
-    os.makedirs(logdir, exist_ok=True)
-    starttime = time.strftime("%Y-%m-%d__%H:%M:%S__sweep-config")
-    with open(logdir + starttime + ".json", "w") as f:
-        json.dump([base_config, sweep_config], f, ensure_ascii=False, indent=4, sort_keys=True)
-
-    svgd_configs  = utils.dict_cartesian_product(**sweep_config["svgd"])
-    train_configs = utils.dict_cartesian_product(**sweep_config["train_kernel"])
-    counter=1
-    for svgd_config, train_config in itertools.product(svgd_configs, train_configs):
-        print()
-        print(f"Run {counter}/{num_experiments}:")
-        run_options = {"svgd": svgd_config, "train_kernel": train_config}
-        run_config = make_config(base_config, run_options)
-        run(run_config, logdir)
-        counter += 1
-
 def random_search(key, base_config: dict, sweep_config: dict, hparams: list,
                   logdir: str, n_random_samples: int):
     """
@@ -193,9 +182,9 @@ def random_search(key, base_config: dict, sweep_config: dict, hparams: list,
     svgd_configs  = utils.dict_cartesian_product(**sweep_config["svgd"])
     train_configs = utils.dict_cartesian_product(**sweep_config["train_kernel"])
     counter=1
-    for svgd_config, train_config in itertools.product(svgd_configs, train_configs):
-        key, subkey = random.split(key)
-        for subkey in random.split(subkey, n_random_samples):
+    key, subkey = random.split(key)
+    for subkey in random.split(subkey, n_random_samples):
+        for svgd_config, train_config in itertools.product(svgd_configs, train_configs):
             print()
             print(f"Run {counter}/{num_experiments}")
             run_options = {}
@@ -203,7 +192,6 @@ def random_search(key, base_config: dict, sweep_config: dict, hparams: list,
             run_options.update(train_config)
             run_options.update(sample_hparams(subkey, *hparams))
             run_options = config.flat_to_nested(run_options)
-
             key, skey = random.split(key)
             run_config = make_config(base_config, run_options)
             run(skey, run_config, logdir)
@@ -220,18 +208,26 @@ def sample_hparams(key, *names):
 
 
 if __name__ == "__main__":
-    key = random.PRNGKey(0)
-    d = 2
-    logdir = "./test-runs/two-dim/"
-    n_iter = [3]
-#    k = None
-#    if k is None:
-#        target = ["Gaussian"]
-#    else:
-#        target=["Gaussian Mixture"]
-#    target_args=[utils.generate_parameters_for_gaussian(d, k)]
-    target = ["Gaussian Mixture"]
-    target_args = [metrics.bent_args]
+    n_iter = [70]
+    d = args.dim
+    key = random.PRNGKey(args.key)
+    target_name = args.target # one of '', 'banana'. If empty string, then target
+                              # mean and var are chosen randomly.
+    if target_name=="banana": d=2
+    logdir = f"./test-runs/{d}-dim/" if target_name=="" else f"./test-runs/{d}-dim-{target_name}/" 
+    if target_name=="":
+        k = None
+        if k is None:
+            target = ["Gaussian"]
+        else:
+            target=["Gaussian Mixture"]
+        target_args=[utils.generate_parameters_for_gaussian(d, k)]
+    elif target_name=="banana":
+        target = ["Gaussian Mixture"]
+        target_args = [metrics.bent_args]
+    else:
+        raise ValueError("target name must be either 'banana' or the empty string."
+                         f"Instead received: {target_name}.")
     # sweep_config
     encoder_layers = [
         [4, 4, 2],
@@ -273,12 +269,12 @@ if __name__ == "__main__":
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
     vanilla_hparams = ["lr_svgd"]
-    n_random_samples = 20
+    n_random_samples = 100
     key, subkey = random.split(key)
 
     # vanilla runs
     key, subkey = random.split(key)
-    n_random_samples_vanilla = 15
+    n_random_samples_vanilla = 1
 
     print("Starting experiments.")
     print(f"Target dimension: {d}")

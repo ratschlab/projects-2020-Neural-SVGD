@@ -31,7 +31,7 @@ def smooth_and_normalize(vec, normalize=True):
     If vec_i = 0, then out_i = epsilon. If vec_i !=0, then out_i = vec_i - c.
     c is chosen such that sum(vec) == 1.
     """
-    vec = np.asarray(vec, dtype=np.float64)
+    vec = np.asarray(vec, dtype=np.float32)
 
     if normalize:
         vec = vec / vec.sum()
@@ -79,7 +79,7 @@ def get_histogram_likelihoods(samples):
     Returns:
     np.array of same length as samples, consisting of a histogram-based approximation of the pdf q(x_i) at the samples x_i
     """
-    samples = np.asarray(samples, dtype=np.float64)
+    samples = np.asarray(samples, dtype=np.float32)
     samples = np.squeeze(samples)
     if samples.ndim != 1:
         raise ValueError(f"The shape of samples has to be either (n,) or (n,1). Instead received shape {samples.shape}.")
@@ -326,20 +326,30 @@ def nested_dict_contains_key(ndict: collections.Mapping, key):
                     return True
         return False
 
-def tolist(dictionary): # alternatively, just remove the .tolist and make all onp
-    """recursively turn all jax arrays or np arrays into lists."""
+def dejaxify(array, target="list"):
+    if target=="list":
+        return onp.asarray(array).tolist()
+    elif target=="numpy":
+        return onp.asarray(array)
+    else:
+        raise ValueError("target must be one of 'list', 'numpy'.")
+
+def dict_dejaxify(dictionary, target="list"): # alternatively, just remove the .tolist and make all onp
+    """recursively turn all jax arrays into lists or np.arrays.
+    target can be one of 'list', 'numpy'."""
     out = {}
     for k, v in dictionary.items():
         if isinstance(v, collections.Mapping):
-            out[k] = tolist(v)
+            out[k] = dict_dejaxify(v, target=target)
         elif type(v) is list and len(v) < 4:
             try:
-                out[k] = [tolist(element) for element in v] # v might be a list of dicts...
+                out[k] = [dict_dejaxify(element, target=target) for element in v] # v might be a list of dicts...
             except AttributeError: # ...or not.
-                out[k] = onp.asarray(v).tolist()
+                out[k] = dejaxify(v, target=target)
         else:
-            out[k] = onp.asarray(v).tolist()
+            out[k] = dejaxify(v, target=target)
     return out
+
 
 
 def generate_pd_matrix(dim):

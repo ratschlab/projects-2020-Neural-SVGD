@@ -15,7 +15,7 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
     \[ \mathcal A_p [\text{fun}](x) .\]
     This expression takes the form of a scalar if transposed else a dxd matrix
     """
-    x = np.array(x, dtype=np.float64)
+    x = np.array(x, dtype=np.float32)
     if x.ndim != 1:
         raise ValueError(f"x needs to be an np.array of shape (d,). Instead, x has shape {x.shape}")
     fx = fun(x)

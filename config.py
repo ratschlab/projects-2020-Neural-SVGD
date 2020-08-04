@@ -78,7 +78,6 @@ def get_svgd_args(config):
         "decoder": decoder,
     }
     if train:
-        print(train)
         if kwargs["target"].d != svgd_config["decoder_layers"][-1]:
             warnings.warn(f"The size of the last layer of the decoder must equal"
             "the target particle dimension d={kwargs['target'].d}."

@@ -106,7 +106,7 @@ class SVGD():
         def autoencoder_loss(x): return np.linalg.norm(x - dec(enc(x)))**2
         autoenc_loss = np.mean(vmap(autoencoder_loss)(all_particles))
         ksd, ksd_var = self.ksd_squared_batched(encoder_params, particles_a, particles_b)
-        ksd = np.clip(ksd, a_min=0, a_max=None)
+        ksd     = np.clip(ksd,     a_min=0,    a_max=None)
         ksd_var = np.clip(ksd_var, a_min=1e-6, a_max=None)
         aux = [ksd, ksd_var, autoenc_loss]
         if self.minimize_ksd_variance:
@@ -168,6 +168,12 @@ class SVGD():
             key, subkey = random.split(key)
             validation_subsamples = utils.subsample(subkey, particle_batch[:, validation_idx, :], self.n_subsamples_for_ksd*2, replace=self.subsample_with_replacement, axis=1).split(2, axis=1)
             kernel_fn = self.get_kernel_fn(encoder_params)
+            # check if kernel is PD
+            if step % 5 == 0:
+                gram = vmap(vmap(kernel_fn, (0, None)), (None, 0))(*2*[utils.subsample(subkey, particle_batch[-1], 100, False)])
+                is_pd = utils.is_pd(gram)
+            else:
+                is_pd = None
             ksd_val, ksd_variance_val = self.ksd_squared_batched(encoder_params_pre_update, *validation_subsamples)
             metrics.append_to_log(rundata, {
                 "ksd_before_kernel_update": ksd_pre_update,
@@ -178,6 +184,7 @@ class SVGD():
                 # "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)] (has to be finite). O(n^2)
                 "regularized_loss": regularized_loss,
                 "autoencoder_loss": autoencoder_loss,
+                "is_pd": is_pd,
             })
             return updated_opt_enc_state, updated_opt_dec_state
 
@@ -222,7 +229,7 @@ class SVGD():
             particles = self.opt.get_params(opt_svgd_state)
             particle_batch = [particles]
             for i in tqdm(range(n_iter), disable=disable_tqdm):
-                particle_batch = np.asarray(particle_batch, dtype=np.float64) # large batch
+                particle_batch = np.asarray(particle_batch, dtype=np.float32) # large batch
                 for j in range(ksd_steps):
                     step = current_step(i, j, ksd_steps)
                     key, subkey = random.split(key)
@@ -244,6 +251,7 @@ class SVGD():
         except FloatingPointError as e:
             print("printing traceback:")
             traceback.print_exc()
+            rundata = utils.dict_dejaxify(rundata, target="numpy")
             rundata["Interrupted because of NaN"] = True
 
         rundata["update_to_weight_ratio"] = utils.dict_concatenate(rundata["update_to_weight_ratio"])
@@ -264,36 +272,48 @@ class SVGD():
         leader_idx, validation_idx = random.permutation(subkey, np.arange(self.n_particles)).split(2)
         opt_svgd_state = self.opt.init(particles)
         rundata = dict()
-        for i in tqdm(range(n_iter), disable=disable_tqdm):
-            particles = self.opt.get_params(opt_svgd_state)
-            key, subkey = random.split(key)
-            subsample = utils.subsample(subkey, particles[leader_idx], self.n_subsamples, replace=self.subsample_with_replacement)
-            negdKL, auxdata = self.phistar(particles, subsample, encoder_params)
-            dKL = -negdKL
-            opt_svgd_state = self.opt.update(i, dKL, opt_svgd_state)
-            # subsamples for ksd
-            key1, key2, key = random.split(key, 3)
-            subsamples            = utils.subsample(key1, particles[leader_idx],     self.n_subsamples_for_ksd*2, replace=self.subsample_with_replacement).split(2)
-            validation_subsamples = utils.subsample(key2, particles[validation_idx], self.n_subsamples_for_ksd*2, replace=self.subsample_with_replacement).split(2)
-            mean_auxdata = np.mean(auxdata, axis=0)
-            ksd, ksd_variance =         self.ksd_squared(encoder_params, *subsamples, True)
-            ksd_val, ksd_variance_val = self.ksd_squared(encoder_params, *validation_subsamples, True)
-            metrics.append_to_log(rundata, {
-                "leader_mean": np.mean(particles[leader_idx], axis=0),
-                "leader_var":  np.var(particles[leader_idx], axis=0),
-                "validation_mean": np.mean(particles[validation_idx], axis=0),
-                "validation_var":  np.var(particles[validation_idx], axis=0),
-                "ksd_after_svgd_update": ksd,
-                "ksd_after_svgd_update_val": ksd_val,
-                "ksd_variance": ksd_variance,
-                "ksd_variance_val": ksd_variance_val,
-                "mean_drift": mean_auxdata[0],
-                "mean_repulsion": mean_auxdata[1],
-            })
+        def get_samples(key):
+            nonlocal opt_svgd_state
+            nonlocal rundata
+            for i in tqdm(range(n_iter), disable=disable_tqdm):
+                particles = self.opt.get_params(opt_svgd_state)
+                key, subkey = random.split(key)
+                subsample = utils.subsample(subkey, particles[leader_idx], self.n_subsamples, replace=self.subsample_with_replacement)
+                negdKL, auxdata = self.phistar(particles, subsample, encoder_params)
+                dKL = -negdKL
+                opt_svgd_state = self.opt.update(i, dKL, opt_svgd_state)
+                # subsamples for ksd
+                key1, key2, key = random.split(key, 3)
+                subsamples            = utils.subsample(key1, particles[leader_idx],     self.n_subsamples_for_ksd*2, replace=self.subsample_with_replacement).split(2)
+                validation_subsamples = utils.subsample(key2, particles[validation_idx], self.n_subsamples_for_ksd*2, replace=self.subsample_with_replacement).split(2)
+                mean_auxdata = np.mean(auxdata, axis=0)
+                ksd, ksd_variance =         self.ksd_squared(encoder_params, *subsamples, True)
+                ksd_val, ksd_variance_val = self.ksd_squared(encoder_params, *validation_subsamples, True)
+                metrics.append_to_log(rundata, {
+                    "leader_mean": np.mean(particles[leader_idx], axis=0),
+                    "leader_var":  np.var(particles[leader_idx], axis=0),
+                    "validation_mean": np.mean(particles[validation_idx], axis=0),
+                    "validation_var":  np.var(particles[validation_idx], axis=0),
+                    "ksd_after_svgd_update": ksd,
+                    "ksd_after_svgd_update_val": ksd_val,
+                    "ksd_variance": ksd_variance,
+                    "ksd_variance_val": ksd_variance_val,
+                    "mean_drift": mean_auxdata[0],
+                    "mean_repulsion": mean_auxdata[1],
+                })
+            return None
 
+        try:
+            key, subkey = random.split(key)
+            get_samples(subkey)
+            rundata["Interrupted because of NaN"] = False
+            rundata["particles"] = self.opt.get_params(opt_svgd_state)
+        except FloatingPointError as e:
+            print("printing traceback:")
+            traceback.print_exc()
+            rundata["Interrupted because of NaN"] = True
+            rundata = utils.dict_dejaxify(rundata, target="numpy")
         rundata.update({
             k: v for k, v in zip(("leader_idx", "validation_idx"), (leader_idx, validation_idx))
         })
-        rundata["particles"] = self.opt.get_params(opt_svgd_state)
-        rundata["Interrupted because of NaN"] = False
         return rundata
