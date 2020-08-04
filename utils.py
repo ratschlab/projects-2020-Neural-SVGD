@@ -390,7 +390,7 @@ def compute_update_to_weight_ratio(params_pre, params_post):
             try:
                 ratios[k] =  np.linalg.norm(params_post[k] - v) / np.linalg.norm(v)
             except FloatingPointError:
-                pass
+                ratios[k] = np.nan
         elif isinstance(v, collections.Mapping):
             ratios[k] = compute_update_to_weight_ratio(v, params_post[k])
     return ratios
