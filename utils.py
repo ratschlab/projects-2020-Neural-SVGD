@@ -131,12 +131,14 @@ def warn_if_nonfinite(*args):
 
 def is_pd(x):
     """check if matrix is positive defininite"""
-    import numpy as onp
     try:
         onp.linalg.cholesky(x)
         return True
     except onp.linalg.linalg.LinAlgError as err:
-        return False
+        if 'Matrix is not positive definite' in str(err):
+            return False
+        else:
+            raise
 
 ## fori_loop implementation in terms of lax.scan taken from here https://github.com/google/jax/issues/1112
 def fori_loop(lower, upper, body_fun, init_val):
@@ -358,15 +360,15 @@ def generate_pd_matrix(dim):
 
 def generate_parameters_for_gaussian(dim, k=None):
     if k is not None:
-        means = onp.random.rand(k, dim) * 10 # random means in [0, 10]
+        means = onp.random.randint(0, 10, size=(k, dim)) # random means in [0, 10]
         covs = [generate_pd_matrix(dim) for _ in range(k)]
         weights = onp.random.randint(1, 5, k)
         weights = weights / weights.sum()
         return means, covs, weights
     else:
-        mean = onp.random.rand(dim) * 10 # random means in [0, 10]
+        mean = onp.random.randint(0, 10, size=(dim,)) # random mean in [0, 10]
         cov = generate_pd_matrix(dim)
-        return mean, cov
+        return mean.tolist(), cov.tolist()
 
 def subsample(key, array, n_subsamples, replace=True, axis=0):
     """
@@ -404,4 +406,23 @@ def compute_update_to_weight_ratio(params_pre, params_post):
         elif isinstance(v, collections.Mapping):
             ratios[k] = compute_update_to_weight_ratio(v, params_post[k])
     return ratios
+
+def mixture(components: list, weights: list):
+    """
+    * components: list of functions RNGkey --> sample
+    * weights: mixture weights
+
+    Returns function
+    mix: RNGkey --> sample,
+    where sample is a random sample from the mixture distribution.
+    """
+    k = len(components)
+    assert k == len(weights)
+    weights = np.asarray(weights)
+    def mix(key):
+        key1, key2 = random.split(key)
+        component = random.categorical(key1, np.log(weights))
+        return components[component](key2)
+    return mix
+
 

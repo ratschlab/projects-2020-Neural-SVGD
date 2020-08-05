@@ -4,3 +4,4 @@ notebooks/.ipynb_checkpoints
 __pycache__
 notebooks/evaluating_experiments/.ipynb_checkpoints/
 old-runs/
+leonhard-runs/

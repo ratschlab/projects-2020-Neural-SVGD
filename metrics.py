@@ -210,7 +210,8 @@ class GaussianMixture(Distribution):
         self.num_components = len(weights)
         self.d = d # particle dimension
         self.mean = mean
-        # recall Cov(X) = E[XX^T] - mu mu^T = sum_over_components(Cov(Xi) + mui mui^T) - mu mu^T
+        # recall Cov(X) = E[XX^T] - mu mu^T =
+        # sum_over_components(Cov(Xi) + mui mui^T) - mu mu^T
         mumut = np.einsum("ki,kj->kij", means, means) # shape (k, d, d)
         self.cov = np.average(covs + mumut, weights=weights, axis=0) - np.outer(mean, mean)
         self.sample_metrics = dict()
@@ -221,12 +222,20 @@ class GaussianMixture(Distribution):
     def sample(self, n_samples):
         """mutates self.rkey"""
         def sample_from_component(rkey, component, num_samples):
-            return random.multivariate_normal(rkey, self.means[component], self.covs[component], shape=(num_samples,))
-        components = random.categorical(self.key, np.log(self.weights), shape=(n_samples,))
+            return random.multivariate_normal(rkey,
+                                              self.means[component],
+                                              self.covs[component],
+                                              shape=(num_samples,))
+        components = random.categorical(self.key,
+                                        np.log(self.weights),
+                                        shape=(n_samples,))
         counts = onp.bincount(components.flatten())
         self.newkey()
 
-        out = [sample_from_component(key, c, num) for key, c, num in zip(random.split(self.key, self.num_components), range(self.num_components), counts)]
+        out = [
+            sample_from_component(key, c, num)
+            for key, c, num in
+            zip(random.split(self.key, self.num_components), range(self.num_components), counts)]
         out = np.concatenate(out)
         self.newkey()
 

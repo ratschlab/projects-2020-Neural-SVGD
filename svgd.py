@@ -98,7 +98,8 @@ class SVGD():
     def kernel_loss_batched(self, encoder_params, decoder_params, particles_a, particles_b, lambda_reg: float):
         """Regularized KSD
         lam: regularization parameter
-        particles have shape (k, n, d)"""
+        particles have shape (k, n, d)
+        returns scalar"""
         k, n, d = particles_a.shape
         all_particles = np.concatenate([particles_a, particles_b]).reshape(2*k*n, d)
         def enc(x): return self.encoder.apply(encoder_params, None, x)
