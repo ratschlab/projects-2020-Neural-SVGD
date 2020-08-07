@@ -51,6 +51,8 @@ parser.add_argument("--target", type=str, default="", help="Name of target."
                     "Must be either 'banana' or the emtpy string.")
 parser.add_argument("--dim", type=int, default=2, help="Dimension of target."
                     "Only needed when --target='', otherwise it is ignored.")
+parser.add_argument("--skip", action="store_true", default=True,
+                    help="Use skip connection in encoder and decoder")
 args = parser.parse_args()
 
 def run(key, cfg: dict, logdir: str):
@@ -222,11 +224,12 @@ def sample_hparams(key, *names):
     samplers = {
         "lr_ksd":     lambda key: 10**random.uniform(key, minval=-3, maxval=1),
         "lr_svgd":    lambda key: 10**random.uniform(key, minval=-1, maxval=2),
-        "lambda_reg": utils.mixture(
-            [lambda key: 10**random.uniform(key, minval=-5, maxval=2),
-             lambda key: 0],
-            [6/7, 1/7]
-        )
+#        "lambda_reg": utils.mixture(
+#            [lambda key: 10**random.uniform(key, minval=-5, maxval=2),
+#             lambda key: 0],
+#            [6/7, 1/7]
+#        )
+        "lambda_reg": lambda key: 10**random.uniform(key, minval=-5, maxval=2),
     }
     return {name: float(samplers[name](key)) for name, key in zip(names, keys)}
 
@@ -255,17 +258,18 @@ if __name__ == "__main__":
                          f"Instead received: {target_name}.")
     # sweep_config
     encoder_layers = [
-        [4, 4, 2],
-        [4, 4, 1],
-        [16, 16, 32, 16, 2],
+        [8, 8, 2],
+        [32, 32, 32, 2]
     ]
 
     svgd_steps = [1]
-    ksd_steps = [5, 10]
+    ksd_steps = [5]
 
-    n_particles = [6000]
-    n_subsamples = [100] # recall subsamples for ksd are 20x this
-    minimize_ksd_variance = [True, False]
+    n_particles = [1200]
+    n_subsamples = [200] # recall subsamples for ksd are 20x this
+    minimize_ksd_variance = [False]
+    skip_connection = [args.skip]
+    print(skip_connection)
 
     sweep_config = config.flat_to_nested(dict(
         train=[True],
@@ -278,6 +282,7 @@ if __name__ == "__main__":
         n_subsamples=n_subsamples,
         n_iter=n_iter,
         minimize_ksd_variance=minimize_ksd_variance,
+        skip_connection=skip_connection,
     ))
 
     vanilla_config = config.flat_to_nested(dict(
