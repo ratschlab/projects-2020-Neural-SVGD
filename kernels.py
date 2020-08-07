@@ -26,7 +26,7 @@ def vanilla_ard(x, y):
     ard = ARD()
     return(ard(x, y))
 
-def make_mlp(sizes, name=None):
+def make_mlp(sizes, name=None, skip_connection=False):
     """
     * sizes is a list of integers representing layer dimension
 
@@ -39,8 +39,12 @@ def make_mlp(sizes, name=None):
                           activation=jax.nn.relu,
                           activate_final=False,
                           name=name)
-        return lin(x)
+        if skip_connection is False:
+            return lin(x)
+        else:
+            return lin(x) + x # make sure sizes fit (ie sizes[-1] == input dimension)
     return mlp
+
 
 ## utils
 

@@ -23,6 +23,7 @@ config["svgd"] = {
     "decoder_layers": [4, 4, 2],
     "kernel": "ard", # no alternatives atm
     "minimize_ksd_variance": True,
+    "skip_connection": True,
 }
 
 config["train_kernel"] = {
@@ -30,10 +31,10 @@ config["train_kernel"] = {
     "ksd_steps": 1,
     "svgd_steps": 1,
     "optimizer_ksd": "Adam",  # One of ["Adam", "Adagrad", "SGD"]. optimizer for encoder and decoder
-    "lr_ksd": 0.03,
-    "lambda_reg": 1.0,
+    "lr_ksd": 0.003,
+    "lambda_reg": 3e-2,
     "train": True, # if false, set some args to null and
-                  # just do a vanilla run w/o kernel learning.
+                   # just do a vanilla run w/o kernel learning.
 }
 
 ####### utilities
@@ -58,8 +59,8 @@ def get_svgd_args(config):
     }
 
     if train:
-        encoder = hk.transform(kernels.make_mlp(svgd_config["encoder_layers"], name="encoder"))
-        decoder = hk.transform(kernels.make_mlp(svgd_config["decoder_layers"], name="decoder"))
+        encoder = hk.transform(kernels.make_mlp(svgd_config["encoder_layers"], name="encoder", skip_connection=svgd_config["skip_connection"]))
+        decoder = hk.transform(kernels.make_mlp(svgd_config["decoder_layers"], name="decoder", skip_connection=svgd_config["skip_connection"]))
     else:
         encoder = hk.transform(lambda x: x)
         decoder = None

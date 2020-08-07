@@ -93,9 +93,12 @@ def run(key, cfg: dict, logdir: str):
         metrics_dict = {}
     else:
         if cfg["train_kernel"]["train"]:
+            print("Train kernel")
             _, rundata = svgd.train_kernel(key, **config.get_train_args(cfg["train_kernel"]))
         else:
+            print("Sample without training")
             rundata = svgd.sample(key, **config.get_sample_args(cfg["train_kernel"]))
+
         if not rundata["Interrupted because of NaN"]:
             metrics_dict = metrics.compute_final_metrics(rundata["particles"][rundata["validation_idx"]], svgd)
         else:
@@ -127,10 +130,11 @@ def make_config(base_config: dict, run_options: dict):
                     "encoder_layers",
                     "decoder_layers",
                     "ksd_steps",
+                    "svgd_steps",
                     "optimizer_ksd",
                     "lr_ksd",
                     "lambda_reg",
-                    "svgd_steps",
+                    "skip_connection",
             ]:
                 return None
         # adapt number iterations / ksd steps based on svgd steps per iter
@@ -217,7 +221,7 @@ def sample_hparams(key, *names):
     keys = random.split(key, len(names))
     samplers = {
         "lr_ksd":     lambda key: 10**random.uniform(key, minval=-3, maxval=1),
-        "lr_svgd":    lambda key: 10**random.uniform(key, minval=-2, maxval=1.5),
+        "lr_svgd":    lambda key: 10**random.uniform(key, minval=-1, maxval=2),
         "lambda_reg": utils.mixture(
             [lambda key: 10**random.uniform(key, minval=-5, maxval=2),
              lambda key: 0],
@@ -288,12 +292,12 @@ if __name__ == "__main__":
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
     vanilla_hparams = ["lr_svgd"]
-    n_random_samples = 5
+    n_random_samples = 200
     key, subkey = random.split(key)
 
     # vanilla runs
     key, subkey = random.split(key)
-    n_random_samples_vanilla = 3
+    n_random_samples_vanilla = 30
 
     print("Starting experiments.")
     print(f"Target dimension: {d}")
