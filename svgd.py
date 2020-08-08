@@ -179,8 +179,8 @@ class SVGD():
             metrics.append_to_log(rundata, {
                 "ksd_before_kernel_update": ksd_pre_update,
                 "ksd_before_kernel_update_val": ksd_val,
-                "ksd_variance": ksd_var,
-                "ksd_variance_val": ksd_variance_val,
+#                "ksd_variance": ksd_var,
+#                "ksd_variance_val": ksd_variance_val,
                 "update_to_weight_ratio": utils.compute_update_to_weight_ratio(encoder_params_pre_update, encoder_params),
                 # "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)] (has to be finite). O(n^2)
                 "regularized_loss": regularized_loss,
@@ -205,7 +205,7 @@ class SVGD():
             subsample            = utils.subsample(key1, updated_particles[leader_idx],     self.n_subsamples_for_ksd, replace=self.subsample_with_replacement)
             validation_subsample = utils.subsample(key2, updated_particles[validation_idx], self.n_subsamples_for_ksd, replace=self.subsample_with_replacement)
             mean_auxdata = np.mean(auxdata, axis=0)
-            metrics.append_to_log(rundata, self.target.compute_metrics(updated_particles))
+            #metrics.append_to_log(rundata, self.target.compute_metrics(updated_particles))
             metrics.append_to_log(rundata, {
                 "leader_mean":     np.mean(updated_particles[leader_idx], axis=0),
                 "training_mean":   np.mean(updated_particles[train_idx], axis=0),
@@ -213,8 +213,8 @@ class SVGD():
                 "leader_var":      np.var(updated_particles[leader_idx], axis=0),
                 "training_var":    np.var(updated_particles[train_idx], axis=0),
                 "validation_var":  np.var(updated_particles[validation_idx], axis=0),
-                "ksd_after_svgd_update":     self.ksd_squared(encoder_params, subsample, False),
-                "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, validation_subsample, False),
+#                "ksd_after_svgd_update":     self.ksd_squared(encoder_params, subsample, False),
+#                "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, validation_subsample, False),
                 "mean_drift": mean_auxdata[0],
                 "mean_repulsion": mean_auxdata[1],
             })
@@ -265,7 +265,7 @@ class SVGD():
         rundata = utils.dict_asarray(rundata)
         return opt_ksd.get_params(opt_enc_state), rundata
 
-    # @partial(jit, static_argnums=(0, 3))
+#    @partial(jit, static_argnums=(0, 3)) # compile takes far too long
     def sample(self, key, encoder_params, n_iter):
         key, subkey = random.split(key)
         particles = init_svgd(subkey, self.particle_shape)
@@ -297,8 +297,8 @@ class SVGD():
                     "validation_var":  np.var(particles[validation_idx], axis=0),
                     "ksd_after_svgd_update": ksd,
                     "ksd_after_svgd_update_val": ksd_val,
-                    "ksd_variance": ksd_variance,
-                    "ksd_variance_val": ksd_variance_val,
+#                    "ksd_variance": ksd_variance,
+#                    "ksd_variance_val": ksd_variance_val,
                     "mean_drift": mean_auxdata[0],
                     "mean_repulsion": mean_auxdata[1],
                 })

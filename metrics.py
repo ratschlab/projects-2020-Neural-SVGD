@@ -3,8 +3,10 @@ from functools import partial
 import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jacrev
 from jax.scipy import stats, special
-import ot
+from jax.ops import index_update, index
 from scipy.spatial.distance import cdist
+
+import ot
 
 import numpy as onp
 
@@ -56,6 +58,15 @@ class Distribution():
             }
 
             return metrics_dict
+
+    def _checkx(self, x):
+        """check if particle (single particle shape (d,)) in right shape, etc"""
+        x = np.array(x)
+        if x.ndim == 0 and self.d == 1:
+            x = x.reshape((1,))
+        if x.shape != (self.d,):
+            raise ValueError(f"x needs to have shape ({self.d},). Instead, received x of shape {x.shape}.")
+        return x
 
     def get_metrics_shape(self):
         shapes = {
@@ -144,15 +155,6 @@ class Gaussian(Distribution):
 
         shape = (n_samples, self.d)
         return out.reshape(shape)
-
-    def _checkx(self, x):
-        """check if particle (single particle shape (d,)) in right shape, etc"""
-        x = np.array(x)
-        if x.ndim == 0 and self.d == 1:
-            x = x.reshape((1,))
-        if x.shape != (self.d,):
-            raise ValueError(f"x needs to have shape ({self.d},). Instead, received x of shape {x.shape}.")
-        return x
 
     def logpdf(self, x):
         x = self._checkx(x)
@@ -265,6 +267,48 @@ class GaussianMixture(Distribution):
             raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
         pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
         return np.vdot(pdfs, self.weights)
+
+class Funnel(Distribution):
+    def __init__(self, d):
+        self.d = d
+        self.xmean = np.zeros(d-1)
+        self.ymean = 0
+        self.mean = np.zeros(d)
+
+        self.xcov = np.eye(d-1) * np.exp(9/2)
+        self.ycov = 9
+        self.cov = np.block([
+            [self.xcov,          np.zeros((d-1, 1))],
+            [np.zeros((1, d-1)), self.ycov         ]
+        ])
+
+    def sample(self, n_samples):
+        self.newkey()
+        y = random.normal(self.key, (n_samples, 1)) * 3
+        self.newkey()
+        x = random.normal(self.key, (n_samples, self.d-1)) * np.exp(y/2)
+        return np.concatenate([x, y], axis=1)
+
+    def pdf(self, x):
+        x = self._checkx(x)
+        *x, y = x
+        x, y = np.asarray(x), np.asarray(y)
+
+        xmean = np.zeros(self.d-1)
+        xcov  = np.eye(self.d-1)*np.exp(y)
+        py = stats.norm.pdf(y, loc=0, scale=3) # scale=stddev
+        px = stats.multivariate_normal.pdf(x, mean=self.xmean, cov=xcov)
+        return np.squeeze(py*px)
+
+    def logpdf(self, x):
+        x = self._checkx(x)
+        *x, y = x
+        x, y = np.asarray(x), np.asarray(y)
+        xmean = np.zeros(self.d-1)
+        xcov  = np.eye(self.d-1)*np.exp(y) # Cov(X \given Y=y)
+        logpy = stats.norm.logpdf(y, loc=0, scale=3)
+        logpx = stats.multivariate_normal.logpdf(x, mean=self.xmean, cov=xcov)
+        return np.squeeze(logpy + logpx)
 
 ######################################
 # Kernelized Stein Discrepancy

@@ -123,3 +123,26 @@ def _ard_m(x, y, sigma):
 
 def ard_m(sigma):
     return lambda x, y: _ard_m(x, y, sigma)
+
+def enc_funnel(z):
+    """encode single sample z, shaped (d,)"""
+    *x, y = z
+    x, y = np.asarray(x), np.asarray(y)
+    x_enc = x * np.exp(-y/2)
+    return np.append(x_enc, y)
+
+def dec_funnel(z):
+    """decode single sample z, shaped (d,)"""
+    *x, y = z
+    x, y = np.asarray(x), np.asarray(y)
+    x_dec = x * np.exp(y/2)
+    return np.append(x_dec, y)
+
+def funnel_optimal_kernel(x, y):
+    x, y = np.asarray(x), np.asarray(y)
+    if x.shape != y.shape:
+        raise ValueError(f"Shapes of particles x and y need to match. Recieved shapes x: {x.shape}, y: {y.shape}")
+    elif x.ndim > 1 or x.ndim == 0:
+        raise ValueError(f"Input particles x and y need to have shape (d,). Instead received shape {x.shape}")
+    return ard(logh=0)(enc_funnel(x), enc_funnel(y))
+

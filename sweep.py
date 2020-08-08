@@ -53,6 +53,8 @@ parser.add_argument("--dim", type=int, default=2, help="Dimension of target."
                     "Only needed when --target='', otherwise it is ignored.")
 parser.add_argument("--skip", action="store_true", default=True,
                     help="Use skip connection in encoder and decoder")
+parser.add_argument("--ksd_steps", type=int, default=5, help="Number of encoder"
+                    "training steps per SVGD step.")
 args = parser.parse_args()
 
 def run(key, cfg: dict, logdir: str):
@@ -148,8 +150,16 @@ def make_config(base_config: dict, run_options: dict):
         if "encoder_layers" in run_options:
             if key == "decoder_layers":
                 ls = copy.copy(run_options["encoder_layers"])
-                ls.reverse()
-                ls[-1] = len(run_options["target_args"][0])
+                if run_options["target"] == "Gaussian":
+                    ls[-1] = len(run_options["target_args"][0])
+                elif run_options["target"] == "Funnel":
+                    ls[-1] = run_options["target_args"][0]
+                elif run_options["target"] == "Gaussian Mixture":
+                    ls[-1] = len(run_options["target_args"][0][0])
+                else:
+                    warnings.warn("No decoder_layers specified. Using"
+                    "layer sizes specified in base_config. Make sure"
+                    "the size of the final layer matches the input dimension.")
                 return ls
         return base_config[key]
 
@@ -238,11 +248,9 @@ if __name__ == "__main__":
     n_iter = [70]
     d = args.dim
     key = random.PRNGKey(args.key)
-    target_name = args.target # one of '', 'banana'. If empty string, then target
-                              # mean and var are chosen randomly.
-    if target_name=="banana": d=2
-    logdir = f"./runs/{d}-dim/" if target_name=="" else f"./runs/{d}-dim-{target_name}/"
-    if target_name=="":
+    if args.target=="banana": d=2
+    logdir = f"./runs/{d}-dim/" if args.target=="" else f"./runs/{d}-dim-{args.target}/"
+    if args.target=="":
         k = None
         if k is None:
             target = ["Gaussian"]
@@ -250,26 +258,28 @@ if __name__ == "__main__":
             target=["Gaussian Mixture"]
         onp.random.seed(42)
         target_args=[utils.generate_parameters_for_gaussian(d, k)]
-    elif target_name=="banana":
+    elif args.target=="banana":
         target = ["Gaussian Mixture"]
         target_args = [metrics.bent_args]
+    elif args.target=="funnel":
+        target = ["Funnel"]
+        target_args = [[args.dim]]
     else:
         raise ValueError("target name must be either 'banana' or the empty string."
-                         f"Instead received: {target_name}.")
+                         f"Instead received: {args.target}.")
+    ksd_steps = [args.ksd_steps] # default 5
     # sweep_config
     encoder_layers = [
-        [8, 8, 2],
-        [32, 32, 32, 2]
+        [8, 8, 8, args.dim],
+        [32, 32, 32, args.dim]
     ]
 
     svgd_steps = [1]
-    ksd_steps = [5]
 
     n_particles = [1200]
     n_subsamples = [200] # recall subsamples for ksd are 20x this
     minimize_ksd_variance = [False]
     skip_connection = [args.skip]
-    print(skip_connection)
 
     sweep_config = config.flat_to_nested(dict(
         train=[True],
@@ -311,4 +321,4 @@ if __name__ == "__main__":
     print(f"Float64 enabled: {enable_float64}")
     print()
     random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
-    random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)
+#    random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)

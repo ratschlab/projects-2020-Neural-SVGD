@@ -9,7 +9,7 @@ import warnings
 
 config = dict()
 config["svgd"] = {
-    "target": "Gaussian",  # one of ["Gaussian", "Gaussian Mixture"]
+    "target": "Gaussian",  # one of ["Gaussian", "Gaussian Mixture", "Funnel"]
     "target_args": [
         [0, 1], # mean
         [5, 1], # covariance
@@ -21,7 +21,7 @@ config["svgd"] = {
     "subsample_with_replacement": False,
     "encoder_layers": [4, 4, 2],
     "decoder_layers": [4, 4, 2],
-    "kernel": "ard", # no alternatives atm
+    "kernel": "ard", # one of "ard", "funnel_optimal_kernel"
     "minimize_ksd_variance": True,
     "skip_connection": True,
 }
@@ -45,6 +45,11 @@ opts = {
     "RMSProp": optimizers.rmsprop,
 }
 
+kernels_mapping = {
+    "ard": kernels.ard(logh=0),
+    "funnel_optimal_kernel": kernels.funnel_optimal_kernel,
+}
+
 def get_svgd_args(config):
     """config is entire config (tho also works if you only pass the svgd subdict)"""
     if "svgd" in config:
@@ -55,7 +60,8 @@ def get_svgd_args(config):
         train = True # assume
     targets = {
         "Gaussian": metrics.Gaussian,
-        "Gaussian Mixture": metrics.GaussianMixture
+        "Gaussian Mixture": metrics.GaussianMixture,
+        "Funnel": metrics.Funnel,
     }
 
     if train:
@@ -74,7 +80,7 @@ def get_svgd_args(config):
         "minimize_ksd_variance": svgd_config["minimize_ksd_variance"],
         "optimizer_svgd": svgd.Optimizer(
             *optimizer(svgd_config["lr_svgd"])),
-        "kernel": kernels.ard(logh=0),
+        "kernel": kernels_mapping[svgd_config["kernel"]],
         "encoder": encoder,
         "decoder": decoder,
     }
@@ -106,11 +112,10 @@ def get_sample_args(train_config):
     Need to pass encoder_params separately if train=True."""
     if "train_kernel" in train_config:
         train_config = train_config["train_kernel"]
-    kwargs = {
-        "n_iter": train_config["n_iter"] * train_config["svgd_steps"]
-    }
+    kwargs = {}
     if not train_config["train"]:
         kwargs["encoder_params"] = {}
+    kwargs["n_iter"] = train_config["n_iter"] * train_config["svgd_steps"]
     return kwargs
 
 def flat_to_nested(flat_dict):

@@ -84,6 +84,8 @@ def phistar_i(xi, x, logp, kernel):
 
 def phistar(followers, leaders, logp, kernel):
     """
+    O(nm) where n=#followers, m=#leaders
+
     Returns an np.array of shape (n, d) containing values of phi^*(x_i) for i in {1, ..., n}.
 
     Arguments:
