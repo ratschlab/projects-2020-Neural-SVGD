@@ -55,6 +55,8 @@ parser.add_argument("--skip", action="store_true", default=True,
                     help="Use skip connection in encoder and decoder")
 parser.add_argument("--ksd_steps", type=int, default=5, help="Number of encoder"
                     "training steps per SVGD step.")
+parser.add_argument("--kernel", type=str, default="ard", help="Kernel to use as"
+                    "activation. Must be either 'ard' or 'funnel_optimal_kernel'.")
 args = parser.parse_args()
 
 def run(key, cfg: dict, logdir: str):
@@ -280,6 +282,7 @@ if __name__ == "__main__":
     n_subsamples = [200] # recall subsamples for ksd are 20x this
     minimize_ksd_variance = [False]
     skip_connection = [args.skip]
+    kernel = [args.kernel]
 
     sweep_config = config.flat_to_nested(dict(
         train=[True],
@@ -293,6 +296,7 @@ if __name__ == "__main__":
         n_iter=n_iter,
         minimize_ksd_variance=minimize_ksd_variance,
         skip_connection=skip_connection,
+        kernel=kernel,
     ))
 
     vanilla_config = config.flat_to_nested(dict(
@@ -303,6 +307,7 @@ if __name__ == "__main__":
         n_particles=n_particles,
         n_subsamples=n_subsamples,
         n_iter=n_iter,
+        kernel=kernel,
     ))
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
