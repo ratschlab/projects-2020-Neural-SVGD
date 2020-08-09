@@ -353,7 +353,6 @@ def compute_final_metrics(particles, svgd):
 #    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
 #    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
     ksd = stein.ksd_squared_u(particles, svgd.target.logpdf, kernels.ard(0), return_variance=False)
-
     se_mean = np.mean((np.mean(particles, axis=0) - svgd.target.mean)**2)
     se_var = np.mean((np.cov(particles, rowvar=False) - svgd.target.cov)**2)
     return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_var=se_var)

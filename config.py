@@ -35,6 +35,7 @@ config["train_kernel"] = {
     "lambda_reg": 3e-2,
     "train": True, # if false, set some args to null and
                    # just do a vanilla run w/o kernel learning.
+    "detailed_log": False,
 }
 
 ####### utilities
@@ -105,6 +106,7 @@ def get_train_args(train_config):
     kwargs = {key: train_config[key] for key in ["n_iter", "ksd_steps", "svgd_steps"]}
     kwargs["opt_ksd"] = svgd.Optimizer(*optimizer(train_config["lr_ksd"]))
     kwargs["lambda_reg"] = train_config["lambda_reg"]
+    kwargs["detailed_log"] = train_config["detailed_log"]
     return kwargs
 
 def get_sample_args(train_config):
@@ -116,6 +118,7 @@ def get_sample_args(train_config):
     if not train_config["train"]:
         kwargs["encoder_params"] = {}
     kwargs["n_iter"] = train_config["n_iter"] * train_config["svgd_steps"]
+    kwargs["detailed_log"] = train_config["detailed_log"]
     return kwargs
 
 def flat_to_nested(flat_dict):

@@ -247,7 +247,7 @@ def sample_hparams(key, *names):
 
 
 if __name__ == "__main__":
-    n_iter = [70]
+    n_iter = [150]
     d = args.dim
     key = random.PRNGKey(args.key)
     if args.target=="banana": d=2
@@ -297,6 +297,7 @@ if __name__ == "__main__":
         minimize_ksd_variance=minimize_ksd_variance,
         skip_connection=skip_connection,
         kernel=kernel,
+        detailed_log=[False],
     ))
 
     vanilla_config = config.flat_to_nested(dict(
@@ -308,6 +309,7 @@ if __name__ == "__main__":
         n_subsamples=n_subsamples,
         n_iter=n_iter,
         kernel=kernel,
+        detailed_log=[False],
     ))
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
@@ -326,4 +328,4 @@ if __name__ == "__main__":
     print(f"Float64 enabled: {enable_float64}")
     print()
     random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
-#    random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)
+    random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)
