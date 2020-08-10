@@ -235,13 +235,13 @@ def sample_hparams(key, *names):
     keys = random.split(key, len(names))
     samplers = {
         "lr_ksd":     lambda key: 10**random.uniform(key, minval=-3, maxval=1),
-        "lr_svgd":    lambda key: 10**random.uniform(key, minval=-1, maxval=2),
-#        "lambda_reg": utils.mixture(
-#            [lambda key: 10**random.uniform(key, minval=-5, maxval=2),
-#             lambda key: 0],
-#            [6/7, 1/7]
-#        )
-        "lambda_reg": lambda key: 10**random.uniform(key, minval=-5, maxval=2),
+        "lr_svgd":    lambda key: 10**random.uniform(key, minval=-1, maxval=1.5),
+        "lambda_reg": utils.mixture(
+            [lambda key: 10**random.uniform(key, minval=-4, maxval=1),
+             lambda key: 0],
+            [6/7, 1/7]
+        )
+#        "lambda_reg": lambda key: 10**random.uniform(key, minval=-5, maxval=2),
     }
     return {name: float(samplers[name](key)) for name, key in zip(names, keys)}
 
@@ -272,13 +272,15 @@ if __name__ == "__main__":
     ksd_steps = [args.ksd_steps] # default 5
     # sweep_config
     encoder_layers = [
-        [8, 8, 8, args.dim],
+        [32, 32, 32, args.dim]
+    ]
+
+    decoder_layers = [
         [32, 32, 32, args.dim]
     ]
 
     svgd_steps = [1]
-
-    n_particles = [1200]
+    n_particles = [1800]
     n_subsamples = [200]
     minimize_ksd_variance = [False]
     skip_connection = [args.skip]
@@ -297,7 +299,7 @@ if __name__ == "__main__":
         minimize_ksd_variance=minimize_ksd_variance,
         skip_connection=skip_connection,
         kernel=kernel,
-        detailed_log=[False],
+        detailed_log=[True],
     ))
 
     vanilla_config = config.flat_to_nested(dict(
@@ -309,7 +311,7 @@ if __name__ == "__main__":
         n_subsamples=n_subsamples,
         n_iter=n_iter,
         kernel=kernel,
-        detailed_log=[False],
+        detailed_log=[True],
     ))
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
@@ -319,7 +321,7 @@ if __name__ == "__main__":
 
     # vanilla runs
     key, subkey = random.split(key)
-    n_random_samples_vanilla = 30
+3   n_random_samples_vanilla = 20
 
     print("Starting experiments.")
     print(f"Target dimension: {d}")

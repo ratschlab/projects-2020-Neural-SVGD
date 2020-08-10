@@ -144,7 +144,7 @@ def ksd_squared(xs, ys, logp, k):
     ksd_matrix = gvv(xs, ys)
     return np.mean(ksd_matrix)
 
-@jit(static_argnums=(1, 2, 3))
+@partial(jit, static_argnums=(1, 2, 3))
 def ksd_squared_u(xs, logp, k, return_variance=False):
     """
     U-statistic for KSD^2. Computation in O(n^2)
