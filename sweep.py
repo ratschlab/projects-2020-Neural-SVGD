@@ -36,13 +36,11 @@ logdir
 └── {date-time}
     ├── config.json
     ├── metrics.json
-    ├── run
     └── rundata.json
 
 containing, respectively,
 * json dumps of hyperparameter config
 * json dump of final metrics
-* text log with references to other files
 * json dumps of rundata collected during run (eg loss, metrics)
 """
 parser = argparse.ArgumentParser()
@@ -299,7 +297,7 @@ if __name__ == "__main__":
         minimize_ksd_variance=minimize_ksd_variance,
         skip_connection=skip_connection,
         kernel=kernel,
-        detailed_log=[True],
+        detailed_log=[False],
     ))
 
     vanilla_config = config.flat_to_nested(dict(
@@ -311,7 +309,7 @@ if __name__ == "__main__":
         n_subsamples=n_subsamples,
         n_iter=n_iter,
         kernel=kernel,
-        detailed_log=[True],
+        detailed_log=[False],
     ))
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
@@ -321,7 +319,7 @@ if __name__ == "__main__":
 
     # vanilla runs
     key, subkey = random.split(key)
-3   n_random_samples_vanilla = 20
+    n_random_samples_vanilla = 15
 
     print("Starting experiments.")
     print(f"Target dimension: {d}")
@@ -329,5 +327,5 @@ if __name__ == "__main__":
         print(f"Target shape: Gaussian with parameters:\n* mean {target_args[0][0]}\n* variance {target_args[0][1]}")
     print(f"Float64 enabled: {enable_float64}")
     print()
-    random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
+    #random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
     random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)
