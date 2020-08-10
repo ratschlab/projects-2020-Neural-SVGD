@@ -49,7 +49,7 @@ parser.add_argument("--target", type=str, default="", help="Name of target."
                     "Must be either 'banana' or the emtpy string.")
 parser.add_argument("--dim", type=int, default=2, help="Dimension of target."
                     "Only needed when --target='', otherwise it is ignored.")
-parser.add_argument("--skip", action="store_true", default=True,
+parser.add_argument("--noskip", action="store_true", default=False,
                     help="Use skip connection in encoder and decoder")
 parser.add_argument("--ksd_steps", type=int, default=5, help="Number of encoder"
                     "training steps per SVGD step.")
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     n_particles = [1800]
     n_subsamples = [200]
     minimize_ksd_variance = [False]
-    skip_connection = [args.skip]
+    skip_connection = [not args.noskip]
     kernel = [args.kernel]
 
     sweep_config = config.flat_to_nested(dict(
@@ -297,7 +297,7 @@ if __name__ == "__main__":
         minimize_ksd_variance=minimize_ksd_variance,
         skip_connection=skip_connection,
         kernel=kernel,
-        detailed_log=[False],
+        detailed_log=[True],
     ))
 
     vanilla_config = config.flat_to_nested(dict(
@@ -309,7 +309,7 @@ if __name__ == "__main__":
         n_subsamples=n_subsamples,
         n_iter=n_iter,
         kernel=kernel,
-        detailed_log=[False],
+        detailed_log=[True],
     ))
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
