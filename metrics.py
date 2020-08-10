@@ -307,7 +307,7 @@ class Funnel(Distribution):
         xmean = np.zeros(self.d-1)
         xcov  = np.eye(self.d-1)*np.exp(y) # Cov(X \given Y=y)
         logpy = stats.norm.logpdf(y, loc=0, scale=3)
-        logpx = stats.multivariate_normal.logpdf(x, mean=self.xmean, cov=xcov)
+        logpx = stats.multivariate_normal.logpdf(x, mean=xmean, cov=xcov)
         return np.squeeze(logpy + logpx)
 
 ######################################

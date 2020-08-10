@@ -163,9 +163,14 @@ class SVGD():
             updated_opt_enc_state = opt_ksd.update(step, d_enc, opt_enc_state)
             updated_opt_dec_state = opt_ksd.update(step, d_dec, opt_dec_state)
 
+            ksd_pre_update, autoencoder_loss, ksd_var = aux
+            metrics.append_to_log(rundata, {
+                "ksd_before_kernel_update": ksd_pre_update,
+                "autoencoder_loss": autoencoder_loss,
+                "regularized_loss": regularized_loss,
+            })
             if detailed_log:
                 # Compute KSD, validation KSD and log rundata
-                ksd_pre_update, autoencoder_loss, ksd_var = aux
                 encoder_params = opt_ksd.get_params(updated_opt_enc_state)
                 key, subkey = random.split(key)
                 validation_subsample = utils.subsample(subkey, particle_batch[:, validation_idx, :], self.n_subsamples_for_ksd, replace=self.subsample_with_replacement, axis=1)
@@ -178,14 +183,11 @@ class SVGD():
                     is_pd = None
                 ksd_val, ksd_variance_val = self.ksd_squared_batched(encoder_params_pre_update, validation_subsample)
                 metrics.append_to_log(rundata, {
-                    "ksd_before_kernel_update": ksd_pre_update,
                     "ksd_before_kernel_update_val": ksd_val,
     #                "ksd_variance": ksd_var,
     #                "ksd_variance_val": ksd_variance_val,
                     "update_to_weight_ratio": utils.compute_update_to_weight_ratio(encoder_params_pre_update, encoder_params),
                     # "sqrt_kxx": vmap(metrics.sqrt_kxx, (None, 0, 0))(kernel_fn, *validation_subsamples), # E[k(x, x)] (has to be finite). O(n^2)
-                    "regularized_loss": regularized_loss,
-                    "autoencoder_loss": autoencoder_loss,
                     "is_pd": is_pd,
                 })
             return updated_opt_enc_state, updated_opt_dec_state
@@ -199,6 +201,9 @@ class SVGD():
             negdKL, auxdata = self.phistar(particles, subsample, encoder_params) # auxdata has shape (n_particles, 2, d)
             dKL = -negdKL
             updated_opt_svgd_state = self.opt.update(step, dKL, opt_svgd_state)
+            metrics.append_to_log(rundata, {
+
+            })
 
             if detailed_log:
                 # compute KSD, validation KSD, and log rundata

@@ -279,7 +279,7 @@ if __name__ == "__main__":
     svgd_steps = [1]
 
     n_particles = [1200]
-    n_subsamples = [200] # recall subsamples for ksd are 20x this
+    n_subsamples = [200]
     minimize_ksd_variance = [False]
     skip_connection = [args.skip]
     kernel = [args.kernel]

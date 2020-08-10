@@ -126,6 +126,7 @@ def svgd_log(log, style="-", full=False):
                 colors = colors[len(v):]
 
 
+#@jit(static_argnums=0)
 def make_meshgrid(func, lims, num=100):
     """
     Utility to help with plotting a 2d distribution in a 3d plot.
@@ -267,3 +268,8 @@ def errorfill(x, y, yerr, color="r", alpha_fill=0.3, ax=None):
         ymin, ymax = yerr
     ax.plot(x, y, color=color)
     ax.fill_between(x, ymax, ymin, color=color, alpha=alpha_fill)
+
+def scatter(x, *args, ax=None, **kwargs):
+    if ax is None:
+        ax=plt.gca()
+    ax.scatter(x[:, 0], x[:, 1], *args, **kwargs)

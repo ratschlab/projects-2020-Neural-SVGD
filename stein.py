@@ -144,6 +144,7 @@ def ksd_squared(xs, ys, logp, k):
     ksd_matrix = gvv(xs, ys)
     return np.mean(ksd_matrix)
 
+@jit(static_argnums=(1, 2, 3))
 def ksd_squared_u(xs, logp, k, return_variance=False):
     """
     U-statistic for KSD^2. Computation in O(n^2)
@@ -174,6 +175,31 @@ def ksd_squared_u(xs, logp, k, return_variance=False):
         return np.sum(ksd_matrix) / (n * (n-1)), variance.var_ksd(xs, logp, k)
     else:
         return np.sum(ksd_matrix) / (n * (n-1))
+
+def ksd_squared_v(xs, logp, k):
+    """
+    V-statistic for KSD^2. Computation in O(n^2)
+    Arguments:
+    * xs: np.array of shape (n, d)
+    * logp: callable
+    * k: callable, computes scalar-valued kernel k(x, y) given two input arguments.
+
+    Returns:
+    The square of the stein discrepancy KSD(q, p).
+    KSD is approximated as $1 / n^2 \sum_{i, j} g(x_i, x_j)$, where the x are iid distributed as q
+    """
+    def g(x, y):
+        """x, y: np.arrays of shape (d,)"""
+        def inner(x):
+            kx = lambda y_: k(x, y_)
+            return stein_operator(kx, y, logp)
+        return stein_operator(inner, x, logp, transposed=True)
+    gv  = vmap(g,  (0, None))
+    gvv = vmap(gv, (None, 0))
+    ksd_matrix = gvv(xs, xs)
+    n = xs.shape[0]
+
+    return np.sum(ksd_matrix) / n**2
 
 @partial(jit, static_argnums=(2,3,4))
 def ksd_squared_l(xs, ys, logp, k, return_variance=False):
