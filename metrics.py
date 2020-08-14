@@ -108,22 +108,31 @@ class Distribution():
 class Gaussian(Distribution):
     def __init__(self, mean, cov):
         """
-        self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)
-
         Possible input shapes for mean and cov:
-        1) mean.shape defines dimension of domain: if mean has shape (d,), then particles have shape (d,)
+        1) mean.shape defines dimension of domain: if mean has shape (d,),
+        then particles have shape (d,)
         2) if covariance is a scalar, it is reshaped to diag(3 * (cov,))
         3) if covariance is an array of shape (k,), it is reshaped to diag(cov)"""
+
+        self.mean, self.cov = self._check_and_reshape_args(mean, cov)
+        self.d = len(self.mean)
+        self.expectations = self.compute_expectations(self.mean, self.cov)
+        self.key = random.PRNGKey(0)
+        self.sample_metrics = dict()
+        self.initialize_metric_names()
+
+    def _check_and_reshape_args(self, mean, cov):
         mean = np.asarray(mean)
         cov = np.asarray(cov)
         if mean.ndim == 0:
             mean = np.reshape(mean, newshape=(1,))
         elif mean.ndim > 1:
-            raise ValueError(f"Recieved inappropriate shape {mean.shape} for mean. (Wrong nr of dimensions).")
-        self.d = mean.shape[0]
+            raise ValueError(f"Recieved inappropriate shape {mean.shape} for"
+            "mean. (Wrong nr of dimensions).")
+        d = mean.shape[0]
 
         if cov.ndim == 0:
-            cov = self.d * (cov,)
+            cov = d * (cov,)
             cov = np.asarray(cov)
             cov = np.diag(cov)
         elif cov.ndim == 1:
@@ -131,21 +140,20 @@ class Gaussian(Distribution):
             cov = np.diag(cov)
         assert mean.ndim == 1 and cov.ndim == 2
         assert mean.shape[0] == cov.shape[0] == cov.shape[1]
-
-        self.mean = mean
-        self.cov = cov
         if not utils.is_pd(cov):
             raise ValueError("Covariance must be positive definite.")
+        return mean, cov
 
+    def compute_expectations(self, mean, cov):
+        """
+        returns a list of expected values of the following expressions:
+        x, x^2, cos(x), sin(x)
+        """
         # characteristic function at [1, ..., 1]:
         t = np.ones(self.d)
         char = np.exp(np.vdot(t, (1j * mean - np.dot(cov, t) / 2)))
-        self.expectations = [mean, np.diagonal(cov) + mean**2, np.real(char), np.imag(char)]
-        self.key = random.PRNGKey(0)
-        self.sample_metrics = dict()
-
-        self.initialize_metric_names()
-        return None
+        expectations = [mean, np.diagonal(cov) + mean**2, np.real(char), np.imag(char)]
+        return expectations
 
     def sample(self, n_samples):
         """mutates self.rkey"""
@@ -164,24 +172,39 @@ class Gaussian(Distribution):
         x = self._checkx(x)
         return stats.multivariate_normal.pdf(x, self.mean, self.cov)
 
+
 class GaussianMixture(Distribution):
     def __init__(self, means, covs, weights):
         """
         Arguments:
-        means, covs are np arrays or lists of length k, with entries of shape (d,) and (d, d) respectively. (e.g. covs can be array of shape (k, d, d))
+        means, covs are np arrays or lists of length k, with entries of shape
+        (d,) and (d, d) respectively. (e.g. covs can be array of shape (k, d, d))
+        """
+        means, covs, weights = self._check_and_reshape_args(means, covs, weights)
+        self.d = len(means[0])
+        self.expectations = self.compute_expectations(means, covs, weights)
+        self.mean = self.expectations[0]
+        # recall Cov(X) = E[XX^T] - mu mu^T =
+        # sum_over_components(Cov(Xi) + mui mui^T) - mu mu^T
+        mumut = np.einsum("ki,kj->kij", means, means) # shape (k, d, d)
+        self.cov = np.average(covs + mumut, weights=weights, axis=0) \
+                 - np.outer(self.mean, self.mean)
+        self.key = random.PRNGKey(0)
+        self.means = means
+        self.covs = covs
+        self.weights = weights
+        self.num_components = len(weights)
+        self.sample_metrics = dict()
+        self.initialize_metric_names()
 
-        Initialization:
-        self.expectations is a list of expected values of the following expressions: x, x^2, cos(x), sin(x)"""
+    def _check_and_reshape_args(self, means, covs, weights):
         means = np.asarray(means)
         covs = np.asarray(covs)
         weights = np.asarray(weights)
         weights = weights / np.sum(weights) # normalize
-
         assert len(means) == len(covs)
-
         if means.ndim == 1:
             means = means[:, np.newaxis]
-#            means = np.reshape(means, newshape=(None, 1)) # same things
         d = means.shape[1]
         if covs.ndim == 1 or covs.ndim == 2:
             covs = [np.identity(d) * var for var in covs]
@@ -194,32 +217,23 @@ class GaussianMixture(Distribution):
         for cov in covs:
             if not utils.is_pd(cov):
                 raise ValueError("Covariance must be positive definite.")
+        return means, covs, weights
 
+    def compute_expectations(self, means, covs, weights):
+        """
+        returns a list of expected values of the following expressions:
+        x, x^2, cos(x), sin(x)
+        """
         # characteristic function at [1, ..., 1]:
-        t = np.ones(d)
+        t = np.ones(self.d)
         chars = np.array([np.exp(np.vdot(t, (1j * mean - np.dot(cov, t) / 2))) for mean, cov in zip(means, covs)]) # shape (k,d)
         char = np.vdot(weights, chars)
-
         mean = np.einsum("i,id->d", weights, means)
         xsquares = [np.diagonal(cov) + mean**2 for mean, cov in zip(means, covs)]
-        self.expectations = [mean, np.einsum("i,id->d", weights, xsquares), np.real(char), np.imag(char)]
-        self.expectations = [np.squeeze(e) for e in self.expectations]
-
-        self.key = random.PRNGKey(0)
-        self.means = means
-        self.covs = covs
-        self.weights = weights
-        self.num_components = len(weights)
-        self.d = d # particle dimension
-        self.mean = mean
-        # recall Cov(X) = E[XX^T] - mu mu^T =
-        # sum_over_components(Cov(Xi) + mui mui^T) - mu mu^T
-        mumut = np.einsum("ki,kj->kij", means, means) # shape (k, d, d)
-        self.cov = np.average(covs + mumut, weights=weights, axis=0) - np.outer(mean, mean)
-        self.sample_metrics = dict()
-
-        self.initialize_metric_names()
-        return None
+        expectations = [mean, np.einsum("i,id->d", weights, xsquares),
+                        np.real(char), np.imag(char)]
+        expectations = [np.squeeze(e) for e in expectations]
+        return expectations
 
     def sample(self, n_samples):
         """mutates self.rkey"""
@@ -271,8 +285,6 @@ class GaussianMixture(Distribution):
 class Funnel(Distribution):
     def __init__(self, d):
         self.d = d
-        self.xmean = np.zeros(d-1)
-        self.ymean = 0
         self.mean = np.zeros(d)
 
         self.xcov = np.eye(d-1) * np.exp(9/2)
@@ -297,7 +309,7 @@ class Funnel(Distribution):
         xmean = np.zeros(self.d-1)
         xcov  = np.eye(self.d-1)*np.exp(y)
         py = stats.norm.pdf(y, loc=0, scale=3) # scale=stddev
-        px = stats.multivariate_normal.pdf(x, mean=self.xmean, cov=xcov)
+        px = stats.multivariate_normal.pdf(x, mean=xmean, cov=xcov)
         return np.squeeze(py*px)
 
     def logpdf(self, x):
@@ -309,6 +321,49 @@ class Funnel(Distribution):
         logpy = stats.norm.logpdf(y, loc=0, scale=3)
         logpx = stats.multivariate_normal.logpdf(x, mean=xmean, cov=xcov)
         return np.squeeze(logpy + logpx)
+
+class FunnelizedGaussian(Gaussian):
+    def __init__(self, mean, cov):
+        self.mean, self.cov = self._check_and_reshape_args(mean, cov)
+        self.d = len(self.mean)
+        self.key = random.PRNGKey(0)
+
+    def _check_and_reshape_args(self, mean, cov):
+        if len(mean) < 2:
+            raise ValueError("Funnel exists only in dimensions > 2."
+            f"Received dimension len(mean) = {len(mean)}")
+        return super()._check_and_reshape_args(mean, cov)
+
+    def funnelize(self, v):
+        """If v is standard 2D normal, then
+        funnelize(v) is distributed as Neal's Funnel."""
+        *x, y = v
+        x, y = np.asarray(x), np.asarray(y)
+        return np.append(x*np.exp(3*y/2), 3*y)
+
+    def defunnelize(self, z):
+        """Inverse of funnelize."""
+        *x, y = z
+        x, y = np.asarray(x), np.asarray(y)
+        return np.append(x*np.exp(-y/2), y/3)
+
+    def logpdf(self, z):
+        x = self.defunnelize(z)
+        *_, y = x
+        return super().logpdf(x) + 3 * np.exp(3/2 * y)
+    
+    def pdf(self, z):
+        x = self.defunnelize(z)
+        *_, y = x
+        return super().pdf(x) * 3 * np.exp(3/2 * y)
+
+    def sample(self, n_samples):
+        return vmap(self.funnelize)(super().sample(n_samples))
+
+
+
+
+
 
 ######################################
 # Kernelized Stein Discrepancy
@@ -352,7 +407,7 @@ def compute_final_metrics(particles, svgd):
     emd = wasserstein_distance(particles, target_sample)
 #    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
 #    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
-    ksd = stein.ksd_squared_u(particles, svgd.target.logpdf, kernels.ard(0), return_variance=False)
+    ksd = stein.ksd_squared_u(particles, svgd.target.logpdf, kernels.get_ard_fn(0), False)
     se_mean = np.mean((np.mean(particles, axis=0) - svgd.target.mean)**2)
     se_var = np.mean((np.cov(particles, rowvar=False) - svgd.target.cov)**2)
     return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_var=se_var)

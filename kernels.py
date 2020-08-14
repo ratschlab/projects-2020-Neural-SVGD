@@ -26,7 +26,7 @@ def vanilla_ard(x, y):
     ard = ARD()
     return(ard(x, y))
 
-def make_mlp(sizes, name=None, skip_connection=False):
+def build_mlp(sizes, name=None, skip_connection=False):
     """
     * sizes is a list of integers representing layer dimension
 
@@ -43,7 +43,7 @@ def make_mlp(sizes, name=None, skip_connection=False):
             return lin(x)
         else:
             return lin(x) + x # make sure sizes fit (ie sizes[-1] == input dimension)
-    return mlp
+    return hk.transform(mlp)
 
 
 ## utils
@@ -90,12 +90,11 @@ def _ard(x, y, logh):
 
     h = np.exp(logh)
     if h.ndim == 0:
-        return np.exp(- np.sum((x - y)**2 / h) / 2)# / np.sqrt(2 * np.pi * h)
+        return np.exp(- np.sum((x - y)**2 / h) / 2)
     else:
-        d = h.shape[0]
-        return np.exp(- np.sum((x - y)**2 / h) / 2)# / (2 * np.pi)**(d / 2) / np.sqrt(np.prod(h))
+        return np.exp(- np.sum((x - y)**2 / h) / 2)
 
-def ard(logh):
+def get_ard_fn(logh):
     return lambda x, y: _ard(x, y, logh)
 
 def _ard_m(x, y, sigma):
@@ -144,5 +143,5 @@ def funnel_optimal_kernel(x, y):
         raise ValueError(f"Shapes of particles x and y need to match. Recieved shapes x: {x.shape}, y: {y.shape}")
     elif x.ndim > 1 or x.ndim == 0:
         raise ValueError(f"Input particles x and y need to have shape (d,). Instead received shape {x.shape}")
-    return ard(logh=0)(enc_funnel(x), enc_funnel(y))
+    return get_kernel_fn(logh=0)(enc_funnel(x), enc_funnel(y))
 

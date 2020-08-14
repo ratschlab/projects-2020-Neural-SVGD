@@ -327,5 +327,5 @@ if __name__ == "__main__":
         print(f"Target shape: Gaussian with parameters:\n* mean {target_args[0][0]}\n* variance {target_args[0][1]}")
     print(f"Float64 enabled: {enable_float64}")
     print()
-    #random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
+    random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
     random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)

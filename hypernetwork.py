@@ -144,7 +144,7 @@ class SVGD():
 
 if __name__ == "main":
     # config
-    kernel = kernels.ard
+    kernel = kernels.get_ard_fn
     target = metrics.Gaussian(0, 10) # target dist
     n = 500 # nr particles
 

@@ -12,6 +12,7 @@ import json_tricks as json
 import utils
 import metrics
 import stein
+import kernels
 
 import os
 on_cluster = not os.getenv("HOME") == "/home/lauro"
@@ -28,10 +29,14 @@ class Optimizer():
 
 @partial(jit, static_argnums=1)
 def init_svgd(key, particle_shape):
-    return random.normal(key, particle_shape) * 2 - 3 # -6
+    particles = random.normal(key, particle_shape) * 2 - 3 # -6
+    return vmap(kernels.dec_funnel)(particles)
+    #return particles
 
 class SVGD():
-    def __init__(self, target, n_particles, n_subsamples, optimizer_svgd, kernel, encoder, decoder, subsample_with_replacement: bool, minimize_ksd_variance: bool):
+    def __init__(self, target, n_particles, n_subsamples,
+                 optimizer_svgd, kernel, encoder, decoder,
+                 subsample_with_replacement: bool, minimize_ksd_variance: bool):
         """
         Arguments
         ----------
@@ -71,15 +76,19 @@ class SVGD():
     # can't jit this I think
     def phistar(self, particles, subsample, encoder_params):
         """Returns tuple (particle_updates, auxdata)"""
-        return stein.phistar(particles, subsample, self.target.logpdf, self.get_kernel_fn(encoder_params))
+        return stein.phistar(particles, subsample, self.target.logpdf,
+                             self.get_kernel_fn(encoder_params))
 
     def ksd_squared(self, encoder_params, particles, compute_variance: bool):
-        """particles_a and particles_b are two bootstrap samples from the particles. Shape (n, d).
+        """particles_a and particles_b are two bootstrap samples from the particles.
+        Shape (n, d).
         Returns:
         * estimate of KSD^2
-        * estimate of Var(\hat KSD^2), the variance of the linear-time estimator, if compute_variance is True.
+        * estimate of Var(\hat KSD^2), the variance of the linear-time estimator,
+        if compute_variance is True.
         """
-        return stein.ksd_squared_u(particles, self.target.logpdf, self.get_kernel_fn(encoder_params), compute_variance)
+        return stein.ksd_squared_u(particles, self.target.logpdf,
+                                   self.get_kernel_fn(encoder_params), compute_variance)
 
     @partial(jit, static_argnums=0)
     def ksd_squared_batched(self, encoder_params, particles):
@@ -91,7 +100,8 @@ class SVGD():
         """
         if particles.ndim < 3:
             particles = np.expand_dims(particles, 0)
-        ksds, variances = vmap(self.ksd_squared, (None, 0, None))(encoder_params, particles, True)
+        ksds, variances = vmap(self.ksd_squared, (None, 0, None))(encoder_params,
+                                                                  particles, True)
         return np.mean(ksds), np.mean(variances)
 
     @partial(jit, static_argnums=0)
@@ -116,7 +126,8 @@ class SVGD():
             loss = -ksd + lambda_reg * autoenc_loss
         return loss, aux
 
-    def train_kernel(self, key, n_iter: int, ksd_steps: int, svgd_steps: int, opt_ksd, lambda_reg: float, detailed_log=False):
+    def train_kernel(self, key, n_iter: int, ksd_steps: int, svgd_steps: int,
+                     opt_ksd, lambda_reg: float, detailed_log=False):
         """Train the kernel parameters
         Training goes over one SVGD run.
 
@@ -158,8 +169,17 @@ class SVGD():
 
             # Update
             key, subkey = random.split(key)
-            subsample = utils.subsample(subkey, particle_batch[:, train_idx, :], self.n_subsamples_for_ksd, replace=self.subsample_with_replacement, axis=1)
-            [regularized_loss, aux], [d_enc, d_dec] = value_and_grad(self.kernel_loss_batched, argnums=(0,1), has_aux=True)(encoder_params_pre_update, decoder_params_pre_update, subsample, lambda_reg)
+            subsample = utils.subsample(subkey, particle_batch[:, train_idx, :],
+                                        self.n_subsamples_for_ksd,
+                                        replace=self.subsample_with_replacement,
+                                        axis=1)
+            [regularized_loss, aux], [d_enc, d_dec] = value_and_grad(
+                self.kernel_loss_batched,
+                argnums=(0,1),
+                has_aux=True)(encoder_params_pre_update,
+                              decoder_params_pre_update,
+                              subsample,
+                              lambda_reg)
             updated_opt_enc_state = opt_ksd.update(step, d_enc, opt_enc_state)
             updated_opt_dec_state = opt_ksd.update(step, d_dec, opt_dec_state)
 
@@ -169,7 +189,7 @@ class SVGD():
                 "autoencoder_loss": autoencoder_loss,
                 "regularized_loss": regularized_loss,
             })
-            if detailed_log:
+            if detailed_log and step % 5 == 0:
                 # Compute KSD, validation KSD and log rundata
                 encoder_params = opt_ksd.get_params(updated_opt_enc_state)
                 key, subkey = random.split(key)
@@ -201,29 +221,28 @@ class SVGD():
             negdKL, auxdata = self.phistar(particles, subsample, encoder_params) # auxdata has shape (n_particles, 2, d)
             dKL = -negdKL
             updated_opt_svgd_state = self.opt.update(step, dKL, opt_svgd_state)
+            mean_auxdata = np.mean(auxdata, axis=0)
+            updated_particles = self.opt.get_params(updated_opt_svgd_state)
             metrics.append_to_log(rundata, {
-
+                "mean_drift": mean_auxdata[0],
+                "mean_repulsion": mean_auxdata[1],
+                "leader_mean":     np.mean(updated_particles[leader_idx], axis=0),
+                "training_mean":   np.mean(updated_particles[train_idx], axis=0),
+                "validation_mean": np.mean(updated_particles[validation_idx], axis=0),
+                "leader_var":      np.var(updated_particles[leader_idx], axis=0),
+                "training_var":    np.var(updated_particles[train_idx], axis=0),
+                "validation_var":  np.var(updated_particles[validation_idx], axis=0),
             })
 
-            if detailed_log:
+            if detailed_log and step % 5 == 0:
                 # compute KSD, validation KSD, and log rundata
-                updated_particles = self.opt.get_params(updated_opt_svgd_state)
                 key1, key2, key = random.split(key, 3)
                 subsample            = utils.subsample(key1, updated_particles[leader_idx],     self.n_subsamples_for_ksd, replace=self.subsample_with_replacement)
                 validation_subsample = utils.subsample(key2, updated_particles[validation_idx], self.n_subsamples_for_ksd, replace=self.subsample_with_replacement)
-                mean_auxdata = np.mean(auxdata, axis=0)
                 #metrics.append_to_log(rundata, self.target.compute_metrics(updated_particles))
                 metrics.append_to_log(rundata, {
-                    "leader_mean":     np.mean(updated_particles[leader_idx], axis=0),
-                    "training_mean":   np.mean(updated_particles[train_idx], axis=0),
-                    "validation_mean": np.mean(updated_particles[validation_idx], axis=0),
-                    "leader_var":      np.var(updated_particles[leader_idx], axis=0),
-                    "training_var":    np.var(updated_particles[train_idx], axis=0),
-                    "validation_var":  np.var(updated_particles[validation_idx], axis=0),
-    #                "ksd_after_svgd_update":     self.ksd_squared(encoder_params, subsample, False),
-    #                "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, validation_subsample, False),
-                    "mean_drift": mean_auxdata[0],
-                    "mean_repulsion": mean_auxdata[1],
+                    "ksd_after_svgd_update":     self.ksd_squared(encoder_params, subsample, False),
+                    "ksd_after_svgd_update_val": self.ksd_squared(encoder_params, validation_subsample, False),
                 })
             return updated_opt_svgd_state
 
@@ -291,25 +310,27 @@ class SVGD():
                 negdKL, auxdata = self.phistar(particles, subsample, encoder_params)
                 dKL = -negdKL
                 opt_svgd_state = self.opt.update(i, dKL, opt_svgd_state)
-                # subsamples for ksd
+                mean_auxdata = np.mean(auxdata, axis=0)
+                metrics.append_to_log(rundata, {
+                    "leader_mean": np.mean(particles[leader_idx], axis=0),
+                    "leader_var":  np.var(particles[leader_idx], axis=0),
+                    "validation_mean": np.mean(particles[validation_idx], axis=0),
+                    "validation_var":  np.var(particles[validation_idx], axis=0),
+                    "mean_drift": mean_auxdata[0],
+                    "mean_repulsion": mean_auxdata[1],
+                })
                 if detailed_log:
+                    # subsamples for ksd
                     key1, key2, key = random.split(key, 3)
                     subsample            = utils.subsample(key1, particles[leader_idx],     self.n_subsamples_for_ksd, replace=self.subsample_with_replacement)
                     validation_subsample = utils.subsample(key2, particles[validation_idx], self.n_subsamples_for_ksd, replace=self.subsample_with_replacement)
-                    mean_auxdata = np.mean(auxdata, axis=0)
                     ksd, ksd_variance =         self.ksd_squared(encoder_params, subsample, True)
                     ksd_val, ksd_variance_val = self.ksd_squared(encoder_params, validation_subsample, True)
                     metrics.append_to_log(rundata, {
-                        "leader_mean": np.mean(particles[leader_idx], axis=0),
-                        "leader_var":  np.var(particles[leader_idx], axis=0),
-                        "validation_mean": np.mean(particles[validation_idx], axis=0),
-                        "validation_var":  np.var(particles[validation_idx], axis=0),
                         "ksd_after_svgd_update": ksd,
                         "ksd_after_svgd_update_val": ksd_val,
     #                    "ksd_variance": ksd_variance,
     #                    "ksd_variance_val": ksd_variance_val,
-                        "mean_drift": mean_auxdata[0],
-                        "mean_repulsion": mean_auxdata[1],
                     })
             return None
 

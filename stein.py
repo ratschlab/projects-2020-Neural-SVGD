@@ -117,8 +117,6 @@ def phistar(followers, leaders, logp, kernel):
 #
 #     return np.mean(phi_matrix, axis=1)
 
-@partial(jit, static_argnums=(1,2))
-
 @partial(jit, static_argnums=(2,3))
 def ksd_squared(xs, ys, logp, k):
     """
@@ -144,7 +142,7 @@ def ksd_squared(xs, ys, logp, k):
     ksd_matrix = gvv(xs, ys)
     return np.mean(ksd_matrix)
 
-@partial(jit, static_argnums=(1, 2, 3))
+#@partial(jit, static_argnums=(1, 2, 3))
 def ksd_squared_u(xs, logp, k, return_variance=False):
     """
     U-statistic for KSD^2. Computation in O(n^2)
@@ -157,15 +155,15 @@ def ksd_squared_u(xs, logp, k, return_variance=False):
     The square of the stein discrepancy KSD(q, p).
     KSD is approximated as $1 / n(n-1) \sum_{i \neq j} g(x_i, x_j)$, where the x are iid distributed as q
     """
-    def g(x, y):
+    def h(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):
             kx = lambda y_: k(x, y_)
             return stein_operator(kx, y, logp)
         return stein_operator(inner, x, logp, transposed=True)
-    gv  = vmap(g,  (0, None))
-    gvv = vmap(gv, (None, 0))
-    ksd_matrix = gvv(xs, xs)
+    hv  = vmap(h,  (0, None))
+    hvv = vmap(hv, (None, 0))
+    ksd_matrix = hvv(xs, xs)
 
     n = xs.shape[0]
     diagonal_indices = [list(range(n))]*2
@@ -176,6 +174,7 @@ def ksd_squared_u(xs, logp, k, return_variance=False):
     else:
         return np.sum(ksd_matrix) / (n * (n-1))
 
+#@partial(jit, static_argnums=(1,2))
 def ksd_squared_v(xs, logp, k):
     """
     V-statistic for KSD^2. Computation in O(n^2)
@@ -201,13 +200,12 @@ def ksd_squared_v(xs, logp, k):
 
     return np.sum(ksd_matrix) / n**2
 
-@partial(jit, static_argnums=(2,3,4))
-def ksd_squared_l(xs, ys, logp, k, return_variance=False):
+#@partial(jit, static_argnums=(1,2,3))
+def ksd_squared_l(samples, logp, k, return_variance=False):
     """
     O(n) time estimator for the KSD.
     Arguments:
-    * xs: np.array of shape (n, d)
-    * ys: np.array of shape (n, d) (can be the same array as xs)
+    * samples: np.array of shape (n, d)
     * logp: callable
     * k: callable, computes scalar-valued kernel k(x, y) given two input arguments of shape (d,).
 
@@ -216,7 +214,11 @@ def ksd_squared_l(xs, ys, logp, k, return_variance=False):
     KSD is approximated as $\sum_i g(x_i, y_i)$, where the x and y are iid distributed as q
     * The approximate variance of h(X, Y)
     """
-    if xs.shape != ys.shape: raise ValueError(f"xs and ys must have same shape. Instead, received shapes {xs.shape} and {ys.shape}.")
+    try:
+        xs, ys = samples.split(2)
+    except ValueError: # uneven split
+        xs, ys = samples[:-1].split(2)
+
     def h(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):

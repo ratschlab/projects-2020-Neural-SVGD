@@ -47,7 +47,7 @@ opts = {
 }
 
 kernels_mapping = {
-    "ard": kernels.ard(logh=0),
+    "ard": kernels.get_ard_fn(logh=0),
     "funnel_optimal_kernel": kernels.funnel_optimal_kernel,
 }
 
@@ -66,8 +66,8 @@ def get_svgd_args(config):
     }
 
     if train:
-        encoder = hk.transform(kernels.make_mlp(svgd_config["encoder_layers"], name="encoder", skip_connection=svgd_config["skip_connection"]))
-        decoder = hk.transform(kernels.make_mlp(svgd_config["decoder_layers"], name="decoder", skip_connection=svgd_config["skip_connection"]))
+        encoder = kernels.build_mlp(svgd_config["encoder_layers"], name="encoder", skip_connection=svgd_config["skip_connection"])
+        decoder = kernels.build_mlp(svgd_config["decoder_layers"], name="decoder", skip_connection=svgd_config["skip_connection"])
     else:
         encoder = hk.transform(lambda x: x)
         decoder = None
@@ -92,7 +92,7 @@ def get_svgd_args(config):
             "Instead received layer size {svgd_config[\"decoder_layers\"][-1]}. I'm"
             "modifying the last decoder layer so that it fits.")
             svgd_config["decoder_layers"][-1] = kwargs["target"].d
-            kwargs["decoder"] = hk.transform(kernels.make_mlp(svgd_config["decoder_layers"], name="decoder"))
+            kwargs["decoder"] = kernels.build_mlp(svgd_config["decoder_layers"], name="decoder")
     return kwargs
 
 def get_train_args(train_config):
