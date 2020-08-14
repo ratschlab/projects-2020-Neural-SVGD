@@ -30,8 +30,7 @@ class Optimizer():
 @partial(jit, static_argnums=1)
 def init_svgd(key, particle_shape):
     particles = random.normal(key, particle_shape) * 2 - 3 # -6
-    return vmap(kernels.dec_funnel)(particles)
-    #return particles
+    return particles
 
 class SVGD():
     def __init__(self, target, n_particles, n_subsamples,
@@ -40,7 +39,7 @@ class SVGD():
         """
         Arguments
         ----------
-        target: instance of class metrics.Distribution
+        target: instance of class distributions.Distribution
 
         encoder / decoder need to have pure methods
            encoder.init(key, x, y) -> params

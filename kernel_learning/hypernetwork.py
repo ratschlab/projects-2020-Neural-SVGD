@@ -144,8 +144,8 @@ class SVGD():
 
 if __name__ == "main":
     # config
-    kernel = kernels.get_ard_fn
-    target = metrics.Gaussian(0, 10) # target dist
+    kernel = kernels.get_rbf_kernel_logscaled
+    target = distributions.Gaussian(0, 10) # target dist
     n = 500 # nr particles
 
     lr_svgd = 1

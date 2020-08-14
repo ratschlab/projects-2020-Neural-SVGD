@@ -54,7 +54,7 @@ parser.add_argument("--noskip", action="store_true", default=False,
 parser.add_argument("--ksd_steps", type=int, default=5, help="Number of encoder"
                     "training steps per SVGD step.")
 parser.add_argument("--kernel", type=str, default="ard", help="Kernel to use as"
-                    "activation. Must be either 'ard' or 'funnel_optimal_kernel'.")
+                    "activation. Must be either 'ard' or 'funnel_kernel'.")
 args = parser.parse_args()
 
 def run(key, cfg: dict, logdir: str):
@@ -245,7 +245,7 @@ def sample_hparams(key, *names):
 
 
 if __name__ == "__main__":
-    n_iter = [150]
+    n_iter = [150] if on_cluster else [6]
     d = args.dim
     key = random.PRNGKey(args.key)
     if args.target=="banana": d=2
@@ -278,6 +278,7 @@ if __name__ == "__main__":
     ]
 
     svgd_steps = [1]
+
     n_particles = [1800]
     n_subsamples = [200]
     minimize_ksd_variance = [False]
@@ -314,12 +315,12 @@ if __name__ == "__main__":
 
     hparams = ["lr_ksd", "lambda_reg", "lr_svgd"]
     vanilla_hparams = ["lr_svgd"]
-    n_random_samples = 200
+    n_random_samples = 200 if on_cluster else 2
     key, subkey = random.split(key)
 
     # vanilla runs
     key, subkey = random.split(key)
-    n_random_samples_vanilla = 15
+    n_random_samples_vanilla = 15 if on_cluster else 2
 
     print("Starting experiments.")
     print(f"Target dimension: {d}")
@@ -327,5 +328,5 @@ if __name__ == "__main__":
         print(f"Target shape: Gaussian with parameters:\n* mean {target_args[0][0]}\n* variance {target_args[0][1]}")
     print(f"Float64 enabled: {enable_float64}")
     print()
-    random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
+    #random_search(subkey, config.config, vanilla_config, vanilla_hparams, logdir, n_random_samples_vanilla)
     random_search(subkey, config.config, sweep_config,   hparams,         logdir, n_random_samples)

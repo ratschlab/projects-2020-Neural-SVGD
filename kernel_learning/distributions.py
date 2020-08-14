@@ -15,9 +15,11 @@ import utils
 import stein
 import kernels
 
-# distributions packaged with metrics
-# check wikipedia for computation of higher moments https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
-# also recall form of characteristic function https://en.wikipedia.org/wiki/Characteristic_function_(probability_theory)#Examples
+# distributions packaged with metrics and sampling
+# check wikipedia for computation of higher moments
+# https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
+# also recall form of characteristic function
+# https://en.wikipedia.org/wiki/Characteristic_function_(probability_theory)#Examples
 class Distribution():
     """Base class for package logpdf + metrics + sampling"""
     def __init__(self):
@@ -351,7 +353,7 @@ class FunnelizedGaussian(Gaussian):
         x = self.defunnelize(z)
         *_, y = x
         return super().logpdf(x) + 3 * np.exp(3/2 * y)
-    
+
     def pdf(self, z):
         x = self.defunnelize(z)
         *_, y = x
@@ -359,75 +361,6 @@ class FunnelizedGaussian(Gaussian):
 
     def sample(self, n_samples):
         return vmap(self.funnelize)(super().sample(n_samples))
-
-
-
-
-
-
-######################################
-# Kernelized Stein Discrepancy
-def _ksd(x, logp, bandwidth):
-    """
-    Arguments:
-    * x: np.array of shape (n, d)
-    * logp: callable, takes in single input x of shape (d,)
-    * bandwidth: scalar or np.array of shape (d,)
-    Returns:
-    * scalar representing the estimated kernelized Stein discrepancy between target p and samples x.
-    """
-    def ksd_i(xi, x, logp, bandwidth):
-        dphi_dxi_transposed = lambda xi: np.trace(jacfwd(svgd.phistar_i)(xi, x, logp, bandwidth))
-        return np.vdot(grad(logp)(xi), svgd.phistar_i(xi, x, logp, bandwidth)) + dphi_dxi_transposed(xi)
-
-    return np.mean(vmap(ksd_i, (0, None, None, None))(x, x, logp, bandwidth)) / x.shape[0]
-
-########################
-### metrics to log while running SVGD
-def append_to_log(dct, update_dict):
-    """appends update_dict to dict, entry-wise.
-    """
-    for key, newvalue in update_dict.items():
-        dct.setdefault(key, []).append(newvalue)
-    return dct
-
-###############
-# Metrics
-from scipy.spatial.distance import cdist
-import ot
-def compute_final_metrics(particles, svgd):
-    """
-    Compute the ARD KSD between particles and target.
-    particles: np.array of shape (n, d)
-    svgd: instance of svgd.SVGD
-    """
-    n = len(particles)
-
-    target_sample = svgd.target.sample(n)
-    emd = wasserstein_distance(particles, target_sample)
-#    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
-#    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
-    ksd = stein.ksd_squared_u(particles, svgd.target.logpdf, kernels.get_ard_fn(0), False)
-    se_mean = np.mean((np.mean(particles, axis=0) - svgd.target.mean)**2)
-    se_var = np.mean((np.cov(particles, rowvar=False) - svgd.target.cov)**2)
-    return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_var=se_var)
-
-def wasserstein_distance(s1, s2):
-    """
-    Arguments: samples from two distributions, shape (n, d) (not (n,)).
-    Returns: W2 distance inf E[d(X, Y)^2]^0.5 over all joint distributions of X and Y such that the marginal distributions are equal those of the input samples. Here, d is the euclidean distance."""
-    M = cdist(s1, s2, "sqeuclidean")
-    a = np.ones(len(s1)) / len(s1)
-    b = np.ones(len(s2)) / len(s2)
-    return np.sqrt(ot.emd2(a, b, M))
-
-def sqrt_kxx(kernel: callable, particles_a, particles_b):
-    """Approximate E[k(x, x)] in O(n^2)"""
-    def sqrt_k(x, y): return np.sqrt(kernel(x, y))
-    sv  = vmap(sqrt_k, (0, None))
-    svv = vmap(sv,     (None, 0))
-    return np.mean(svv(particles_a, particles_b))
-#    return np.mean(vmap(sqrt_k)(particles_a, particles_b))
 
 ### Some nice target distributions
 # 2D

@@ -1,11 +1,14 @@
+import warnings
 import haiku as hk
 from jax import random
 from jax.experimental import optimizers
+
 import metrics
 import kernels
 import svgd
 import utils
-import warnings
+import nets
+import distributions
 
 config = dict()
 config["svgd"] = {
@@ -21,7 +24,7 @@ config["svgd"] = {
     "subsample_with_replacement": False,
     "encoder_layers": [4, 4, 2],
     "decoder_layers": [4, 4, 2],
-    "kernel": "ard", # one of "ard", "funnel_optimal_kernel"
+    "kernel": "ard", # one of "ard", "funnel_kernel"
     "minimize_ksd_variance": True,
     "skip_connection": True,
 }
@@ -47,8 +50,8 @@ opts = {
 }
 
 kernels_mapping = {
-    "ard": kernels.get_ard_fn(logh=0),
-    "funnel_optimal_kernel": kernels.funnel_optimal_kernel,
+    "ard":           kernels.get_rbf_kernel(   bandwidth=1),
+    "funnel_kernel": kernels.get_funnel_kernel(bandwidth=1),
 }
 
 def get_svgd_args(config):
@@ -60,14 +63,14 @@ def get_svgd_args(config):
         svgd_config = config
         train = True # assume
     targets = {
-        "Gaussian": metrics.Gaussian,
-        "Gaussian Mixture": metrics.GaussianMixture,
-        "Funnel": metrics.Funnel,
+        "Gaussian": distributions.Gaussian,
+        "Gaussian Mixture": distributions.GaussianMixture,
+        "Funnel": distributions.Funnel,
     }
 
     if train:
-        encoder = kernels.build_mlp(svgd_config["encoder_layers"], name="encoder", skip_connection=svgd_config["skip_connection"])
-        decoder = kernels.build_mlp(svgd_config["decoder_layers"], name="decoder", skip_connection=svgd_config["skip_connection"])
+        encoder = nets.build_mlp(svgd_config["encoder_layers"], name="encoder", skip_connection=svgd_config["skip_connection"])
+        decoder = nets.build_mlp(svgd_config["decoder_layers"], name="decoder", skip_connection=svgd_config["skip_connection"])
     else:
         encoder = hk.transform(lambda x: x)
         decoder = None
@@ -92,7 +95,7 @@ def get_svgd_args(config):
             "Instead received layer size {svgd_config[\"decoder_layers\"][-1]}. I'm"
             "modifying the last decoder layer so that it fits.")
             svgd_config["decoder_layers"][-1] = kwargs["target"].d
-            kwargs["decoder"] = kernels.build_mlp(svgd_config["decoder_layers"], name="decoder")
+            kwargs["decoder"] = nets.build_mlp(svgd_config["decoder_layers"], name="decoder")
     return kwargs
 
 def get_train_args(train_config):
