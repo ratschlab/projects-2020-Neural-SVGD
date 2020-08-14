@@ -249,7 +249,7 @@ if __name__ == "__main__":
     d = args.dim
     key = random.PRNGKey(args.key)
     if args.target=="banana": d=2
-    logdir = f"./runs/{d}-dim/" if args.target=="" else f"./runs/{d}-dim-{args.target}/"
+    logdir = f"../runs/{d}-dim/" if args.target=="" else f"../runs/{d}-dim-{args.target}/"
     if args.target=="":
         k = None
         if k is None:
