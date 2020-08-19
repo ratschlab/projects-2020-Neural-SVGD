@@ -10,6 +10,14 @@ from jax import vmap
 import metrics
 
 ## plotting utilities
+def plot_fun(fun, lims=(-5, 5), *args, ax=None, **kwargs):
+    if ax is None:
+        ax = plt.gca()
+    vfun = vmap(fun)
+    grid = np.linspace(*lims, num=200)
+    ax.plot(grid, vfun(grid), *args, **kwargs)
+
+
 def equalize_xy_axes(ax):
     """input: matplotlib axis object. sets x and y axis to same limits (and returns new limits)."""
     ylim = ax.get_ylim()
@@ -164,7 +172,7 @@ def plot_3d(x, y, z):
     if ax is None: print("huh?")
     return ax
 
-def plot_pdf(pdf, lims, type="contour", num_gridpoints=150):
+def plot_pdf_2d(pdf, lims, type="contour", num_gridpoints=150):
     """
     Arguments
     * pdf: callable, computes a distribution on R2.

@@ -7,9 +7,12 @@ import variance
 def stein_operator(fun, x, logp, transposed=False, aux=False):
     """
     Arguments:
-    * fun: callable, transformation $\text{fun}: \mathbb R^d \to \mathbb R^d$, or $\text{fun}: \mathbb R^d \to \mathbb R$. Satisfies $\lim_{x \to \infty} \text{fun}(x) = 0$.
+    * fun: callable, transformation $\text{fun}: \mathbb R^d \to \mathbb R^d$,
+    or $\text{fun}: \mathbb R^d \to \mathbb R$.
+    Satisfies $\lim_{x \to \infty} \text{fun}(x) = 0$.
     * x: np.array of shape (d,).
-    * p: callable, takes argument of shape (d,). Computes log(p(x)). Can be unnormalized (just using gradient.)
+    * p: callable, takes argument of shape (d,). Computes log(p(x)). Can be
+    unnormalized (just using gradient.)
 
     Returns:
     Stein operator $\mathcal A$ evaluated at fun and x:
@@ -18,16 +21,22 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
     """
     x = np.array(x, dtype=np.float32)
     if x.ndim != 1:
-        raise ValueError(f"x needs to be an np.array of shape (d,). Instead, x has shape {x.shape}")
+        raise ValueError(f"x needs to be an np.array of shape (d,). Instead, "
+                         f"x has shape {x.shape}")
     fx = fun(x)
     if transposed:
         if fx.ndim == 0:   # f: R^d --> R
-            raise ValueError(f"Got passed transposed = True, but the input function {fun.__name__} returns a scalar. This doesn't make sense: the transposed Stein operator acts only on vector-valued functions.")
+            raise ValueError(f"Got passed transposed = True, but the input "
+                             f"function {fun.__name__} returns a scalar. This "
+                             "doesn't make sense: the transposed Stein operator "
+                             "acts only on vector-valued functions.")
         elif fx.ndim == 1: # f: R^d --> R^d
             auxdata = None
             out = np.inner(grad(logp)(x), fun(x)) + np.trace(jacfwd(fun)(x).transpose())
         else:
-            raise ValueError(f"Output of input function {fun.__name__} needs to have dimension 1 or two. Instead got output of shape {fx.shape}")
+            raise ValueError(f"Output of input function {fun.__name__} needs "
+                             f"to have dimension 1 or two. Instead got output "
+                             f"of shape {fx.shape}")
     else:
         if fx.ndim == 0:   # f: R^d --> R
             drift_term = grad(logp)(x) * fx
@@ -41,7 +50,9 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
             raise NotImplementedError()
 #            return np.einsum("ij,j->ij", fun(x), grad(logp)(x)) + #np.einsum("iii->i", jacfwd(fun)(x).transpose())
         else:
-            raise ValueError(f"Output of input function {fun.__name__} needs to be a scalar, a vector, or a square matrix. Instead got output of shape {fx.shape}")
+            raise ValueError(f"Output of input function {fun.__name__} needs "
+                             f"to be a scalar, a vector, or a square matrix. "
+                             f"Instead got output of shape {fx.shape}")
     if aux:
         return out, auxdata
     else:
@@ -65,7 +76,7 @@ def stein(fun, xs, logp, transposed=False, aux=False):
         steins = vmap(stein_operator, (None, 0, None, None, None))(fun, xs, logp, transposed, aux)
         return np.mean(steins, axis=0)
 
-def phistar_i(xi, x, logp, kernel):
+def phistar_i(xi, x, logp, kernel, aux=True):
     """
     Arguments:
     * xi: np.array of shape (d,), usually a row element of x
@@ -74,13 +85,13 @@ def phistar_i(xi, x, logp, kernel):
     * kernel: callable. Takes as arguments two vectors x and y.
 
     Returns:
-    * \phi^*(xi) estimated using the particles x
+    * \phi^*(xi) estimated using the particles x (shape (d,))
     * auxdata consisting of [mean_drift, mean_repulsion] of shape (2, d)
     """
     if xi.ndim > 1:
         raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
     kx = lambda y: kernel(y, xi)
-    return stein(kx, x, logp, aux=True)
+    return stein(kx, x, logp, aux=aux)
 
 def phistar(followers, leaders, logp, kernel):
     """
@@ -95,9 +106,11 @@ def phistar(followers, leaders, logp, kernel):
     * kernel: callable. Takes as arguments two vectors x and y.
 
     Returns:
-    np array of same shape as x.
+    * updates: np array of same shape as followers (n, d)
+    * auxdata consisting of [mean_drift, mean_repulsion] of shape (n, 2, d)
     """
-    return vmap(phistar_i, (0, None, None, None))(followers, leaders, logp, kernel)
+    return vmap(phistar_i, (0, None, None, None, None))(followers, leaders,
+                                                        logp, kernel, True)
 
 # def phistar(xs, logp, k, xest=None):
 #     if xest is not None:

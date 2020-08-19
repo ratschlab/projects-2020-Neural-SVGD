@@ -425,4 +425,15 @@ def mixture(components: list, weights: list):
         return components[component](key2)
     return mix
 
-
+@jit
+def kl_of_gaussian(p, q):
+    """
+    Parameters
+    ----------
+    p, q : array-like, parameters of gaussian: p = [mu, var], q = [mu2, var2]
+    """
+    mu1, var1 = p
+    mu2, var2 = q
+    sigma1, sigma2 = [np.sqrt(v) for v in (var1, var2)]
+    out =  np.log(sigma2 / sigma1) + (var1 + (mu1 - mu2)**2) / (2 * var2) - 1/2
+    return np.squeeze(out)

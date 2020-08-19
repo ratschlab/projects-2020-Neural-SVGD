@@ -52,6 +52,7 @@ opts = {
 kernels_mapping = {
     "ard":           kernels.get_rbf_kernel(   bandwidth=1),
     "funnel_kernel": kernels.get_funnel_kernel(bandwidth=1),
+    "constant":      kernels.constant_kernel,
 }
 
 def get_svgd_args(config):

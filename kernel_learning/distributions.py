@@ -158,7 +158,7 @@ class Gaussian(Distribution):
         return expectations
 
     def sample(self, n_samples):
-        """mutates self.rkey"""
+        """mutates self.key"""
         self.newkey()
         out = random.multivariate_normal(self.key, self.mean, self.cov, shape=(n_samples,))
         self.newkey()
@@ -200,18 +200,38 @@ class GaussianMixture(Distribution):
         self.initialize_metric_names()
 
     def _check_and_reshape_args(self, means, covs, weights):
+        """
+        Shapes:
+        means: (k, d) or (k,)
+        covs: (k, d, d), (), (k,), (d, d)
+        weights: (k,)
+        """
         means = np.asarray(means)
         covs = np.asarray(covs)
         weights = np.asarray(weights)
         weights = weights / np.sum(weights) # normalize
-        assert len(means) == len(covs)
-        if means.ndim == 1:
-            means = means[:, np.newaxis]
+        k = len(means) # must equal the number of mixture components
+        if means.ndim == 0:
+            raise ValueError
+        elif means.ndim == 1:
+            means = means[:, np.newaxis] # d = 1
         d = means.shape[1]
-        if covs.ndim == 1 or covs.ndim == 2:
-            covs = [np.identity(d) * var for var in covs]
-            covs = np.array(covs)
+        if covs.ndim == 0:
+            covs = np.asarray([np.identity(d)*covs]*k)
+        elif covs.ndim == 1: # assume dimension is components
+            if len(covs) == k:
+                covs = np.asarray([np.identity(d) * cov for cov in covs])
+            elif len(covs) == d:
+                warnings.warn(f"Using the same covariance for all"
+                              " mixture components")
+                covs = np.asarray([np.diag(covs)]*d)
+            else:
+                raise ValueError(f"Length of covariance vector must equal the"
+                                 f"number of mixture components.")
+        elif covs.ndim == 2:
+            covs = np.asarray([covs]*k)
 
+        assert len(covs) == len(means)
         assert weights.ndim == 1 and len(weights) > 1
         assert means.ndim == 2 and covs.ndim == 3
         assert means.shape[1] == covs.shape[1] == covs.shape[2]
@@ -269,7 +289,9 @@ class GaussianMixture(Distribution):
         def exponent(x, mean, cov):
             sigmax = np.dot(np.linalg.inv(cov), (x - mean))
             return - np.vdot((x - mean), sigmax) / 2
-        exponents = vmap(exponent, (None, 0, 0))(x, self.means, self.covs) + np.log(self.weights)
+        exponents = vmap(exponent, (None, 0, 0))(x,
+                                                 self.means,
+                                                 self.covs) + np.log(self.weights)
 
         out = special.logsumexp(exponents)
         return np.squeeze(out)
@@ -280,7 +302,8 @@ class GaussianMixture(Distribution):
     def pdf(self, x):
         x = np.asarray(x)
         if x.shape != (self.d,) and not (self.d == 1 and x.ndim == 0):
-            raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
+            raise ValueError(f"Input x must be an np.array of length "
+            "{self.d} and dimension one.")
         pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
         return np.vdot(pdfs, self.weights)
 

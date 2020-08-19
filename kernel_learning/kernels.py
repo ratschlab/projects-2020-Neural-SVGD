@@ -53,6 +53,10 @@ def constant_kernel(x, y):
     _check_xy(x, y)
     return np.array(1.)
 
+def char_kernel(x, y):
+    _check_xy(x, y)
+    return np.squeeze(np.where(x==y, 1., 0.))
+
 def funnelize(v):
     """If v is standard 2D normal, then
     funnelize(v) is distributed as Neal's Funnel."""
