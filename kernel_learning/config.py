@@ -19,7 +19,7 @@ config["svgd"] = {
     ],  # either [mean, cov] or [means, covs, weights]
     "n_particles": 2000,
     "n_subsamples": 300,
-    "optimizer_svgd": "Adagrad",  # One of ["Adam", "Adagrad", "SGD"]
+    "optimizer_svgd": "SGD",  # One of ["Adam", "Adagrad", "SGD"]
     "lr_svgd": 1.0,
     "subsample_with_replacement": False,
     "encoder_layers": [4, 4, 2],

@@ -29,7 +29,7 @@ class Optimizer():
 
 @partial(jit, static_argnums=1)
 def init_svgd(key, particle_shape):
-    particles = random.normal(key, particle_shape)
+    particles = random.normal(key, particle_shape) * np.sqrt(5)
     return particles
 
 class SVGD():

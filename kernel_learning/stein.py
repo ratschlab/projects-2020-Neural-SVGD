@@ -188,7 +188,7 @@ def ksd_squared_u(xs, logp, k, return_variance=False):
         return np.sum(ksd_matrix) / (n * (n-1))
 
 #@partial(jit, static_argnums=(1,2))
-def ksd_squared_v(xs, logp, k):
+def ksd_squared_v(xs, logp, k, dummy_arg):
     """
     V-statistic for KSD^2. Computation in O(n^2)
     Arguments:

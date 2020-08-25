@@ -15,7 +15,6 @@ import utils
 import stein
 import kernels
 
-# distributions packaged with metrics and sampling
 # check wikipedia for computation of higher moments
 # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
 # also recall form of characteristic function
@@ -31,10 +30,7 @@ class Distribution():
 
     threadkey = random.PRNGKey(0)
 
-    def newkey(self):
-        self.threadkey, self.key = random.split(self.threadkey)
-
-    def sample(self, shape):
+    def sample(self, shape, key=None):
         raise NotImplementedError()
 
     def logpdf(self, x):
@@ -157,12 +153,12 @@ class Gaussian(Distribution):
         expectations = [mean, np.diagonal(cov) + mean**2, np.real(char), np.imag(char)]
         return expectations
 
-    def sample(self, n_samples):
-        """mutates self.key"""
-        self.newkey()
-        out = random.multivariate_normal(self.key, self.mean, self.cov, shape=(n_samples,))
-        self.newkey()
-
+    def sample(self, n_samples, key=None):
+        """mutates self.key if key is None"""
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        key, subkey = random.split(key)
+        out = random.multivariate_normal(subkey, self.mean, self.cov, shape=(n_samples,))
         shape = (n_samples, self.d)
         return out.reshape(shape)
 
@@ -257,26 +253,29 @@ class GaussianMixture(Distribution):
         expectations = [np.squeeze(e) for e in expectations]
         return expectations
 
-    def sample(self, n_samples):
+    def sample(self, n_samples, key=None):
         """mutates self.rkey"""
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+
         def sample_from_component(rkey, component, num_samples):
             return random.multivariate_normal(rkey,
                                               self.means[component],
                                               self.covs[component],
                                               shape=(num_samples,))
-        components = random.categorical(self.key,
+        key, subkey = random.split(key)
+        components = random.categorical(subkey,
                                         np.log(self.weights),
                                         shape=(n_samples,))
         counts = onp.bincount(components.flatten())
-        self.newkey()
-
+        key, keya, keyb = random.split(key, 3)
         out = [
-            sample_from_component(key, c, num)
-            for key, c, num in
-            zip(random.split(self.key, self.num_components), range(self.num_components), counts)]
+            sample_from_component(keya, c, num) for key, c, num in
+            zip(random.split(keyb, self.num_components),
+                range(self.num_components),
+                counts)
+        ]
         out = np.concatenate(out)
-        self.newkey()
-
         shape = (n_samples, self.d)
         return out.reshape(shape)
 
@@ -319,11 +318,13 @@ class Funnel(Distribution):
             [np.zeros((1, d-1)), self.ycov         ]
         ])
 
-    def sample(self, n_samples):
-        self.newkey()
-        y = random.normal(self.key, (n_samples, 1)) * 3
-        self.newkey()
-        x = random.normal(self.key, (n_samples, self.d-1)) * np.exp(y/2)
+    def sample(self, n_samples, key=None):
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        key, subkey = random.split(key)
+        y = random.normal(subkey, (n_samples, 1)) * 3
+        key, subkey = random.split(key)
+        x = random.normal(subkey, (n_samples, self.d-1)) * np.exp(y/2)
         return np.concatenate([x, y], axis=1)
 
     def pdf(self, x):
@@ -384,6 +385,43 @@ class FunnelizedGaussian(Gaussian):
 
     def sample(self, n_samples):
         return vmap(self.funnelize)(super().sample(n_samples))
+
+class Uniform(Distribution):
+    def __init__(self, lims):
+        """
+        lims has shape (d, 2)
+        """
+        lims = np.asarray(lims)
+        if lims.ndim < 2:
+            lims = lims[None, :] # d=1
+        elif lims.ndim < 1:
+            raise
+        self.lims = lims
+        self.d = len(lims)
+        self.mean = np.mean(self.lims, axis=1)
+        self.cov = None
+
+    def sample(self, n_samples, key=None):
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        key, subkey = random.split(key)
+        samples = random.uniform(subkey, shape=(n_samples, self.d)) - 0.5
+        scales = self.lims[:, 1] - self.lims[:, 0]
+        return np.einsum("ij,j->ij", samples, scales) + self.mean
+
+    def pdf(self, x):
+        x = self._checkx(x)
+        return stats.uniform.pdf(x,
+                                 loc=self.lims[:, 0],
+                                 scale=self.lims[:, 1] - self.lims[:, 0])
+
+    def logpdf(self, x):
+        x = self._checkx(x)
+        return stats.uniform.logpdf(x,
+                                    loc=self.lims[:, 0],
+                                    scale=self.lims[:, 1] - self.lims[:, 0])
+
+
 
 ### Some nice target distributions
 # 2D

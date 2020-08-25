@@ -6,20 +6,23 @@ import haiku as hk
 import warnings
 import utils
 
-class ARD(hk.Module):
+class RBF(hk.Module):
     def __init__(self, name=None):
-        super(ARD, self).__init__(name=name)
+        super().__init__(name=name)
 
     def __call__(self, x, y):
         logh_init = np.zeros
-        logh = hk.get_parameter("logh", shape=x.shape, dtype=x.dtype, init=logh_init)
-        return kernels.get_rbf_kernel_logscaled(logh)(x, y)
+        bandwidth = hk.get_parameter(
+            "bandwidth", shape=x.shape, dtype=x.dtype, init=logh_init)
+        return kernels.get_rbf_kernel(bandwidth)(x, y)
 
-def vanilla_ard(x, y):
-    ard = ARD()
-    return(ard(x, y))
+def build_rbf():
+    def vanilla_rbf(x, y):
+        rbf = RBF()
+        return(rbf(x, y))
+    return hk.transform(vanilla_rbf)
 
-def build_mlp(sizes, name=None, skip_connection=False):
+def build_mlp(sizes, name=None, skip_connection=False, with_bias=True):
     """
     * sizes is a list of integers representing layer dimension
 
@@ -31,6 +34,7 @@ def build_mlp(sizes, name=None, skip_connection=False):
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
                           activation=jax.nn.relu,
                           activate_final=False,
+                          with_bias=with_bias,
                           name=name)
         if skip_connection is False:
             return lin(x)

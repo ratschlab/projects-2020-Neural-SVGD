@@ -155,24 +155,27 @@ def make_meshgrid(func, lims, num=100):
     return xx, yy, zz
 
 
-def plot_3d(x, y, z):
+def plot_3d(x, y, z, ax=None, **kwargs):
     """makes a 3d plot.
     Arguments:
     * x, y, z are np.arrays of shape (k, k). meant to be output of make_meshgrid."""
-    fig = plt.figure(figsize=(12, 6))
-    ax = fig.gca(projection='3d')
+    if ax is None:
+        fig = plt.figure(figsize=(12, 6))
+        ax = fig.gca(projection='3d')
+    else:
+        ax = ax(projection='3d')
     ax.plot_surface(x, y, z,
-                  cmap=cm.coolwarm,
-                  linewidth=0,
-                  antialiased=True)
+                    cmap=cm.coolwarm,
+                    linewidth=0,
+                    antialiased=True,
+                    **kwargs)
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     ax.set_zlabel('z')
     plt.show()
-    if ax is None: print("huh?")
     return ax
 
-def plot_pdf_2d(pdf, lims, type="contour", num_gridpoints=150):
+def plot_pdf_2d(pdf, lims, type="contour", num_gridpoints=150, ax=None, **kwargs):
     """
     Arguments
     * pdf: callable, computes a distribution on R2.
@@ -180,9 +183,12 @@ def plot_pdf_2d(pdf, lims, type="contour", num_gridpoints=150):
     * type: string, one of "3d", "contour".
     """
     if type=="3d":
-        return plot_3d(*make_meshgrid(pdf, lims, num=num_gridpoints))
+        return plot_3d(*make_meshgrid(pdf, lims, num=num_gridpoints, ax=ax), **kwargs)
     elif type=="contour":
-        return plt.contour(*make_meshgrid(pdf, lims, num=num_gridpoints))
+        if ax is None:
+            ax=plt.gca()
+        return ax.contour(*make_meshgrid(pdf, lims, num=num_gridpoints),
+                           **kwargs)
     else:
         raise ValueError("type must be one of '3d' or 'contour'.")
 
