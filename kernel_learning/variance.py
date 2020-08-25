@@ -17,7 +17,8 @@ def var_exp(gram):
     n = gram.shape[0]
     diagonal_indices = [list(range(n))]*2
     gramzero = index_update(gram, diagonal_indices, 0)
-    return (np.linalg.norm(np.dot(gramzero, np.ones(n)))**2 - np.linalg.norm(gramzero)**2) / (n * (n-1) * (n-2))
+    return (np.linalg.norm(np.dot(gramzero, np.ones(n)))**2 \
+            - np.linalg.norm(gramzero)**2) / (n * (n-1) * (n-2))
 
 
 def var_hxy(gram):
@@ -37,7 +38,9 @@ def var_hxy(gram):
 
     ones = np.ones(n)
     mean_of_square = np.linalg.norm(gramzero)**2 / (n * (n-1))
-    mean_squared = (np.dot(np.dot(ones, gramzero), ones)**2 - 4*np.linalg.norm(np.dot(gramzero, ones))**2 + 2*np.linalg.norm(gramzero)**2) / (n*(n-1)*(n-2)*(n-3)) 
+    mean_squared = (np.dot(np.dot(ones, gramzero), ones)**2 \
+                    - 4*np.linalg.norm(np.dot(gramzero, ones))**2 \
+                    + 2*np.linalg.norm(gramzero)**2) / (n*(n-1)*(n-2)*(n-3))
     return mean_of_square - mean_squared
 
 def var_ksd(xs, logp: callable, k: callable):

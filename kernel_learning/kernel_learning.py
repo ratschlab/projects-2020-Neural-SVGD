@@ -46,7 +46,8 @@ class KernelLearner():
                  sizes: list,
                  activation_kernel: callable,
                  learning_rate: float = 0.01,
-                 lambda_reg: float = 0):
+                 lambda_reg: float = 0,
+                 normalize = False):
         """
         When sizes = [d] and no biases, then this is equivalent to just maximizing the
         vanilla RBF parameters (bandwidth / ARD covariance matrix).
@@ -96,13 +97,16 @@ class KernelLearner():
     def loss_fn(self, params, samples):
         encoder_params, decoder_params = params
         kernel = self.get_kernel(params)
-        ksd = stein.ksd_squared_v(samples, self.target.logpdf, kernel, False)
+        ksd, var = stein.ksd_squared_v(samples, self.target.logpdf, kernel, True)
         def enc(x): return self.mlp.apply(    encoder_params, None, x)
         def dec(z): return self.decoder.apply(decoder_params, None, z)
         def autoencoder_loss(x): return np.linalg.norm(x - dec(enc(x)))**2
         autoenc_loss = np.mean(vmap(autoencoder_loss)(samples))
-        aux = [ksd, autoenc_loss*self.lambda_reg]
-        return -ksd + self.lambda_reg * autoenc_loss, aux
+        aux = [ksd, autoenc_loss*self.lambda_reg, var]
+        if self.normalize:
+            return -ksd/np.sqrt(var) + self.lambda_reg * autoenc_loss, aux
+        else:
+            return -ksd + self.lambda_reg * autoenc_loss, aux
 
     @partial(jit, static_argnums=0)
     def _step(self, optimizer_state, samples, step: int):
@@ -120,7 +124,7 @@ class KernelLearner():
         return None
 
     def log(self, aux):
-        ksd, autoenc_loss = aux
+        ksd, autoenc_loss, var = aux
         metrics.append_to_log(self.rundata, {
             "training_ksd": ksd,
             "autoencoder_loss": autoenc_loss,
