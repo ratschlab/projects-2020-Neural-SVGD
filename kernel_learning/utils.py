@@ -437,3 +437,9 @@ def kl_of_gaussian(p, q):
     sigma1, sigma2 = [np.sqrt(v) for v in (var1, var2)]
     out =  np.log(sigma2 / sigma1) + (var1 + (mu1 - mu2)**2) / (2 * var2) - 1/2
     return np.squeeze(out)
+
+def vmv_dot(vec_a, matrix, vec_b):
+    """
+    Returns x^T A x, the vector-matrix-vector dot product
+    """
+    return np.einsum("i,ij,j->", vec_a, matrix, vec_b)

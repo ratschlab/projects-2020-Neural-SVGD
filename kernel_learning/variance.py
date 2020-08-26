@@ -3,9 +3,12 @@ import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jit
 from jax.ops import index_update, index
 
+import utils
+
 def var_exp(gram):
     """
-    Estimator for $Var_Y(E_X[h(X, Y)])$, where h is a symmetric kernel function.
+    Estimator for $Var_Y(E_X[h(X, Y)])$, where h is a symmetric kernel function,
+    and X, Y are iid.
     For background, see this technical report: https://arxiv.org/pdf/1906.02104.pdf
 
     Args
@@ -17,13 +20,20 @@ def var_exp(gram):
     n = gram.shape[0]
     diagonal_indices = [list(range(n))]*2
     gramzero = index_update(gram, diagonal_indices, 0)
-    return (np.linalg.norm(np.dot(gramzero, np.ones(n)))**2 \
-            - np.linalg.norm(gramzero)**2) / (n * (n-1) * (n-2))
+    del gram
+    one_n = np.ones(n)
+    expectation_of_square = (np.linalg.norm(np.dot(gramzero, one_n))**2 \
+                             - np.linalg.norm(gramzero)**2) / (n * (n-1) * (n-2))
+    square_of_expectation = (utils.vmv_dot(one_n, gramzero, one_n)**2 \
+                             - 4 * np.linalg.norm(np.dot(gramzero, one_n))**2 \
+                             + 2 * np.linalg.norm(gramzero)**2) / (n*(n-1)*(n-1)*(n-3))
+    return expectation_of_square - square_of_expectation
 
 
 def var_hxy(gram):
     """
-    Estimator for $Var_{XY}(h(X, Y))$, where h is a symmetric kernel function.
+    Estimator for $Var_{XY}(h(X, Y))$, where h is a symmetric kernel function,
+    and X, Y are iid.
     For background, see this technical report: https://arxiv.org/pdf/1906.02104.pdf
 
     Args
@@ -45,7 +55,7 @@ def var_hxy(gram):
 
 def var_ksd(xs, logp: callable, k: callable):
     """
-    Estimator for $Var_{XY} \hat KSD$, where \hat KSD is a U-estimator for the 
+    Estimator for $Var_{XY} \hat KSD$, where \hat KSD is a U-estimator for the
     kernelized Stein discrepancy with kernel k.
     For background, see this technical report: https://arxiv.org/pdf/1906.02104.pdf
 

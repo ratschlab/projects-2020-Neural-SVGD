@@ -8,7 +8,6 @@ from scipy.spatial.distance import cdist
 import ot
 import numpy as onp
 
-import svgd
 import utils
 import stein
 import kernels

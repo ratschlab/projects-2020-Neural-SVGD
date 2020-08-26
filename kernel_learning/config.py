@@ -5,7 +5,6 @@ from jax.experimental import optimizers
 
 import metrics
 import kernels
-import svgd
 import utils
 import nets
 import distributions

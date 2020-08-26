@@ -17,7 +17,6 @@ import metrics
 import stein
 import kernels
 import nets
-import svgd
 import distributions
 
 import os
@@ -56,6 +55,7 @@ class KernelLearner():
         self.activation_kernel = activation_kernel
         self.target = target
         self.lambda_reg = lambda_reg
+        self.normalize = normalize
         self.threadkey, subkey = random.split(key)
 
         # net and optimizer
@@ -63,7 +63,7 @@ class KernelLearner():
                                   with_bias=False)
         self.decoder = nets.build_mlp(self.sizes, name="decoder",
                                       skip_connection=False, with_bias=False)
-        self.opt = svgd.Optimizer(*optimizers.rmsprop(learning_rate))
+        self.opt = Optimizer(*optimizers.rmsprop(learning_rate))
         self.step_counter = 0
         self.initialize_optimizer(subkey)
         self.rundata = {}
@@ -97,7 +97,7 @@ class KernelLearner():
     def loss_fn(self, params, samples):
         encoder_params, decoder_params = params
         kernel = self.get_kernel(params)
-        ksd, var = stein.ksd_squared_v(samples, self.target.logpdf, kernel, True)
+        ksd, var = stein.ksd_squared_u(samples, self.target.logpdf, kernel, True)
         def enc(x): return self.mlp.apply(    encoder_params, None, x)
         def dec(z): return self.decoder.apply(decoder_params, None, z)
         def autoencoder_loss(x): return np.linalg.norm(x - dec(enc(x)))**2
@@ -330,7 +330,8 @@ class AdversarialSVGD():
                  svgd_lr=0.1,
                  kernel_lr=0.1,
                  lambda_reg=0.1,
-                 svgd_key=None):
+                 svgd_key=None,
+                 normalize=False):
         """
         Initialize containers for kernel learning and particle updates.
         """
@@ -340,7 +341,8 @@ class AdversarialSVGD():
                                     sizes,
                                     kernels.get_rbf_kernel(1),
                                     kernel_lr,
-                                    lambda_reg)
+                                    lambda_reg,
+                                    normalize=normalize)
         if svgd_key is not None:
             keyb = svgd_key
         self.svgd = SVGD(key=keyb,

@@ -2,7 +2,10 @@ from functools import partial
 import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jit
 from jax.ops import index_update, index
+
 import variance
+import distributions
+import kernels
 
 def stein_operator(fun, x, logp, transposed=False, aux=False):
     """
@@ -244,14 +247,29 @@ def ksd_squared_l(samples, logp, k, return_variance=False):
     else:
         return np.mean(outs)
 
-@partial(jit, static_argnums=(2,3))
-def h_var(xs, ys, logp, k):
-    """Estimate for Var(h(X, Y))
-    Recall Var(KSD_L) = 1/n Var(h(X, Y))"""
-    def h(x, y):
-        """x, y: np.arrays of shape (d,)"""
-        def inner(x):
-            kx = lambda y_: k(x, y_)
-            return stein_operator(kx, y, logp)
-        return stein_operator(inner, x, logp, transposed=True)
-    return np.var(vmap(h)(xs, ys), ddof=1) # unbiased variance
+def h(x, y, kernel, logp):
+    k=kernel
+    def h2(x_, y_): return np.inner(grad(logp)(y_), grad(k, argnums=0)(x_, y_))
+    def d_xk(x_, y_): return grad(k, argnums=0)(x_, y_)
+    out = np.inner(grad(logp)(x), grad(logp)(y)) * k(x,y) +\
+            h2(x, y) + h2(y, x) +\
+            np.trace(jacfwd(d_xk, argnums=1)(x, y))
+    return out
+
+def g(x, y, kernel, logp):
+    """x, y: np.arrays of shape (d,)"""
+    k=kernel
+    def inner(x):
+        kx = lambda y_: k(x, y_)
+        return stein_operator(kx, y, logp)
+    return stein_operator(inner, x, logp, transposed=True)
+
+def test_h_successful():
+    target = distributions.Gaussian(0, 5)
+    source = distributions.Gaussian(3, 1)
+    k = kernels.get_rbf_kernel_logscaled(logh=0)
+    logp = target.logpdf
+    x, y = source.sample(2)
+    return g(x, y, k, logp) == h(x, y, k, logp)
+
+assert test_h_successful()
