@@ -45,8 +45,9 @@ class KernelLearner():
                  sizes: list,
                  activation_kernel: callable,
                  learning_rate: float = 0.01,
-                 lambda_reg: float = 0,
-                 normalize = False):
+                 lambda_reg: float = 1,
+                 scaling_parameter = False,
+                 std_normalize=False):
         """
         When sizes = [d] and no biases, then this is equivalent to just maximizing the
         vanilla RBF parameters (bandwidth / ARD covariance matrix).
@@ -55,7 +56,8 @@ class KernelLearner():
         self.activation_kernel = activation_kernel
         self.target = target
         self.lambda_reg = lambda_reg
-        self.normalize = normalize
+        self.scaling_parameter = scaling_parameter
+        self.std_normalize = std_normalize
         self.threadkey, subkey = random.split(key)
 
         # net and optimizer
@@ -69,6 +71,9 @@ class KernelLearner():
         self.rundata = {}
 
     def initialize_optimizer(self, key=None, keep_params=False):
+        """Initialize optimizer. If keep_params=True, then only the learning
+        rate schedule is reinitialized, otherwise the model parameters are
+        also reinitialized."""
         if keep_params:
             self.optimizer_state = self.opt.init(self.get_params())
         else:
@@ -80,77 +85,88 @@ class KernelLearner():
             init_params_enc = self.mlp.init(subkey, x_dummy)
             init_params_dec = self.decoder.init(
                 subkey, self.mlp.apply(init_params_enc, None, x_dummy))
-            self.optimizer_state = self.opt.init((init_params_enc, init_params_dec))
+            if self.scaling_parameter:
+                init_normalizing_constant = 1.
+                init_params = (init_params_enc, init_params_dec, init_normalizing_constant)
+            else:
+                init_params = (init_params_enc, init_params_dec)
+            self.optimizer_state = self.opt.init(init_params)
         return None
 
     def get_params(self):
         return self.opt.get_params(self.optimizer_state)
 
     def get_kernel(self, params):
-        params = params[0]
+        if self.scaling_parameter:
+            enc_params, _, norm = params
+        else:
+            enc_params, *_ = params
         def kernel(x, y):
             x, y = np.asarray(x), np.asarray(y)
-            return self.activation_kernel(self.mlp.apply(params, None, x),
-                                          self.mlp.apply(params, None, y))
+            k = self.activation_kernel(self.mlp.apply(enc_params, None, x),
+                                       self.mlp.apply(enc_params, None, y))
+            return k*norm if self.scaling_parameter else k
         return kernel
 
     def loss_fn(self, params, samples):
-        encoder_params, decoder_params = params
         kernel = self.get_kernel(params)
-        ksd, var = stein.ksd_squared_u(samples, self.target.logpdf, kernel, True)
-        def enc(x): return self.mlp.apply(    encoder_params, None, x)
-        def dec(z): return self.decoder.apply(decoder_params, None, z)
-        def autoencoder_loss(x): return np.linalg.norm(x - dec(enc(x)))**2
-        autoenc_loss = np.mean(vmap(autoencoder_loss)(samples))
-        aux = [ksd, autoenc_loss*self.lambda_reg, var]
-        if self.normalize:
-            return -ksd/np.sqrt(var) + self.lambda_reg * autoenc_loss, aux
+        ksd_squared, std = stein.ksd_squared_u(
+            samples, self.target.logpdf, kernel, include_stddev=True)
+        phistar = self.get_phistar(params, samples)
+        def phi_norm(x): return np.linalg.norm(phistar(x))**2
+        regularizer_term = np.mean(vmap(phi_norm)(samples))
+        ksd = np.sqrt(np.clip(ksd_squared, a_min=1e-6))
+        aux = [ksd, ksd_squared, regularizer_term]
+        if self.std_normalize:
+            return -ksd_squared/std + self.lambda_reg * regularizer_term, aux
         else:
-            return -ksd + self.lambda_reg * autoenc_loss, aux
+            return -ksd_squared +             self.lambda_reg * regularizer_term, aux
+
+    def get_phistar(self, params, samples):
+        """return phistar(\cdot)"""
+        kernel = self.get_kernel(params)
+        def phistar(x):
+            return stein.phistar_i(x, samples, self.target.logpdf, kernel, aux=False)
+        return phistar
 
     @partial(jit, static_argnums=0)
     def _step(self, optimizer_state, samples, step: int):
         # update step
         params = self.opt.get_params(optimizer_state)
-        [_, aux], g = value_and_grad(self.loss_fn, has_aux=True)(params, samples)
+        [loss, aux], g = value_and_grad(self.loss_fn, has_aux=True)(params, samples)
         optimizer_state = self.opt.update(step, g, optimizer_state)
+        aux.append(loss)
         return optimizer_state, aux
 
     def step(self, samples):
         """Step and mutate state"""
-        self.optimizer_state, aux = self._step(self.optimizer_state, samples, self.step_counter)
+        self.optimizer_state, aux = self._step(
+            self.optimizer_state, samples, self.step_counter)
         self.log(aux)
         self.step_counter += 1
         return None
 
     def log(self, aux):
-        ksd, autoenc_loss, var = aux
+        ksd, ksd_squared, reg, full_loss = aux
+        params = self.get_params()
         metrics.append_to_log(self.rundata, {
             "training_ksd": ksd,
-            "autoencoder_loss": autoenc_loss,
-            "bandwidth": 1 / np.squeeze(
-                self.opt.get_params(self.optimizer_state)[0]["MLP/~/linear_0"]["w"])**2,
+            "bandwidth": 1 / np.squeeze(params[0]["MLP/~/linear_0"]["w"])**2,
+            #"std_of_ksd": std,
+            "loss": full_loss,
         })
+#        if self.scaling_parameter:
+#            metrics.append_to_log(self.rundata, {
+#                "normalizing_const": params[2],
+#            })
 
-    def train(self, proposal, n_steps=100, batch_size=400, sample_every=True):
-        samples = proposal.sample(batch_size)
+    def train(self, samples, n_steps=100, proposal=None):
         for _ in tqdm(range(n_steps), disable=disable_tqdm):
-            if sample_every:
-                samples = proposal.sample(batch_size)
+            if proposal is not None:
+                samples = proposal.sample(400)
             self.step(samples)
         return None
 
-    def compute_final_loss_mean_and_stddev(self, proposal, batch_size=400, m=100):
-        @jit
-        def loss(key):
-            samples = proposal.sample(batch_size, key=key)
-            loss, aux = self.loss_fn(self.get_params(), samples)
-            return loss
-        losses = []
-        for _ in range(m):
-            self.threadkey, subkey = random.split(self.threadkey)
-            losses.append(loss(subkey))
-        return onp.mean(losses), onp.std(losses)
 
 
 class SVGD():
@@ -160,7 +176,9 @@ class SVGD():
                  proposal,
                  n_particles: int = 400,
                  get_kernel=None,
-                 learning_rate=0.1):
+                 learning_rate=0.1,
+                 u_est_update=True,
+                 debugging_config=None):
         """
         Arguments
         ----------
@@ -174,6 +192,8 @@ class SVGD():
         self.target = target
         self.proposal = proposal
         self.n_particles = n_particles
+        self.u_est_update=u_est_update
+        self.debugging_config = debugging_config
 
         # optimizer for particle updates
         self.opt = Optimizer(*optimizers.sgd(learning_rate))
@@ -206,7 +226,8 @@ class SVGD():
         key, subkey = random.split(key)
         self.group_names = ("leader", "follower") # TODO make this a dict or namedtuple
         idx = random.permutation(subkey, np.arange(self.n_particles))
-        self.group_idx = idx[:-1], idx[-1:]
+        #self.group_idx = idx[:-1], idx[-1:]
+        self.group_idx = idx.split(2)
         return None
 
     @partial(jit, static_argnums=0)
@@ -219,12 +240,19 @@ class SVGD():
         * dKL: np array of same shape as followers (n, d)
         * auxdata consisting of [mean_drift, mean_repulsion] of shape (n, 2, d)
         """
-        leader_idx, *_ = group_idx
-        followers = self.opt.get_params(optimizer_state)
-        leaders = followers[leader_idx]
+        leader_idx, follower_idx = group_idx
+        particles = self.opt.get_params(optimizer_state)
+        leaders, followers = particles[leader_idx], particles[follower_idx]
         kernel = self.get_kernel(kernel_params)
-        negdKL, auxdata = stein.phistar(followers, leaders, self.target.logpdf, kernel)
-        dKL = -negdKL
+        if self.u_est_update:
+            negdKL, auxdata = stein.phistar_u( # negdKL = [leader_dKL, follower_dKL]
+                followers, leaders, self.target.logpdf, kernel)
+            dKL = -negdKL # Stein gradient
+            dKL = index_update(dKL, np.concatenate(group_idx), dKL) # reshuffle idx
+        else:
+            negdKL, auxdata = stein.phistar(
+                particles, leaders, self.target.logpdf, kernel)
+            dKL = -negdKL
         optimizer_state = self.opt.update(step_counter, dKL, optimizer_state)
         return optimizer_state, dKL, auxdata
 
@@ -232,7 +260,7 @@ class SVGD():
         """Log rundata, take step, update loglikelihood. Mutates state"""
         updated_optimizer_state, dKL, auxdata = self._step(
             self.optimizer_state, kernel_params, self.group_idx, self.step_counter)
-        self.log(dKL, auxdata, kernel_params)
+        self.log(dKL, auxdata, kernel_params, temp=None)
         self.update_logq(kernel_params)
         self.optimizer_state = updated_optimizer_state # take step
         self.step_counter += 1
@@ -241,7 +269,7 @@ class SVGD():
     def get_params(self):
         return self.opt.get_params(self.optimizer_state)
 
-    def log(self, dKL, auxdata, kernel_params):
+    def log(self, dKL, auxdata, kernel_params, temp=None):
         particles = self.opt.get_params(self.optimizer_state)
         mean_auxdata = np.mean(auxdata, axis=0)
         metrics.append_to_log(self.rundata, {
@@ -250,22 +278,21 @@ class SVGD():
             "step": self.step_counter,
             "stein_gradient_norm": np.linalg.norm(dKL),
             "loglikelihood": np.sum(self.loglikelihood),
-            "KL": np.mean(self.loglikelihood) \
-                - np.mean(vmap(self.target.logpdf)(particles)),
-            "KSD": self.ksd(particles, kernel_params),
         })
         # mean and var of groups
-        for k, idx in zip(self.group_names, self.group_idx):
+        for k, idx in zip(self.group_names, self.group_idx): # TODO: iterate thru particle groups directly instead
             metrics.append_to_log(self.rundata, {
-                k+"_mean":     np.mean(particles[idx], axis=0),
-                k+"_variance": np.var( particles[idx], axis=0),
+                f"{k}_mean": np.mean(particles[idx], axis=0),
+                f"{k}_std":  np.std(particles[idx], axis=0),
+                f"{k}_kl":   np.mean(self.loglikelihood[idx]) \
+                           - np.mean(vmap(self.target.logpdf)(particles[idx])),
+                f"{k}_ksd": self.ksd_squared(particles[idx], kernel_params),
             })
 
     @partial(jit, static_argnums=0)
-    def ksd(self, particles, kernel_params):
+    def ksd_squared(self, particles, kernel_params):
         return stein.ksd_squared_u(
-            particles, self.target.logpdf, self.get_kernel(kernel_params),
-            return_variance=False)
+            particles, self.target.logpdf, self.get_kernel(kernel_params))
 
     @partial(jit, static_argnums=0)
     def _update_logq(self, loglikelihood, optimizer_state, kernel_params, group_idx, step_counter):
@@ -283,7 +310,7 @@ class SVGD():
             optimizer_state_with_inject = self.opt.init(particles_with_inject)
 
             # step
-            updated_optimizer_state, dKL, auxdata = self._step(
+            updated_optimizer_state, *_ = self._step(
                 optimizer_state_with_inject, kernel_params, group_idx, step_counter)
 
             # extract z = T(x)
@@ -329,9 +356,9 @@ class AdversarialSVGD():
                  n_particles=400,
                  svgd_lr=0.1,
                  kernel_lr=0.1,
-                 lambda_reg=0.1,
+                 lambda_reg=0,
                  svgd_key=None,
-                 normalize=False):
+                 normalize=True):
         """
         Initialize containers for kernel learning and particle updates.
         """
@@ -358,7 +385,8 @@ class AdversarialSVGD():
         2) Optimize kernel for KSD
         3) Move particles along SVGD gradient
         """
-        particles = self.svgd.get_params()
+        leader_idx = self.svgd.group_idx[0]
+        particles    = self.svgd.get_params()[leader_idx]
         for _ in range(n_iter_kernel):
             self.kernel.step(particles)
         kernel_params = self.kernel.get_params()
@@ -373,3 +401,4 @@ class AdversarialSVGD():
 
     def log(self):
         pass
+

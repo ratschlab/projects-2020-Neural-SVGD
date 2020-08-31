@@ -53,10 +53,23 @@ def var_hxy(gram):
                     + 2*np.linalg.norm(gramzero)**2) / (n*(n-1)*(n-2)*(n-3))
     return mean_of_square - mean_squared
 
-def var_ksd(xs, logp: callable, k: callable):
+
+def var_ksd(gram):
+    """
+    Estimator for $Var_{XY} \hat KSD^2$, where \hat KSD^2 is a U-estimator for the
+    squared kernelized Stein discrepancy with kernel k.
+    For background, see this technical report: https://arxiv.org/pdf/1906.02104.pdf
+
+    Args
+        gram: Gram matrix $G_{ij} = h(x_i, x_j)$. Has shape (n, n)
+    """
+    n = gram.shape[0]
+    return 4*(n-2) / (n * (n-1)) * var_exp(gram) + 2/(n*(n-1)) * var_hxy(gram)
+
+def compute_var_ksd(xs, logp: callable, k: callable):
     """
     Estimator for $Var_{XY} \hat KSD$, where \hat KSD is a U-estimator for the
-    kernelized Stein discrepancy with kernel k.
+    squared kernelized Stein discrepancy with kernel k.
     For background, see this technical report: https://arxiv.org/pdf/1906.02104.pdf
 
     Args
@@ -73,8 +86,7 @@ def var_ksd(xs, logp: callable, k: callable):
         return out
 
     gram = vmap(vmap(h, (0, None)), (None, 0))(xs, xs)
-    n = xs.shape[0]
-    return 4*(n-2) / (n * (n-1)) * var_exp(gram) + 2/(n*(n-1)) * var_hxy(gram)
+    return var_ksd(gram)
 
 @partial(jit, static_argnums=(2,3))
 def h_var(xs, ys, logp, k):

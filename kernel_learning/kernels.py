@@ -1,12 +1,13 @@
 import jax.numpy as np
 from jax import vmap
+from jax.scipy import stats
 import utils
 
 """A collection of positive definite kernel functions.
 Every kernel takes as input two jax scalars or arrays x, y of shape (d,),
 where d is the particle dimension, and outputs a scalar.
 """
-def _check_xy(x, y):
+def _check_xy(x, y, dim=None):
     x, y = [np.asarray(v) for v in (x, y)]
     if x.shape != y.shape:
         raise ValueError(f"Shapes of particles x and y need to match. "
@@ -14,35 +15,64 @@ def _check_xy(x, y):
     elif x.ndim > 1:
         raise ValueError(f"Input particles x and y can't have more than one "
                          f"dimension. Instead they have rank {x.ndim}")
+    if dim is not None:
+        if dim > 1:
+            if not x.shape[0] == dim:
+                raise ValueError(f"x must have shape {(dim,)}. Instead received "
+                                 f"shape {x.shape}.")
+        elif dim == 1:
+            if not (x.ndim==0 or x.shape[0]==dim):
+                raise ValueError(f"x must have shape (1,) or scalar. Instead "
+                                 f"received shape {x.shape}.")
+        else: raise ValueError(f"dim must be a natural nr")
     return x, y
 
-def _check_bandwidth(bandwidth):
+def _check_bandwidth(bandwidth, dim=None):
     bandwidth = np.squeeze(np.asarray(bandwidth))
     if bandwidth.ndim > 1:
         raise ValueError(f"Bandwidth needs to be a scalar or a d-dim vector. "
                          f"Instead it has shape {bandwidth.shape}")
     elif bandwidth.ndim == 1:
-        assert x.shape == bandwidth.shape
+        pass
+
+    if dim is not None:
+        if not (bandwidth.ndim == 0 or bandwidth.shape[0] in (0, 1, dim)):
+            raise ValueError(f"Bandwidth has shape {bandwidth.shape}.")
     return bandwidth
 
-def get_rbf_kernel(bandwidth):
-    bandwidth = _check_bandwidth(bandwidth)
+def _normalizing_factor(bandwidth):
+    if bandwidth.ndim==1 or bandwidth.shape[0]==1:
+        return np.sqrt(2*np.pi)
+    else:
+        d = bandwidth.shape[0]
+        return (2*np.pi)**(-d/2) * 1/np.sqrt(np.prod(bandwidth))
+
+
+def get_rbf_kernel(bandwidth, normalize=False, dim=None):
+    bandwidth = _check_bandwidth(bandwidth, dim)
     def rbf(x, y):
-        x, y = _check_xy(x, y)
-        return np.exp(- np.sum((x - y)**2 / bandwidth**2) / 2)
+        x, y = _check_xy(x, y, dim)
+        if normalize:
+            return np.prod(stats.norm.pdf(x, loc=y, scale=bandwidth))
+        else:
+            return np.exp(- np.sum((x - y)**2 / bandwidth**2) / 2)
     return rbf
 
-def get_tophat_kernel(bandwidth):
-    bandwidth = _check_bandwidth(bandwidth)
+def get_tophat_kernel(bandwidth, normalize=False, dim=None):
+    bandwidth = _check_bandwidth(bandwidth, dim)
+    volume = np.prod(2*bandwidth)
     def tophat(x, y):
-        x, y = _check_xy(x, y)
-        return np.squeeze(np.where(np.linalg.norm(x-y)<bandwidth, 1., 0.))
+        x, y = _check_xy(x, y, dim)
+        if normalize:
+            return np.squeeze(np.where(np.all(np.abs(x - y) < bandwidth), 1/volume, 0.))
+        else:
+            return np.squeeze(np.where(np.all(np.abs(x - y) < bandwidth), 1., 0.))
     return tophat
 
-def get_rbf_kernel_logscaled(logh):
+def get_rbf_kernel_logscaled(logh, normalize=False):
     logh = np.asarray(logh)
     bandwidth = np.exp(logh/2) # TODO remove 1/2
-    return get_rbf_kernel(bandwidth)
+    return get_rbf_kernel(bandwidth, normalize)
 
 def get_tophat_kernel_logscaled(logh):
     logh = np.asarray(logh)
@@ -79,7 +109,7 @@ def get_funnel_kernel(bandwidth):
 ### Utils
 def median_heuristic(x):
     """
-    Heuristic for choosing ARD bandwidth.
+    Heuristic for choosing RBF bandwidth.
 
     IN: np array of shape (n,) or (n,d): set of particles
     OUT: scalar: bandwidth parameter for RBF kernel, based on the

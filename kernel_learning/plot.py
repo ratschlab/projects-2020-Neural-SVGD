@@ -175,7 +175,7 @@ def plot_3d(x, y, z, ax=None, **kwargs):
     plt.show()
     return ax
 
-def plot_pdf_2d(pdf, lims, type="contour", num_gridpoints=150, ax=None, **kwargs):
+def plot_fun_2d(pdf, lims=(-5, 5), type="contour", num_gridpoints=150, ax=None, **kwargs):
     """
     Arguments
     * pdf: callable, computes a distribution on R2.
@@ -183,7 +183,8 @@ def plot_pdf_2d(pdf, lims, type="contour", num_gridpoints=150, ax=None, **kwargs
     * type: string, one of "3d", "contour".
     """
     if type=="3d":
-        return plot_3d(*make_meshgrid(pdf, lims, num=num_gridpoints, ax=ax), **kwargs)
+        return plot_3d(*make_meshgrid(pdf, lims, num=num_gridpoints),
+                       ax=ax, **kwargs)
     elif type=="contour":
         if ax is None:
             ax=plt.gca()

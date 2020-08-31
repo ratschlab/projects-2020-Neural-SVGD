@@ -256,25 +256,16 @@ class GaussianMixture(Distribution):
         """mutates self.rkey"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
+        def sample_from_component(rkey, component):
+            return random.multivariate_normal(
+                rkey, self.means[component], self.covs[component])
 
-        def sample_from_component(rkey, component, num_samples):
-            return random.multivariate_normal(rkey,
-                                              self.means[component],
-                                              self.covs[component],
-                                              shape=(num_samples,))
         key, subkey = random.split(key)
+        keys = random.split(key, n_samples)
         components = random.categorical(subkey,
                                         np.log(self.weights),
                                         shape=(n_samples,))
-        counts = onp.bincount(components.flatten())
-        key, keya, keyb = random.split(key, 3)
-        out = [
-            sample_from_component(keya, c, num) for key, c, num in
-            zip(random.split(keyb, self.num_components),
-                range(self.num_components),
-                counts)
-        ]
-        out = np.concatenate(out)
+        out = vmap(sample_from_component)(keys, components)
         shape = (n_samples, self.d)
         return out.reshape(shape)
 
@@ -282,7 +273,8 @@ class GaussianMixture(Distribution):
         """unnormalized"""
         x = np.array(x)
         if x.shape != (self.d,):
-            raise ValueError(f"Input x must be an np.array of length {self.d} and dimension one.")
+            raise ValueError(f"Input x must be an np.array of length {self.d} "
+                             "and dimension one.")
 
         def exponent(x, mean, cov):
             sigmax = np.dot(np.linalg.inv(cov), (x - mean))

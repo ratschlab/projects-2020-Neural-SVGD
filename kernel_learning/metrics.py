@@ -78,7 +78,7 @@ def _pushforward_log(logpdf: callable, tinv: callable):
         tinv is the inverse of an injective transformation T: R^d --> R^d, x --> z
 
     Returns
-        $\log p_T(z)$, where z = T(x). That is, the pushforward log pdf 
+        $\log p_T(z)$, where z = T(x). That is, the pushforward log pdf
         $$\log p_T(z) = \log p(T^{-1} z) + \log \det(J_{T^{-1} z})$$
     """
     def pushforward_logpdf(z):
