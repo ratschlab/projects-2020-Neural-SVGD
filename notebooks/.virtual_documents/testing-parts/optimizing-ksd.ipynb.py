@@ -49,7 +49,7 @@ def get_sd(samples, fun):
 proposal = distributions.Gaussian(0, 5)
 target = distributions.GaussianMixture([-3, 0, 3], [1, 0.05, 1], [1,1,1])
 # target = distributions.GaussianMixture([-3, 0, 1], [1, 0.05, 2], [1,1,1])
-sizes = [8, 8, 8, 8]
+sizes = [1]
 
 plot.plot_fun(proposal.pdf)
 plot.plot_fun(target.pdf, label="Target")
@@ -68,26 +68,30 @@ def get_ksds(proposal, kernel):
 
 
 learning_rate = 0.05
-learner = kernel_learning.KernelLearner(key, 
-                                        target, 
-                                        sizes, 
-                                        kernels.get_rbf_kernel(1), 
-                                        learning_rate, 
-                                        lambda_reg=1,
-                                        scaling_parameter=True,
+learner = kernel_learning.KernelLearner(key,
+                                        target,
+                                        sizes,
+                                        kernels.get_rbf_kernel(1),
+                                        learning_rate,
+                                        lambda_reg=0,
+                                        scaling_parameter=False,
                                         std_normalize=False)
 kernel = learner.get_kernel(learner.get_params())
 ksds_pre = get_ksds(proposal, kernel)
 
 
 print("Training kernel to optimize KSD...")
+
+# learner.train(samples=None, n_steps=500, proposal=proposal, batch_size=400)
+
 samples = proposal.sample(400)
-learner.train(samples, n_steps=500, proposal=proposal)
+learner.train(samples, n_steps=500)
 
 
-ksds_post = get_ksds(proposal, learner.get_kernel(learner.get_params()))
+# ksds_post = get_ksds(proposal, learner.get_kernel(learner.get_params()))
 
-learned_phistar = learner.get_phistar(learner.get_params(), samples)
+inducing_samples = proposal.sample(500)
+learned_phistar = learner.get_phistar(learner.get_params(), inducing_samples)
 def optimal_phistar(x):
     div = 1 if learner.lambda_reg == 0 else 2*learner.lambda_reg
     return grad(lambda x: target.logpdf(x) - proposal.logpdf(x))(x) / div
@@ -104,9 +108,10 @@ print("Plot results:")
 
 rundata = learner.rundata
 fig, ax = plt.subplots(figsize=[10,8])
-plt.plot(rundata["training_ksd"], "--", label="Training KSD")
+# plt.plot(rundata["training_ksd"], "--", label="Training KSD")
+plt.plot(rundata["ksd_squared"], "--", label="Training KSD")
 plt.errorbar(x=0, y=onp.mean(ksds_pre), yerr=onp.std(ksds_pre), fmt="o", capsize=10)
-plt.errorbar(x=len(rundata["loss"]), y=onp.mean(ksds_post), yerr=onp.std(ksds_post), fmt="o", capsize=10, color="b")
+# plt.errorbar(x=len(rundata["loss"]), y=onp.mean(ksds_post), yerr=onp.std(ksds_post), fmt="o", capsize=10, color="b")
 plt.errorbar(x=0, y=onp.mean(sds), yerr=onp.std(sds), fmt="o", capsize=10, color="green")
 plt.axhline(y=onp.mean(sds), linestyle="--", label="Optimal KSD", color="green")
 plt.legend()
@@ -119,9 +124,10 @@ if target.d ==1:
     grid_n = 100
     grid = np.linspace(-5, 5, grid_n).reshape(grid_n, 1)
     fig, ax = plt.subplots(figsize=[12,7])
-    plt.plot(grid, vmap(optimal_phistar)(grid), label="KL gradient \\nabla logp/logq")
+    plt.plot(grid, vmap(optimal_phistar)(grid)*kmean, label="KL gradient \\nabla logp/logq")
     plt.plot(grid, vmap(learned_phistar)(grid), label="learned_phistar")
 #     plt.plot(grid, vmap(phistar_rbf)(grid)*scale_rbf, label="rbf phistar")
+#     plt.scatter(inducing_samples[:, 0], y=np.zeros(len(inducing_samples))-6)
 
     plt.legend()
 

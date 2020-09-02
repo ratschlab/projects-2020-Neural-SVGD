@@ -44,6 +44,62 @@ key = random.PRNGKey(0)
 from jax.scipy.stats import norm
 
 
+target = distributions.GaussianMixture([-5, 5], [1, 9], [1, 1])
+proposal = distributions.GaussianMixture([-6, 0, 6], [9, 1, 1], [1,1,1])
+plot.plot_fun(target.pdf, lims=(-10, 10), label="target")
+plot.plot_fun(proposal.pdf, lims=(-10, 10))
+plt.legend()
+
+
+target = distributions.GaussianMixture([-5, 5], [1, 9], [1, 1])
+proposal = distributions.Gaussian(0, 3)
+plot.plot_fun(target.pdf, lims=(-10, 10), label="target")
+plot.plot_fun(proposal.pdf, lims=(-10, 10))
+plt.legend()
+
+
+target = distributions.Banana([0, 0], [4, 1])
+proposal = distributions.Gaussian([0, 0], [4, 4])
+plot.plot_fun_2d(target.pdf, lims=(-10, 10), label="target")
+plot.plot_fun_2d(proposal.pdf, lims=(-10, 10))
+plt.legend()
+
+
+plot.scatter(target.sample(1000))
+
+
+target = distributions.Funnel(2)
+proposal = distributions.Gaussian([0,0], 9)
+plot.plot_fun_2d(target.pdf, lims=(-10, 10), label="target")
+plot.plot_fun_2d(proposal.pdf, lims=(-10, 10))
+plt.legend()
+
+
+target = distributions.Ring(10, .1)
+proposal = distributions.Gaussian([0,0], 9)
+plot.plot_fun_2d(target.pdf, lims=(-10, 10))
+# plot.plot_fun_2d(proposal.pdf, lims=(-10, 10))
+plt.legend()
+
+
+plot.scatter(target.sample(1000))
+plot.scatter(proposal.sample(1000))
+
+
+target = distributions.Ring(10, .1)
+proposal = distributions.Ring(15, 0.1)
+plot.plot_fun_2d(target.pdf, lims=(-15, 15))
+plot.plot_fun_2d(proposal.pdf, lims=(-20, 20))
+plt.legend()
+
+
+plot.scatter(target.sample(1000))
+plot.scatter(proposal.sample(1000))
+
+
+sldfkskj
+
+
 x = np.array([1,2])
 y = np.array([-1,3])
 

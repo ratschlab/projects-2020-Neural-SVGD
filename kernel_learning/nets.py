@@ -32,7 +32,7 @@ def build_mlp(sizes, name=None, skip_connection=False, with_bias=True):
     def mlp(x):
         lin = hk.nets.MLP(output_sizes=sizes,
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
-                          activation=jax.nn.relu,
+                          activation=jax.nn.swish,
                           activate_final=False,
                           with_bias=with_bias,
                           name=name)

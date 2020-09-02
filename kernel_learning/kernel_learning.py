@@ -116,11 +116,11 @@ class KernelLearner():
         def phi_norm(x): return np.linalg.norm(phistar(x))**2
         regularizer_term = np.mean(vmap(phi_norm)(samples))
         ksd = np.sqrt(np.clip(ksd_squared, a_min=1e-6))
-        aux = [ksd, ksd_squared, regularizer_term]
+        aux = [ksd, ksd_squared, std, regularizer_term]
         if self.std_normalize:
             return -ksd_squared/std + self.lambda_reg * regularizer_term, aux
         else:
-            return -ksd_squared +             self.lambda_reg * regularizer_term, aux
+            return -ksd_squared +     self.lambda_reg * regularizer_term, aux
 
     def get_phistar(self, params, samples):
         """return phistar(\cdot)"""
@@ -147,23 +147,25 @@ class KernelLearner():
         return None
 
     def log(self, aux):
-        ksd, ksd_squared, reg, full_loss = aux
+        ksd, ksd_squared, std, reg, full_loss = aux
         params = self.get_params()
         metrics.append_to_log(self.rundata, {
             "training_ksd": ksd,
             "bandwidth": 1 / np.squeeze(params[0]["MLP/~/linear_0"]["w"])**2,
-            #"std_of_ksd": std,
+            "std_of_ksd": std,
+            "ksd_squared": ksd_squared,
             "loss": full_loss,
+            "regularizer": reg,
         })
-#        if self.scaling_parameter:
-#            metrics.append_to_log(self.rundata, {
-#                "normalizing_const": params[2],
-#            })
+        if self.scaling_parameter:
+            metrics.append_to_log(self.rundata, {
+                "normalizing_const": params[2],
+            })
 
-    def train(self, samples, n_steps=100, proposal=None):
+    def train(self, samples, n_steps=100, proposal=None, batch_size=200):
         for _ in tqdm(range(n_steps), disable=disable_tqdm):
             if proposal is not None:
-                samples = proposal.sample(400)
+                samples = proposal.sample(batch_size)
             self.step(samples)
         return None
 

@@ -69,7 +69,7 @@ class SDLearner():
         return self.opt.get_params(self.optimizer_state)
 
     def loss_fn(self, params, samples):
-        def f(x): return self.mlp.apply(params, None, x)
+        f = self.get_f(params)
         stein_discrepancy = stein.stein_discrepancy(
             samples, self.target.logpdf, f, aux=False)
         def fnorm(x): return np.linalg.norm(f(x))**2
@@ -77,9 +77,11 @@ class SDLearner():
         aux = [stein_discrepancy, regularizer_term]
         return -stein_discrepancy + self.lambda_reg * regularizer_term, aux
 
-    def get_f(self):
+    def get_f(self, params=None):
         """return f(\cdot)"""
-        def f(x): return self.mlp.apply(self.get_params(), None, x)
+        if params is None:
+            params = self.get_params()
+        def f(x): return self.mlp.apply(params, None, x)
         return f
 
     @partial(jit, static_argnums=0)

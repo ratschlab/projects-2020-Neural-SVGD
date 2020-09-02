@@ -48,8 +48,9 @@ def get_sd(samples, fun):
 # target = distributions.Gaussian([2]*50, 1)
 
 proposal = distributions.Gaussian(0, 5)
-target = distributions.GaussianMixture([-3, 0, 1], [1, 0.05, 2], [1,1,1])
-sizes = [64, 64, 64, 1]
+# target = distributions.GaussianMixture([-3, 0, 1], [1, 0.05, 2], [1,1,1])
+target = distributions.GaussianMixture([-3, 0, 3], [1, 0.05, 1], [1,1,1])
+sizes = [2, 2, 1]
 
 plot.plot_fun(proposal.pdf)
 plot.plot_fun(target.pdf, label="Target")
@@ -85,9 +86,10 @@ for _ in range(100):
 
 
 fig, axs = plt.subplots(figsize=[10, 8])
-plt.plot(learner.rundata["training_sd"])
+plt.plot(learner.rundata["training_sd"], label="Stein Discrepancy")
 plt.errorbar(x=0, y=onp.mean(sds), yerr=onp.std(sds), fmt="o", capsize=10, color="green")
-plt.axhline(y=onp.mean(sds), linestyle="--", label="Optimal KSD", color="green")
+plt.axhline(y=onp.mean(sds), linestyle="--", label="Optimal SD", color="green")
+plt.legend()
 
 
 
@@ -105,3 +107,7 @@ if target.d ==1:
 #     plt.plot(grid, vmap(phistar_rbf)(grid)*scale_rbf, label="rbf phistar")
 
     plt.legend()
+
+
+plt.plot(learner.rundata["fnorm"])
+plt.yscale("log")

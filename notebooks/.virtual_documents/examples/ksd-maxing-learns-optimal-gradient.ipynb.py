@@ -40,20 +40,26 @@ key = random.PRNGKey(0)
 
 proposal = distributions.Gaussian(0, 5)
 target = distributions.GaussianMixture([-3, 0, 3], [1, 0.05, 1], [1,1,1])
-# sizes = [1]
-sizes = [8, 8, 8, 8]
-sample_every = False
+sizes = [1]
+# sizes = [8, 8, 8, 8]
 
 plot.plot_fun(proposal.pdf)
 plot.plot_fun(target.pdf, label="Target")
 
 
 learning_rate = 0.1
-learner = kernel_learning.KernelLearner(key, target, sizes, kernels.get_rbf_kernel(1, dim=sizes[-1]), learning_rate, lambda_reg=0, normalizing_constant=False)
+learner = kernel_learning.KernelLearner(key, 
+                                        target, 
+                                        sizes,
+                                        kernels.get_rbf_kernel(1, dim=sizes[-1]),
+                                        learning_rate,
+                                        lambda_reg=0,
+                                        scaling_parameter=False)
 
 
 print("Training kernel to optimize KSD...")
-learner.train(proposal, n_steps=100, batch_size=400, sample_every=sample_every)
+sample = proposal.sample(400)
+learner.train(sample, n_steps=100)
 
 
 samples = proposal.sample(500)
@@ -67,13 +73,11 @@ phistar_rbf = stein.get_phistar(kernels.get_rbf_kernel(1), target.logpdf, sample
 grid_n = 100
 grid = np.linspace(-5, 5, grid_n).reshape(grid_n, 1)
 fig, ax = plt.subplots(figsize=[7,7])
-plt.plot(grid, vmap(optimal_phistar)(grid)/14, label="KL gradient \\nabla logp/logq")
-plt.plot(grid, vmap(phistar)(grid), label="learned_phistar")
+plt.plot(grid, vmap(optimal_phistar)(grid), label="KL gradient \\nabla logp/logq")
+plt.plot(grid, vmap(phistar)(grid)*15, label="learned_phistar (scaled)")
 # plt.plot(grid, vmap(phistar_rbf)(grid), label="rbf phistar")
 
 plt.legend()
-if sample_every:
-    print("Note that we're sampling every step")
 
 
 plt.plot(learner.rundata["training_ksd"])
@@ -91,10 +95,10 @@ if proposal.d == 1:
     grid = np.linspace(-4, 10, ngrid).reshape(ngrid,1)
     x = np.array([0.])
     plt.plot(grid, vmap(learned_kernel, (0, None))(grid, x), label="Learned", color="r")
-    plt.plot(grid, vmap(kernels.get_rbf_kernel(1, normalize=normalize_kernel),  (0, None))(grid, x), label="RBF", color="b")
+    plt.plot(grid, vmap(kernels.get_rbf_kernel(1),  (0, None))(grid, x), label="RBF", color="b")
     x = np.array([4.])
     plt.plot(grid, vmap(learned_kernel, (0, None))(grid, x), color="r")
-    plt.plot(grid, vmap(kernels.get_rbf_kernel(1, normalize_kernel),  (0, None))(grid, x), color="b")
+    plt.plot(grid, vmap(kernels.get_rbf_kernel(1),  (0, None))(grid, x), color="b")
 
     plt.legend()
 elif proposal.d == 2:

@@ -13,6 +13,7 @@ import numpy as onp
 import utils
 import stein
 import kernels
+import plot
 
 # check wikipedia for computation of higher moments
 # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
@@ -21,18 +22,15 @@ import kernels
 class Distribution():
     """Base class for package logpdf + metrics + sampling"""
     def __init__(self):
-        self.expectations = None
-        self.sample_metrics = None
-        self.d = None
-        self.initialize_metric_names()
-        pass
-
-    threadkey = random.PRNGKey(0)
+        self.threadkey = random.PRNGKey(0)
 
     def sample(self, shape, key=None):
         raise NotImplementedError()
 
     def logpdf(self, x):
+        raise NotImplementedError()
+
+    def pdf(self, x):
         raise NotImplementedError()
 
     def compute_metrics(self, x, normalize=False):
@@ -91,17 +89,6 @@ class Distribution():
             self.sample_metrics[sample_size] = utils.dict_mean([compute() for _ in range(100)])
         return self.sample_metrics[sample_size]
 
-    # @partial(jit, static_argnums=0) # TODO: replace np.repeat with smth else so I can use jit here.
-    def kl_divergence(self, sample):
-        """Kullback-Leibler divergence D(sample || p) between sample and distribution of class instance.
-
-        Parameters
-        ----------
-        sample : array-like, shape (n,). Scalar-valued sample from some distribution.
-        """
-        histogram_likelihoods = utils.get_histogram_likelihoods(sample)
-        return np.mean(np.log(histogram_likelihoods) - vmap(self.logpdf)(sample))
-
 class Gaussian(Distribution):
     def __init__(self, mean, cov):
         """
@@ -110,6 +97,7 @@ class Gaussian(Distribution):
         then particles have shape (d,)
         2) if covariance is a scalar, it is reshaped to diag(3 * (cov,))
         3) if covariance is an array of shape (k,), it is reshaped to diag(cov)"""
+        super().__init__()
 
         self.mean, self.cov = self._check_and_reshape_args(mean, cov)
         self.d = len(self.mean)
@@ -186,7 +174,7 @@ class GaussianMixture(Distribution):
         mumut = np.einsum("ki,kj->kij", means, means) # shape (k, d, d)
         self.cov = np.average(covs + mumut, weights=weights, axis=0) \
                  - np.outer(self.mean, self.mean)
-        self.key = random.PRNGKey(0)
+        self.threadkey = random.PRNGKey(0)
         self.means = means
         self.covs = covs
         self.weights = weights
@@ -299,6 +287,7 @@ class GaussianMixture(Distribution):
 
 class Funnel(Distribution):
     def __init__(self, d):
+        super().__init__()
         self.d = d
         self.mean = np.zeros(d)
 
@@ -343,7 +332,7 @@ class FunnelizedGaussian(Gaussian):
     def __init__(self, mean, cov):
         self.mean, self.cov = self._check_and_reshape_args(mean, cov)
         self.d = len(self.mean)
-        self.key = random.PRNGKey(0)
+        self.threadkey = random.PRNGKey(0)
 
     def _check_and_reshape_args(self, mean, cov):
         if len(mean) < 2:
@@ -412,14 +401,136 @@ class Uniform(Distribution):
                                     loc=self.lims[:, 0],
                                     scale=self.lims[:, 1] - self.lims[:, 0])
 
+class Banana(Gaussian):
+    def __init__(self, mean, cov):
+        self.mean, self.cov = self._check_and_reshape_args(mean, cov)
+        self.d = len(self.mean)
+        self.threadkey = random.PRNGKey(0)
 
+    def _check_and_reshape_args(self, mean, cov):
+        if len(mean) != 2:
+            raise ValueError("Banana exists only in 2 dim."
+            f"Received dimension len(mean) = {len(mean)}")
+        return super()._check_and_reshape_args(mean, cov)
 
-### Some nice target distributions
-# 2D
-l = np.asarray((1, 2, 1.5, 3, 3.3, 3.8))
-l = onp.concatenate([-l, [0], l])
-means = list(zip(l, (l**2)**0.8))
-variances = [[1,1]]*len(means)
-weights = [1]*len(means)
-#bent = GaussianMixture(means, variances, weights)
-bent_args = [means, variances, weights]
+    def bananify(self, v):
+        """If v is 2D normal, then
+        bananify(v) is distributed as a Banana."""
+        *x, y = v
+        x, y = np.asarray(x), np.asarray(y)
+        return np.append(x, x**2 + y)
+
+    def debananify(self, z):
+        """Inverse of bananify."""
+        *x, y = z
+        x, y = np.asarray(x), np.asarray(y)
+        return np.append(x, y - x**2)
+
+    def logpdf(self, z):
+        x = self.debananify(z)
+        return super().logpdf(x)
+
+    def pdf(self, z):
+        x = self.debananify(z)
+        return super().pdf(x)
+
+    def sample(self, n_samples):
+        return vmap(self.bananify)(super().sample(n_samples))
+
+class Ring(Distribution):
+    def __init__(self, radius, var):
+        """Both args are scalar.
+        r ~ N(radius, var), phi ~ Uniform(-pi, pi)"""
+        super().__init__()
+        self.radius, self.var = self._check_and_reshape_args(radius, var)
+        self.d = 2
+
+    def _check_and_reshape_args(self, r, v):
+        r, v = [np.array(a) for a in (r, v)]
+        if r.ndim > 0 or v.ndim > 0:
+            raise ValueError(f"Both radius and error variance must be scalar.")
+        return r, v
+
+    def to_cartesian(self, polar_coords):
+        polar_coords = self._checkx(polar_coords)
+        r, phi = polar_coords
+        x = r*np.cos(phi)
+        y = r*np.sin(phi)
+        return np.append(x, y)
+
+    def to_polar(self, v):
+        v = self._checkx(v)
+        x, y = v
+        r = np.linalg.norm(v)
+        phi = np.arctan2(y, x)
+        return np.append(r, phi)
+
+    def logpdf(self, x):
+        polar_coords = self.to_polar(x)
+        jacdet = np.abs(np.linalg.det(jacfwd(self.to_cartesian)(polar_coords)))
+        r, _ = polar_coords
+        pr = stats.norm.logpdf(r, loc=self.radius, scale=np.sqrt(self.var))
+        return pr - np.log(2*np.pi) - np.log(jacdet)
+
+    def pdf(self, x):
+        polar_coords = self.to_polar(x)
+        jacdet = np.abs(np.linalg.det(jacfwd(self.to_cartesian)(polar_coords)))
+        r, _ = polar_coords
+        pr = stats.norm.pdf(r, loc=self.radius, scale=np.sqrt(self.var))
+        return pr * 1/(2*np.pi) * 1/jacdet
+
+    def sample(self, n_samples, key=None):
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        keya, keyb = random.split(key)
+        phi = random.uniform(keya, minval=-np.pi, maxval=np.pi, shape=(n_samples,))
+        r = random.normal(keyb, shape=(n_samples,)) + self.radius
+        polar_coords = np.stack([r, phi], axis=1)
+        return vmap(self.to_cartesian)(polar_coords)
+
+### Test distributions for experiments:
+class Setup():
+    """Simple container for target and proposal densities"""
+    def __init__(self, target=None, proposal=None):
+        self.target=target
+        self.proposal=proposal
+
+    def get(self):
+        return self.target, self.proposal
+
+    def plot(self, *args, **kwargs):
+        plot.plot_fun(proposal.pdf, *args, label="Proposal", **kwargs)
+        plot.plot_fun(target.pdf, *args, label="Target", **kwargs)
+        plt.legend()
+
+##########################
+## 1-dimensional experiments
+target = GaussianMixture([-5, 5], [1, 9], [1, 1])
+proposal = Gaussian(0, 3)
+simple_mixture = Setup(target, proposal)
+
+# both prop and target are mixtures of different scales
+# (situations like this will happen when fitting mixtures)
+target = GaussianMixture([-5, 5], [1, 9], [1, 1])
+proposal = GaussianMixture([-6, 0, 6], [9, 1, 1], [1,1,1])
+double_mixture = Setup(target, proposal)
+
+###########################
+## 2-dimensional experiments
+target = Funnel(2)
+proposal = Gaussian([0,0], 9)
+funnel = Setup(target, proposal)
+
+banana = Banana([0, 0], [4, 1]) # ie y = x**2 + eps; std 2 and 1 respectively
+gauss = Gaussian([0, 0], [4, 4])
+banana_target = Setup(banana, gauss)
+banana_proposal = Setup(banana, gauss)
+
+ring = distributions.Ring(10, .1)
+gauss = distributions.Gaussian([0,0], 9)
+ring_target = Setup(ring, gauss)
+ring_proposal = Setup(gauss, ring)
+
+target = distributions.Ring(10, .1)
+proposal = distributions.Ring(15, .1)
+double_ring = Setup(target, proposal)
