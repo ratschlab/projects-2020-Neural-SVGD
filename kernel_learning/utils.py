@@ -352,8 +352,6 @@ def dict_dejaxify(dictionary, target="list"): # alternatively, just remove the .
             out[k] = dejaxify(v, target=target)
     return out
 
-
-
 def generate_pd_matrix(dim):
     A = onp.random.rand(dim, dim) * 2
     return onp.matmul(A, A.T)

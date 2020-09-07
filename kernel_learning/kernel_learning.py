@@ -61,11 +61,11 @@ class KernelLearner():
         self.threadkey, subkey = random.split(key)
 
         # net and optimizer
-        self.mlp = nets.build_mlp(self.sizes, name="MLP", skip_connection=False,
+        self.mlp = nets.build_mlp(self.sizes, name="MLP", skip_connection=True,
                                   with_bias=False)
         self.decoder = nets.build_mlp(self.sizes, name="decoder",
                                       skip_connection=False, with_bias=False)
-        self.opt = Optimizer(*optimizers.rmsprop(learning_rate))
+        self.opt = Optimizer(*optimizers.adam(learning_rate))
         self.step_counter = 0
         self.initialize_optimizer(subkey)
         self.rundata = {}
@@ -136,6 +136,8 @@ class KernelLearner():
         [loss, aux], g = value_and_grad(self.loss_fn, has_aux=True)(params, samples)
         optimizer_state = self.opt.update(step, g, optimizer_state)
         aux.append(loss)
+        aux.append(g)
+        aux.append(params) # params before update
         return optimizer_state, aux
 
     def step(self, samples):
@@ -147,7 +149,7 @@ class KernelLearner():
         return None
 
     def log(self, aux):
-        ksd, ksd_squared, std, reg, full_loss = aux
+        ksd, ksd_squared, std, reg, full_loss, grad, params_pre = aux
         params = self.get_params()
         metrics.append_to_log(self.rundata, {
             "training_ksd": ksd,
@@ -156,6 +158,8 @@ class KernelLearner():
             "ksd_squared": ksd_squared,
             "loss": full_loss,
             "regularizer": reg,
+            "update-to-weight-ratio": utils.compute_update_to_weight_ratio(
+                params_pre[0], params[0])
         })
         if self.scaling_parameter:
             metrics.append_to_log(self.rundata, {
@@ -166,9 +170,11 @@ class KernelLearner():
         for _ in tqdm(range(n_steps), disable=disable_tqdm):
             if proposal is not None:
                 samples = proposal.sample(batch_size)
-            self.step(samples)
-        return None
-
+            try:
+                self.step(samples)
+            except KeyboardInterrupt:
+                return
+        return
 
 
 class SVGD():

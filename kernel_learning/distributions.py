@@ -9,9 +9,9 @@ from scipy.spatial.distance import cdist
 import ot
 
 import numpy as onp
+import matplotlib.pyplot as plt
 
 import utils
-import stein
 import kernels
 import plot
 
@@ -274,6 +274,7 @@ class GaussianMixture(Distribution):
         out = special.logsumexp(exponents)
         return np.squeeze(out)
 
+
     def logpdf(self, x):
         return np.log(self.pdf(x))
 
@@ -363,8 +364,8 @@ class FunnelizedGaussian(Gaussian):
         *_, y = x
         return super().pdf(x) * 3 * np.exp(3/2 * y)
 
-    def sample(self, n_samples):
-        return vmap(self.funnelize)(super().sample(n_samples))
+    def sample(self, n_samples, key=None):
+        return vmap(self.funnelize)(super().sample(n_samples, key=key))
 
 class Uniform(Distribution):
     def __init__(self, lims):
@@ -434,8 +435,8 @@ class Banana(Gaussian):
         x = self.debananify(z)
         return super().pdf(x)
 
-    def sample(self, n_samples):
-        return vmap(self.bananify)(super().sample(n_samples))
+    def sample(self, n_samples, key=None):
+        return vmap(self.bananify)(super().sample(n_samples, key=key))
 
 class Ring(Distribution):
     def __init__(self, radius, var):
@@ -496,17 +497,32 @@ class Setup():
         self.proposal=proposal
 
     def get(self):
+        """Return target, proposal"""
         return self.target, self.proposal
 
-    def plot(self, *args, **kwargs):
-        plot.plot_fun(proposal.pdf, *args, label="Proposal", **kwargs)
-        plot.plot_fun(target.pdf, *args, label="Target", **kwargs)
+    def plot(self, cmaps=("Blues", "plasma"),
+             only_plot_target=False, # TODO
+             only_plot_proposal=False,
+             **kwargs):
+        """
+        cmaps: sequence of colormaps. First one used for proposal, second one
+        for target.
+        Proposal is density plot, target is contour plot.
+        """
+        if target.d == 1:
+            plot.plot_fun(self.proposal.pdf, label="Proposal", **kwargs)
+            plot.plot_fun(self.target.pdf, label="Target", **kwargs)
+        elif target.d == 2:
+            plot.plot_fun_2d(self.proposal.pdf, cmap=cmaps[0], **kwargs)
+            plot.plot_fun_2d(self.target.pdf, type="contour", cmap=cmaps[1], **kwargs)
+        else:
+            raise NotImplementedError()
         plt.legend()
 
 ##########################
 ## 1-dimensional experiments
-target = GaussianMixture([-5, 5], [1, 9], [1, 1])
-proposal = Gaussian(0, 3)
+target = Gaussian(0, 3)
+proposal = GaussianMixture([-5, 5], [1, 9], [1, 1])
 simple_mixture = Setup(target, proposal)
 
 # both prop and target are mixtures of different scales
@@ -517,20 +533,20 @@ double_mixture = Setup(target, proposal)
 
 ###########################
 ## 2-dimensional experiments
-target = Funnel(2)
-proposal = Gaussian([0,0], 9)
+proposal = Funnel(2)
+target = Gaussian([0,0], 9)
 funnel = Setup(target, proposal)
 
 banana = Banana([0, 0], [4, 1]) # ie y = x**2 + eps; std 2 and 1 respectively
 gauss = Gaussian([0, 0], [4, 4])
 banana_target = Setup(banana, gauss)
-banana_proposal = Setup(banana, gauss)
+banana_proposal = Setup(gauss, banana)
 
-ring = distributions.Ring(10, .1)
-gauss = distributions.Gaussian([0,0], 9)
+ring = Ring(10, .1)
+gauss = Gaussian([0,0], 9)
 ring_target = Setup(ring, gauss)
 ring_proposal = Setup(gauss, ring)
 
-target = distributions.Ring(10, .1)
-proposal = distributions.Ring(15, .1)
+target = Ring(10, .1)
+proposal = Ring(15, .1)
 double_ring = Setup(target, proposal)

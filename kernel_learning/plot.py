@@ -7,8 +7,6 @@ from scipy.ndimage.filters import gaussian_filter
 import jax.numpy as np
 from jax import vmap
 
-import metrics
-
 ## plotting utilities
 def plot_fun(fun, lims=(-5, 5), *args, ax=None, **kwargs):
     if ax is None:
@@ -135,9 +133,9 @@ def svgd_log(log, style="-", full=False):
 
 
 #@jit(static_argnums=0)
-def make_meshgrid(func, lims, num=100):
+def make_meshgrid(func, lims=(-5, 5), xlims=None, ylims=None, num=100):
     """
-    Utility to help with plotting a 2d distribution in a 3d plot.
+    Utility to help with plotting a 2d function.
     Arguments:
     * func: callable. Takes an np.array of shape (2,) as only input, and outputs a scalar.
     * lims
@@ -145,13 +143,17 @@ def make_meshgrid(func, lims, num=100):
     Returns:
     meshgrids xx, yy, f(xx, yy)
     """
-    x = y = np.linspace(*lims, num)
+    if xlims is None:
+        xlims = lims
+    if ylims is None:
+        ylims = lims
+
+    x = np.linspace(*xlims, num)
+    y = np.linspace(*ylims, num)
     xx, yy = np.meshgrid(x, y)
 
     grid = np.stack([xx, yy]) # shape (2, r, r)
     zz = vmap(vmap(func, 1), 1)(grid)
-
-    #zz = np.exp(zz)
     return xx, yy, zz
 
 
@@ -175,23 +177,29 @@ def plot_3d(x, y, z, ax=None, **kwargs):
     plt.show()
     return ax
 
-def plot_fun_2d(pdf, lims=(-5, 5), type="contour", num_gridpoints=150, ax=None, **kwargs):
+def plot_fun_2d(pdf, lims=(-5, 5), xlims=None, ylims=None, type="colormesh", num_gridpoints=150, ax=None, **kwargs):
     """
     Arguments
     * pdf: callable, computes a distribution on R2.
     * lims: list of two floats (limits)
     * type: string, one of "3d", "contour".
     """
+    if xlims is None:
+        xlims = lims
+    if ylims is None:
+        ylims = lims
+    if ax is None:
+        ax = plt.gca()
+
+    meshgrid = make_meshgrid(pdf, xlims=xlims, ylims=ylims, num=num_gridpoints)
     if type=="3d":
-        return plot_3d(*make_meshgrid(pdf, lims, num=num_gridpoints),
-                       ax=ax, **kwargs)
+        return plot_3d(*meshgrid, ax=ax, **kwargs)
     elif type=="contour":
-        if ax is None:
-            ax=plt.gca()
-        return ax.contour(*make_meshgrid(pdf, lims, num=num_gridpoints),
-                           **kwargs)
+        return ax.contour(*meshgrid, **kwargs)
+    elif type=="colormesh":
+        return ax.pcolormesh(*meshgrid, **kwargs)
     else:
-        raise ValueError("type must be one of '3d' or 'contour'.")
+        raise ValueError("type must be one of 'colormesh', '3d', or 'contour'.")
 
 
 def autolabel_bar_chart(ax, rects):
@@ -288,3 +296,35 @@ def scatter(x, *args, ax=None, **kwargs):
     if ax is None:
         ax=plt.gca()
     ax.scatter(x[:, 0], x[:, 1], *args, **kwargs)
+
+def quiverplot(f, samples=None, num_gridpoints=50, ax=None, lims=[-10, 10], xlims=None, ylims=None, angles="xy", scale=2, **kwargs):
+    """
+    Plot a vector field. f is a function f: R^2 ---> R^2
+    If arrows are too large, change scale (larger scale = shorter arrows)
+    If samples is not None, then draw arrows at samples insted of building a grid.
+    In this case, the arguments num_gridpoints, lims, xlims, ylims are ignored.
+    """
+    if xlims is None:
+        xlims = lims
+    if ylims is None:
+        ylims = lims
+    if ax is None:
+        ax = plt.gca()
+
+    if samples is None:
+        def split_f(x, y):
+            return f(np.append(x, y))
+        x = np.linspace(*xlims, num_gridpoints)
+        y = np.linspace(*ylims, num_gridpoints)
+        xx, yy = np.meshgrid(x, y, dtype=np.float32)
+        zz = vmap(vmap(split_f))(xx, yy)
+        uu, vv = np.rollaxis(zz, 2)
+        ax.quiver(xx, yy, uu, vv, angles=angles, scale=scale, **kwargs)
+    else:
+        zz = vmap(f)(samples)
+        u, v = np.rollaxis(zz, 1)
+        x, y = np.rollaxis(samples, 1).split(2)
+        x, y = np.squeeze(x), np.squeeze(y)
+        ax.scatter(x, y, color="black")
+        ax.quiver(x, y, u, v, angles=angles, scale=scale, **kwargs)
+

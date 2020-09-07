@@ -1,5 +1,5 @@
 import jax.numpy as np
-from jax import vmap
+from jax import vmap, grad
 from jax.scipy import stats
 import utils
 
@@ -80,10 +80,12 @@ def get_tophat_kernel_logscaled(logh):
     return get_tophat_kernel(bandwidth)
 
 def constant_kernel(x, y):
+    """Returns 1."""
     _check_xy(x, y)
     return np.array(1.)
 
 def char_kernel(x, y):
+    """Returns 1 if x==y, else 0"""
     _check_xy(x, y)
     return np.squeeze(np.where(x==y, 1., 0.))
 
@@ -105,6 +107,40 @@ def get_funnel_kernel(bandwidth):
     def funnel_kernel(x, y):
         return rbf(defunnelize(x), defunnelize(y))
     return funnel_kernel
+
+def scalar_product_kernel(x, y):
+    """k(x, y) = x^T y"""
+    return np.inner(x, y)
+
+def get_imq_kernel(alpha: float=1, beta: float=-0.5):
+    """
+    alpha > 0
+    beta \in (-1, 0)
+    Returns:
+    kernel k(x, y) = (alpha + ||x - y||^2)^beta
+    """
+    def inverse_multi_quadratic_kernel(x, y):
+        return (alpha + np.linalg.norm(x - y)**2)**beta
+    return inverse_multi_quadratic_kernel
+
+def get_inverse_log_kernel(alpha: float):
+    def il_kernel(x, y):
+        return (alpha + np.log(1 + np.linalg.norm(x - y)**2))**(-1)
+    return il_kernel
+
+def get_imq_score_kernel(alpha: float, beta: float, logp: callable):
+    """
+    Arguments:
+    alpha > 0
+    beta \in (-1, 0)
+    logp computes log p(x)
+    
+    Returns:
+    kernel k(x, y) = (alpha + ||\nabla \log p(x) - \nabla \log p(y)||^2)^beta
+    """
+    def imq_score_kernel(x, y):
+        return (alpha + np.linalg.norm(grad(logp)(x) - grad(logp)(y))**2)**beta
+    return imq_score_kernel
 
 ### Utils
 def median_heuristic(x):

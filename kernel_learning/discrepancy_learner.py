@@ -42,8 +42,10 @@ class SDLearner():
         self.threadkey, subkey = random.split(key)
 
         # net and optimizer
+        # small experiments suggest it's better to have no skip connection
+        # and to not use an activation on the final layer
         self.mlp = nets.build_mlp(self.sizes, name="MLP", skip_connection=False,
-                                  with_bias=False)
+                                  with_bias=True, activate_final=False)
         self.opt = kernel_learning.Optimizer(*optimizers.adam(learning_rate))
         self.step_counter = 0
         self.initialize_optimizer(subkey)
@@ -114,5 +116,8 @@ class SDLearner():
         for _ in tqdm(range(n_steps), disable=disable_tqdm):
             if proposal is not None:
                 samples = proposal.sample(400)
-            self.step(samples)
-        return None
+            try:
+                self.step(samples)
+            except KeyboardInterrupt:
+                return
+        return
