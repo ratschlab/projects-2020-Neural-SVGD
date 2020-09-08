@@ -112,10 +112,10 @@ class SDLearner():
             "fnorm": fnorm,
         })
 
-    def train(self, samples, n_steps=100, proposal=None):
+    def train(self, samples, n_steps=100, proposal=None, batch_size=200):
         for _ in tqdm(range(n_steps), disable=disable_tqdm):
             if proposal is not None:
-                samples = proposal.sample(400)
+                samples = proposal.sample(batch_size)
             try:
                 self.step(samples)
             except KeyboardInterrupt:

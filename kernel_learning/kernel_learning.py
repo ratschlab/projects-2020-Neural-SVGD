@@ -96,7 +96,9 @@ class KernelLearner():
     def get_params(self):
         return self.opt.get_params(self.optimizer_state)
 
-    def get_kernel(self, params):
+    def get_kernel(self, params=None):
+        if params is None:
+            params = self.get_params()
         if self.scaling_parameter:
             enc_params, _, norm = params
         else:
@@ -112,7 +114,7 @@ class KernelLearner():
         kernel = self.get_kernel(params)
         ksd_squared, std = stein.ksd_squared_u(
             samples, self.target.logpdf, kernel, include_stddev=True)
-        phistar = self.get_phistar(params, samples)
+        phistar = self.get_phistar(samples, params=params)
         def phi_norm(x): return np.linalg.norm(phistar(x))**2
         regularizer_term = np.mean(vmap(phi_norm)(samples))
         ksd = np.sqrt(np.clip(ksd_squared, a_min=1e-6))
@@ -122,8 +124,10 @@ class KernelLearner():
         else:
             return -ksd_squared +     self.lambda_reg * regularizer_term, aux
 
-    def get_phistar(self, params, samples):
+    def get_phistar(self, samples, params=None):
         """return phistar(\cdot)"""
+        if params is None:
+            params = self.get_params()
         kernel = self.get_kernel(params)
         def phistar(x):
             return stein.phistar_i(x, samples, self.target.logpdf, kernel, aux=False)
