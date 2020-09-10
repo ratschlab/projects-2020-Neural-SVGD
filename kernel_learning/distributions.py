@@ -501,23 +501,24 @@ class Setup():
         return self.target, self.proposal
 
     def plot(self, cmaps=("Blues", "plasma"),
-             only_plot_target=False, # TODO
-             only_plot_proposal=False,
              **kwargs):
         """
         cmaps: sequence of colormaps. First one used for proposal, second one
         for target.
         Proposal is density plot, target is contour plot.
         """
-        if target.d == 1:
+        if self.target.d == 1:
             plot.plot_fun(self.proposal.pdf, label="Proposal", **kwargs)
             plot.plot_fun(self.target.pdf, label="Target", **kwargs)
-        elif target.d == 2:
+        elif self.target.d == 2:
             plot.plot_fun_2d(self.proposal.pdf, cmap=cmaps[0], **kwargs)
             plot.plot_fun_2d(self.target.pdf, type="contour", cmap=cmaps[1], **kwargs)
         else:
             raise NotImplementedError()
-        plt.legend()
+        return
+
+    def grad_kl(self, x):
+        return grad(self.proposal.logpdf)(x) - grad(self.target.logpdf)(x)
 
 ##########################
 ## 1-dimensional experiments

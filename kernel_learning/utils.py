@@ -441,3 +441,10 @@ def vmv_dot(vec_a, matrix, vec_b):
     Returns x^T A x, the vector-matrix-vector dot product
     """
     return np.einsum("i,ij,j->", vec_a, matrix, vec_b)
+
+def l2_norm(samples, fun):
+    """Returns mean of fun^T fun evaluated
+    over samples"""
+    def fun_norm(x): return np.linalg.norm(fun(x))**2
+    return np.sqrt(np.mean(vmap(fun_norm)(samples))) # TODO added sqrt; so need to
+                                                    # change where I've used this.

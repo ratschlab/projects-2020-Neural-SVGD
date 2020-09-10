@@ -39,8 +39,10 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
                              "doesn't make sense: the transposed Stein operator "
                              "acts only on vector-valued functions.")
         elif fx.ndim == 1: # f: R^d --> R^d
-            auxdata = None
-            out = np.inner(grad(logp)(x), fun(x)) + np.trace(jacfwd(fun)(x).transpose())
+            drift_term = np.inner(grad(logp)(x), fx)
+            repulsive_term = np.trace(jacfwd(fun)(x).transpose())
+            auxdata = np.asarray([drift_term, repulsive_term])
+            out = drift_term + repulsive_term
         else:
             raise ValueError(f"Output of input function {fun.__name__} needs "
                              f"to have rank 0 or 1. Instead got output "
@@ -52,11 +54,12 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
             auxdata = np.asarray([drift_term, repulsive_term])
             out = drift_term + repulsive_term
         elif fx.ndim == 1: # f: R^d --> R^d
-            auxdata = None
-            out = np.einsum("i,j->ij", grad(logp)(x), fun(x)) + jacfwd(fun)(x).transpose()
+            drift_term = np.einsum("i,j->ij", grad(logp)(x), fun(x))
+            repulsive_term = jacfwd(fun)(x).transpose()
+            auxdata = np.asarray([drift_term, repulsive_term])
+            out = drift_term + repulsive_term
         elif fx.ndim == 2 and fx.shape[0] == fx.shape[1]: # f: R^d --> R^{dxd}
-            raise NotImplementedError()
-#            return np.einsum("ij,j->ij", fun(x), grad(logp)(x)) + #np.einsum("iii->i", jacfwd(fun)(x).transpose())
+            raise NotImplementedError("Not implemented for matrix-valued f.")
         else:
             raise ValueError(f"Output of input function {fun.__name__} needs "
                              f"to be a scalar, a vector, or a square matrix. "
@@ -66,23 +69,30 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
     else:
         return out
 
-def stein(fun, xs, logp, transposed=False, aux=False):
+def stein_expectation(fun, xs, logp, transposed=False, aux=False):
     """
     Arguments:
     * fun: callable, transformation fun: R^d \to R^d. Satisfies lim fun(x) = 0 for x \to \infty.
     * xs: np.array of shape (n, d). Used to compute an empirical distribution \hat q.
     * p: callable, takes argument of shape (d,). Computes log(p(x)). Can be unnormalized (just using gradient.)
 
-    Returns: the expectation of the Stein operator $\mathcal A [\text{fun}]$ wrt the empirical distribution of the particles xs:
+    Returns:
+
+    * the expectation of the Stein operator $\mathcal A [\text{fun}]$ wrt the empirical distribution of the particles xs:
     \[1/n \sum_i \mathcal A_p [\text{fun}](x_i) \]
     np.array of shape (d,) if transposed else shape (d, d)
+    * if aux: per-particle drift and repulsion terms
     """
+    out = vmap(
+        stein_operator,
+        (None, 0, None, None, None)
+    )(fun, xs, logp, transposed, aux)
+
     if aux:
-        steins, auxdata = vmap(stein_operator, (None, 0, None, None, None))(
-            fun, xs, logp, transposed, aux)
+        steins, auxdata = out
         return np.mean(steins, axis=0), np.mean(auxdata, axis=0) # per-particle drift and repulsion, shape (2, d)
     else:
-        steins = vmap(stein_operator, (None, 0, None, None, None))(fun, xs, logp, transposed, aux)
+        steins = out
         return np.mean(steins, axis=0)
 
 def phistar_i(xi, x, logp, kernel, aux=True):
@@ -100,7 +110,7 @@ def phistar_i(xi, x, logp, kernel, aux=True):
     if xi.ndim > 1:
         raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
     kx = lambda y: kernel(y, xi)
-    return stein(kx, x, logp, aux=aux)
+    return stein_expectation(kx, x, logp, aux=aux)
 
 def get_phistar(kernel, logp, samples):
     def phistar(x):
@@ -289,7 +299,7 @@ def ksd_squared_l(samples, logp, k, return_variance=False):
 def stein_discrepancy(xs, logp, f, aux=False):
     """Return estimated stein discrepancy using
     witness function f"""
-    return stein(f, xs, logp, transposed=True, aux=aux)
+    return stein_expectation(f, xs, logp, transposed=True, aux=aux)
 
 def h(x, y, kernel, logp):
     k=kernel
