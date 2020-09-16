@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import utils
 import kernels
 import plot
+import stein
 
 # check wikipedia for computation of higher moments
 # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
@@ -520,6 +521,12 @@ class Setup():
     def grad_kl(self, x):
         return grad(self.proposal.logpdf)(x) - grad(self.target.logpdf)(x)
 
+    def stein_discrepancy(self, f, samples=None):
+        """Compute stein discrepancy to target using witness function f"""
+        if samples is None:
+            samples = self.proposal.sample(10_000)
+        return stein.stein_discrepancy(samples, self.target.logpdf, f)
+
 ##########################
 ## 1-dimensional experiments
 target = Gaussian(0, 3)
@@ -534,8 +541,8 @@ double_mixture = Setup(target, proposal)
 
 ###########################
 ## 2-dimensional experiments
-proposal = Funnel(2)
-target = Gaussian([0,0], 9)
+target = Funnel(2)
+proposal = Gaussian([0,0], 9)
 funnel = Setup(target, proposal)
 
 banana = Banana([0, 0], [4, 1]) # ie y = x**2 + eps; std 2 and 1 respectively

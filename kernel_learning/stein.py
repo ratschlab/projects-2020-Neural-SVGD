@@ -230,13 +230,14 @@ def ksd_squared_u(xs, logp, k, include_stddev=False):
     hvv = vmap(hv, (None, 0))
     ksd_matrix = hvv(xs, xs)
     n = xs.shape[0]
-
     diagonal_indices = [list(range(n))]*2
     ksd_matrix = index_update(ksd_matrix, diagonal_indices, 0)
-
     ksd_squared = np.sum(ksd_matrix) / (n * (n-1))
-    stddev = np.sqrt(np.clip(variance.var_ksd(ksd_matrix), a_min=1e-4))
-    return (ksd_squared, stddev) if include_stddev else ksd_squared
+    if include_stddev:
+        stddev = np.sqrt(np.clip(variance.var_ksd(ksd_matrix), a_min=1e-4))
+        return ksd_squared, stddev
+    else:
+        return ksd_squared
 
 #@partial(jit, static_argnums=(1,2))
 def ksd_squared_v(xs, logp, k, dummy_arg1, dummy_arg2):

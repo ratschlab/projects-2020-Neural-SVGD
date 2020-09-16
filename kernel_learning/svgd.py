@@ -19,6 +19,8 @@ import kernels
 import nets
 import distributions
 
+from models import Optimizer, KernelLearner
+
 import os
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 disable_tqdm = on_cluster
@@ -30,14 +32,6 @@ disable_tqdm = on_cluster
 #    def __init__(self):
 #        pass
 
-class Optimizer():
-    def __init__(self, opt_init, opt_update, get_params):
-        """opt_init, opt_update, get_params are the three functions obtained
-        from a stax.optimizer call."""
-        self.init = jit(opt_init)
-        self.update = jit(opt_update)
-        self.get_params = jit(get_params)
-
 
 class SVGD():
     def __init__(self,
@@ -47,7 +41,7 @@ class SVGD():
                  n_particles: int = 400,
                  get_kernel=None,
                  learning_rate=0.1,
-                 u_est_update=True,
+                 u_est_update=False,
                  debugging_config=None):
         """
         Arguments
@@ -227,8 +221,7 @@ class AdversarialSVGD():
                  svgd_lr=0.1,
                  kernel_lr=0.1,
                  lambda_reg=0,
-                 svgd_key=None,
-                 normalize=True):
+                 svgd_key=None):
         """
         Initialize containers for kernel learning and particle updates.
         """
@@ -238,8 +231,9 @@ class AdversarialSVGD():
                                     sizes,
                                     kernels.get_rbf_kernel(1),
                                     kernel_lr,
-                                    lambda_reg,
-                                    normalize=normalize)
+                                    lambda_reg=lambda_reg,
+                                    scaling_parameter=bool(lambda_reg),
+                                    std_normalize=False)
         if svgd_key is not None:
             keyb = svgd_key
         self.svgd = SVGD(key=keyb,

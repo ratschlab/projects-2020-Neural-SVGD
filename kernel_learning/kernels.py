@@ -134,7 +134,7 @@ def get_imq_score_kernel(alpha: float, beta: float, logp: callable):
     alpha > 0
     beta \in (-1, 0)
     logp computes log p(x)
-    
+
     Returns:
     kernel k(x, y) = (alpha + ||\nabla \log p(x) - \nabla \log p(y)||^2)^beta
     """

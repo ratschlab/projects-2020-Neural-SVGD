@@ -448,3 +448,29 @@ def l2_norm(samples, fun):
     def fun_norm(x): return np.linalg.norm(fun(x))**2
     return np.sqrt(np.mean(vmap(fun_norm)(samples))) # TODO added sqrt; so need to
                                                     # change where I've used this.
+def l2_normalize(fun: callable, samples):
+    """Rescale function fun so it has L2(q) norm equal to 1.
+    samples need to be samples from q (used to compute the expectation)."""
+    l2_fun = l2_norm(samples, fun)
+    def fun_normed(x):
+        return fun(x) / l2_fun
+    return fun_normed
+
+def squeeze_output(fun):
+    """fun(...) --> np.squeeze(fun(...))"""
+    def fun_with_squeezed_output(*args, **kwargs):
+        return np.squeeze(fun(*args, **kwargs))
+    return fun_with_squeezed_output
+
+def accept_scalar(fun, reshape_input_to=(1,)):
+    """fun(a) --> fun(np.reshape(a, newshape=(1,))). Also squeezes output."""
+    def fun_accepts_scalar_input(x):
+        x = np.reshape(x, newshape=reshape_input_to)
+        return np.squeeze(fun(x))
+    return fun_accepts_scalar_input
+
+def negative(fun):
+    """f --> -f"""
+    def negfun(*args, **kwargs):
+        return -fun(*args, **kwargs)
+    return negfun

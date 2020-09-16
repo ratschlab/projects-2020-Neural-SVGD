@@ -38,7 +38,6 @@ import kernels
 import distributions
 import nets
 import kernel_learning
-from kernel_learning import Optimizer
 
 from jax.experimental import optimizers
 
@@ -47,12 +46,25 @@ key = random.PRNGKey(0)
 from jax.scipy.stats import norm
 
 
-from 
+rain_drops = onp.zeros(5, dtype=[('position', float, 2),
+                                      ('size',     float, 1),
+                                      ('growth',   float, 1),
+                                      ('color',    float, 4)])
+
+rain_drops['position']
 
 
-# setup = distributions.Setup(target=distributions.Gaussian(0, 16), proposal=distributions.Gaussian(0, 1))
+
+target = distributions.GaussianMixture()
+circle_mix = distributions.Setup
+
+
+from models import Particles
+
+
+setup = distributions.Setup(target=distributions.Gaussian(0, 16), proposal=distributions.Gaussian(0, 1))
 # setup = distributions.double_mixture
-setup = distributions.banana_target
+# setup = distributions.banana_target
 target, proposal = setup.get()
 kernel = kernels.get_rbf_kernel(1)
 
