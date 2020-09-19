@@ -1,4 +1,5 @@
 from functools import partial
+import numpy as onp
 import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jit
 from jax.ops import index_update, index
@@ -347,3 +348,23 @@ def test_h_successful():
     return g(x, y, k, logp) == h(x, y, k, logp)
 
 assert test_h_successful()
+
+def get_optimal_sd(key, lambda_reg, target, proposal, batch_size=400):
+    """Compute mean and stddev of optimal SD under proposal."""
+    def optimal_grad(x):
+        div = 2*lambda_reg
+        return grad(lambda x: target.logpdf(x) - proposal.logpdf(x))(x) / div
+
+    @partial(jit, static_argnums=1)
+    def compute_sd(samples, fun):
+        return stein_discrepancy(samples, target.logpdf, fun)
+
+    def get_sds(key, n_samples, fun):
+        sds = []
+        for subkey in random.split(key, 100):
+            samples = proposal.sample(n_samples, key=subkey)
+            sds.append(compute_sd(samples, fun))
+        return sds
+
+    sds_optimal = get_sds(key, batch_size, optimal_grad)
+    return onp.mean(sds_optimal), onp.std(sds_optimal)

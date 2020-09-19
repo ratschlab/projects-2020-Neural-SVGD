@@ -1,16 +1,15 @@
 import jax.numpy as np
 import jax
-from jax import jit, vmap, random
+from jax import jit, vmap, random, grad
 from jax.ops import index_update, index
 from jax import lax
 import time
-from functools import wraps
+from functools import wraps, partial
 import itertools
 
 from collections.abc import Iterable
 import collections
 import warnings
-
 import numpy as onp
 
 def isiterable(obj):
@@ -446,8 +445,8 @@ def l2_norm(samples, fun):
     """Returns mean of fun^T fun evaluated
     over samples"""
     def fun_norm(x): return np.linalg.norm(fun(x))**2
-    return np.sqrt(np.mean(vmap(fun_norm)(samples))) # TODO added sqrt; so need to
-                                                    # change where I've used this.
+    return np.sqrt(np.mean(vmap(fun_norm)(samples)))
+
 def l2_normalize(fun: callable, samples):
     """Rescale function fun so it has L2(q) norm equal to 1.
     samples need to be samples from q (used to compute the expectation)."""
@@ -474,3 +473,4 @@ def negative(fun):
     def negfun(*args, **kwargs):
         return -fun(*args, **kwargs)
     return negfun
+
