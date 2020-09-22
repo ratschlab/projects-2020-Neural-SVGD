@@ -283,7 +283,7 @@ class GaussianMixture(Distribution):
         x = np.asarray(x)
         if x.shape != (self.d,) and not (self.d == 1 and x.ndim == 0):
             raise ValueError(f"Input x must be an np.array of length "
-            "{self.d} and dimension one.")
+                             f"{self.d} and dimension one.")
         pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
         return np.vdot(pdfs, self.weights)
 

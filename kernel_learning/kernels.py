@@ -120,12 +120,12 @@ def get_imq_kernel(alpha: float=1, beta: float=-0.5):
     kernel k(x, y) = (alpha + ||x - y||^2)^beta
     """
     def inverse_multi_quadratic_kernel(x, y):
-        return (alpha + np.linalg.norm(x - y)**2)**beta
+        return (alpha + utils.normsq(x - y))**beta
     return inverse_multi_quadratic_kernel
 
 def get_inverse_log_kernel(alpha: float):
     def il_kernel(x, y):
-        return (alpha + np.log(1 + np.linalg.norm(x - y)**2))**(-1)
+        return (alpha + np.log(1 + utils.normsq(x - y)))**(-1)
     return il_kernel
 
 def get_imq_score_kernel(alpha: float, beta: float, logp: callable):
@@ -139,7 +139,7 @@ def get_imq_score_kernel(alpha: float, beta: float, logp: callable):
     kernel k(x, y) = (alpha + ||\nabla \log p(x) - \nabla \log p(y)||^2)^beta
     """
     def imq_score_kernel(x, y):
-        return (alpha + np.linalg.norm(grad(logp)(x) - grad(logp)(y))**2)**beta
+        return (alpha + utils.normsq(grad(logp)(x) - grad(logp)(y)))**beta
     return imq_score_kernel
 
 ### Utils

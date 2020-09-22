@@ -1,6 +1,6 @@
 import jax.numpy as np
 import jax
-from jax import jit, vmap, random, grad
+from jax import jit, vmap, random, grad, jacfwd
 from jax.ops import index_update, index
 from jax import lax
 import time
@@ -441,18 +441,18 @@ def vmv_dot(vec_a, matrix, vec_b):
     """
     return np.einsum("i,ij,j->", vec_a, matrix, vec_b)
 
-def l2_norm(samples, fun):
+def l2_norm_squared(samples, fun):
     """Returns mean of fun^T fun evaluated
     over samples"""
-    def fun_norm(x): return np.linalg.norm(fun(x))**2
-    return np.sqrt(np.mean(vmap(fun_norm)(samples)))
+    def fun_norm(x): return np.inner(fun(x), fun(x))
+    return np.mean(vmap(fun_norm)(samples))
 
-def l2_normalize(fun: callable, samples):
-    """Rescale function fun so it has L2(q) norm equal to 1.
+def l2_normalize(fun: callable, samples, target_norm=1):
+    """Rescale function fun so it has L2(q) norm equal to 1 (or target_norm, if supplied).
     samples need to be samples from q (used to compute the expectation)."""
-    l2_fun = l2_norm(samples, fun)
+    l2_fun = np.sqrt(l2_norm_squared(samples, fun))
     def fun_normed(x):
-        return fun(x) / l2_fun
+        return fun(x) * target_norm / l2_fun
     return fun_normed
 
 def squeeze_output(fun):
@@ -461,8 +461,9 @@ def squeeze_output(fun):
         return np.squeeze(fun(*args, **kwargs))
     return fun_with_squeezed_output
 
-def accept_scalar(fun, reshape_input_to=(1,)):
-    """fun(a) --> fun(np.reshape(a, newshape=(1,))). Also squeezes output."""
+def reshape_input(fun, reshape_input_to=(1,)):
+    """fun(a) --> fun(np.reshape(a, newshape=(1,))). Also squeezes output.
+    Useful e.g. if you want function to accept scalar input."""
     def fun_accepts_scalar_input(x):
         x = np.reshape(x, newshape=reshape_input_to)
         return np.squeeze(fun(x))
@@ -474,3 +475,29 @@ def negative(fun):
         return -fun(*args, **kwargs)
     return negfun
 
+
+def div(fun):
+    """return divergence of fun: R^d --> R^d"""
+    def divergence(x):
+        if x.ndim > 0:
+            return np.trace(jacfwd(fun)(x))
+        else:
+            return grad(fun)(x)
+    return divergence
+
+def div_sq(fun):
+    def divergence_sq(x):
+        if x.ndim > 0:
+            j = jacfwd(fun)(x)
+            return np.sum(np.diag(j)**2)
+        else:
+            return grad(fun)(x)**2
+    return divergence_sq
+
+def mul(fun, factor):
+    """f --> factor * fun"""
+    return lambda *args, **kwargs: factor * fun(*args, **kwargs)
+
+
+def normsq(x):
+    return np.inner(x, x)
