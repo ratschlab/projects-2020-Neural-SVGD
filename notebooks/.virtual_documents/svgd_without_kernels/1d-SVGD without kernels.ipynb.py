@@ -40,6 +40,9 @@ from jax.experimental import optimizers
 key = random.PRNGKey(0)
 
 
+get_ipython().run_line_magic("autoreload", "")
+
+
 # setup = distributions.funnel
 # target, proposal = setup.get()
 
@@ -129,7 +132,7 @@ plot.plot_fun(utils.reshape_input(v),     lims=(-8, 8), label="learned grad(kl)"
 # plot.plot_fun(utils.reshape_input(score), lims=(-8, 8), label="learned score")
 plt.axhline(y=0, linestyle="--")
 # plot.plot_fun(utils.negative(grad(target.logpdf)), lims=(-8, 8), label="-grad(logp)")
-ax.set_xlim(xlims)
+# ax.set_xlim(xlims)
 ax.legend()
 
 

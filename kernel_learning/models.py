@@ -6,6 +6,7 @@ import haiku as hk
 import jax
 import numpy as onp
 import matplotlib.pyplot as plt
+import optax
 
 import traceback
 import time
@@ -92,10 +93,6 @@ class Particles():
         gradient: takes in args (params, key, particles) and returns
             an array of shape (n, d), interpreted as grad(loss)(particles).
         proposal: instances of class distributions.Distribution
-        optimizer needs to have pure methods
-           optimizer.init(params) -> state
-           optimizer.update(key, gradient, state) -> state
-           optimizer.get_params(state) -> params
         """
         self.gradient = gradient
         self.target = target
@@ -103,7 +100,9 @@ class Particles():
         self.n_particles = n_particles
 
         # optimizer for particle updates
-        self.opt = Optimizer(*optimizers.sgd(learning_rate))
+        self.opt = optax.chain(
+            optax.clip_by_global_norm(10),
+            optax.sgd(learning_rate))
         self.threadkey, subkey = random.split(key)
         self.initialize_optimizer(subkey)
         self.step_counter = 0
@@ -136,6 +135,7 @@ class Particles():
             self.threadkey, key = random.split(self.threadkey)
         if particles is None:
             particles = self.init_particles(key)
+        self.particles = particles
         self.optimizer_state = self.opt.init(particles)
         return None
 
@@ -145,43 +145,40 @@ class Particles():
 
     def get_params(self, split_by_group=False):
         if split_by_group:
-            return [self.opt.get_params(self.optimizer_state)[idx]
-                    for idx in self.group_idx]
+            return [self.particles[idx] for idx in self.group_idx]
         else:
-            return self.opt.get_params(self.optimizer_state)
+            return self.particles
 
-    def perturb(self, noise_level=1e-2, key=None):
-        if key is None:
-            self.threadkey, key = random.split(self.threadkey)
-        particles = self.get_params()
-        particles += random.normal(key, shape=particles.shape)
-        self.initialize_optimizer(particles=particles)
-        return None
+    def perturb(self, key, particles, opt_state, noise_level=1e-2):
+        noise = -random.normal(key, shape=particles.shape) * noise_level
+        noise_rescaled, _ = self.opt.update(noise, opt_state, particles)
+        return optax.apply_updates(particles, noise_rescaled)
 
     @partial(jit, static_argnums=0)
-    def _step(self, key, optimizer_state, params, step_counter, noise_pre=0):
+    def _step(self, key, particles, optimizer_state, params, noise_pre=0):
         """
         Updates particles in direction of the gradient.
 
         params can be anything. e.g. inducing particles in the case of SVGD,
-        deep NN params for learned f, or nothing.
+        deep NN params for learned f, or None.
         """
-        particles = self.opt.get_params(optimizer_state)
-        particles = particles + noise_pre * random.normal(key, particles.shape)
-        gradient, grad_aux = self.gradient(params, key, particles, aux=True)
-        gradient = np.clip(gradient, a_max=50, a_min=-50)
-        optimizer_state = self.opt.update(step_counter, gradient, optimizer_state)
-        auxdata = gradient
-        return optimizer_state, auxdata, grad_aux # grad_aux is a dict
+        key1, key2 = random.split(key)
+        particles = self.perturb(key1, particles, optimizer_state, noise_pre)
+        grads, grad_aux = self.gradient(params, key2, particles, aux=True)
+        grads = np.clip(grads, a_max=50, a_min=-50) # TODO: put in optimizer
+        grads, optimizer_state = self.opt.update(grads, optimizer_state, particles)
+        particles = optax.apply_updates(particles, grads)
+        auxdata = grads
+        return particles, optimizer_state, auxdata, grad_aux # grad_aux is a dict
 
     def step(self, params, key=None, noise_pre=0):
-        """Log rundata, take step, update loglikelihood. Mutates state"""
+        """Log rundata, take step. Mutates state"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
-        updated_optimizer_state, auxdata, grad_aux = self._step(
-            key, self.optimizer_state, params, self.step_counter, noise_pre)
+        updated_particles, self.optimizer_state, auxdata, grad_aux = self._step(
+            key, self.particles, self.optimizer_state, params, noise_pre)
         self.log(auxdata, grad_aux)
-        self.optimizer_state = updated_optimizer_state # take step
+        self.particles = updated_particles
         self.step_counter += 1
         return None
 
@@ -213,14 +210,14 @@ class Particles():
         if axs is None:
             fig, axs = plt.subplots(1, 2, figsize=[18,5])
 
-        particles = self.get_params()
         axs = axs.flatten()
         for ax, target_stat, stat_key in zip(axs, [target.mean, np.sqrt(np.diag(target.cov))], "mean std".split()):
-            ax.axhline(y=target_stat, linestyle="--", color="green", label=f"Target {stat_key}")
-            ax.plot(self.rundata[f"test_{stat_key}"], label=f"{stat_key}")
-#            for group_name in self.group_names:
-#                ax.plot(self.rundata[f"{group_name}_{stat_key}"], label=f"{stat_key}")
-#                ax.legend()
+            if target.d == 1:
+                ax.axhline(y=target_stat, linestyle="--", color="green", label=f"Target {stat_key}")
+            else:
+                for y in target_stat:
+                    ax.axhline(y=y, linestyle="--", color="green", label=f"Target {stat_key}")
+                ax.plot(self.rundata[f"test_{stat_key}"], label=f"{stat_key}")
         return
 
     def plot_trajectories(self, ax=None, **kwargs):
@@ -230,17 +227,32 @@ class Particles():
         ax.plot(p_over_time[:, :, 0], **kwargs)
         return ax
 
-    def plot_final(self, ax=None, target=None, xlim=None, **kwargs):
+    def plot_final(self, target, ax=None, xlim=None, **kwargs):
         if ax is None:
             ax = plt.gca()
         p = self.get_params()
-        ax.hist(p[:, 0], density=True, alpha=0.5, label="Samples",   bins=25)
-        if target is not None:
+        if target.d == 1:
+            ax.hist(p[:, 0], density=True, alpha=0.5, label="Samples",   bins=25)
             plot.plot_fun(target.pdf, lims=ax.get_xlim(), ax=ax, label="Target density")
+        elif target.d == 2:
+            plot.scatter(p, ax=ax)
+            plot.plot_fun_2d(target.pdf, xlims=ax.get_xlim(), ylims=ax.get_ylim(), ax=ax, **kwargs)
+            plot.scatter(p, ax=ax)
+        else:
+            return NotImplementedError()
         if xlim is not None:
             ax.set_xlim(xlim)
         ax.legend()
         return ax
+
+    def animate_trajectory(self, target=None, fig=None, ax=None, **kwargs):
+        """Create animated scatterplot of particle trajectory"""
+        trajectory = np.asarray(self.rundata["particles"])
+        if target is not None:
+            plot.plot_fun_2d(target.pdf, lims=(-20, 20), ax=ax)
+        anim = plot.animate_array(trajectory, fig, ax)
+        return anim
+
 
 class GradientLearner():
     """
@@ -275,7 +287,7 @@ class GradientLearner():
         self.mlp = nets.build_mlp(self.sizes, name="MLP",
                                   skip_connection=skip_connection,
                                   with_bias=True, activate_final=activate_final)
-        self.opt = Optimizer(*optimizers.adam(learning_rate))
+        self.opt = optax.adam(learning_rate)
         self.step_counter = 0
         self.initialize_optimizer(subkey)
         self.rundata = {"train_steps": []}
@@ -295,12 +307,12 @@ class GradientLearner():
                 self.threadkey, subkey = random.split(self.threadkey)
             else:
                 key, subkey = random.split(key)
-            init_params = self.mlp.init(subkey, x_dummy)
-            self.optimizer_state = self.opt.init(init_params)
+            self.params = self.mlp.init(subkey, x_dummy)
+            self.optimizer_state = self.opt.init(self.params)
         return None
 
     def get_params(self):
-        return self.opt.get_params(self.optimizer_state)
+        return self.params
 
     def loss_fn(self, params, samples):
         raise NotImplementedError()
@@ -308,22 +320,21 @@ class GradientLearner():
     def gradient(self, params, key, particles, aux=False):
         raise NotImplementedError()
 
-    def _step_unjitted(self, optimizer_state, samples, validation_samples, step: int):
+    def _step_unjitted(self, params, optimizer_state, samples, validation_samples):
         """update parameters and compute validation loss"""
-        params = self.opt.get_params(optimizer_state)
-        [loss, loss_aux], g = value_and_grad(self.loss_fn, has_aux=True)(params, samples)
+        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, samples)
         _, val_loss_aux = self.loss_fn(params, validation_samples)
-        optimizer_state = self.opt.update(step, g, optimizer_state)
-        auxdata = (loss_aux, val_loss_aux, g)
-        return optimizer_state, auxdata
+        grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
+        params = optax.apply_updates(params, grads)
+        auxdata = (loss_aux, val_loss_aux, grads)
+        return params, optimizer_state, auxdata
     _step = jit(_step_unjitted, static_argnums=0)
 
     def step(self, samples, validation_samples, disable_jit=False):
         """Step and mutate state"""
         step_fn = self._step_unjitted if disable_jit else self._step
-        updated_optimizer_state, auxdata = step_fn(
-            self.optimizer_state, samples, validation_samples, self.step_counter)
-        self.optimizer_state = updated_optimizer_state
+        self.params, self.optimizer_state, auxdata = step_fn(
+            self.params, self.optimizer_state, samples, validation_samples)
         self.write_to_log(self._log(samples, validation_samples, auxdata))
         self.step_counter += 1
         return None
@@ -629,9 +640,9 @@ class KernelGradient():
             return vmap(v)(particles)
 
     def get_field_scaled(self, inducing_samples):
-        phi = stein.get_phistar(self.kernel, target.logpdf, inducing_samples)
+        phi = stein.get_phistar(self.kernel, self.target.logpdf, inducing_samples)
         l2_phi_squared = utils.l2_norm_squared(inducing_samples, phi)
-        ksd = stein.stein_discrepancy(inducing_samples, target.logpdf, phi)
+        ksd = stein.stein_discrepancy(inducing_samples, self.target.logpdf, phi)
         alpha = ksd / (2*self.lambda_reg*l2_phi_squared)
         return utils.mul(phi, -alpha)
 
@@ -659,7 +670,8 @@ class KernelizedScoreMatcher():
 
     def get_score(self, inducing_samples):
         def kernelized_score(x):
-            return -np.mean(vmap(grad(self.kernel), (0, None))(inducing_samples, x))
+            """Return E_y[grad(kernel)(y, x)]"""
+            return -np.mean(vmap(grad(self.kernel), (0, None))(inducing_samples, x), axis=0)
 
         # rescale s.t. l2_norm(kernelized_score) = M / 2*lambda
         kernelized_score = utils.l2_normalize(kernelized_score, inducing_samples)

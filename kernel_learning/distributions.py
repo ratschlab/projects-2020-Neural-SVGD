@@ -446,6 +446,9 @@ class Ring(Distribution):
         super().__init__()
         self.radius, self.var = self._check_and_reshape_args(radius, var)
         self.d = 2
+        self.mean = [0, 0]
+        self.cov = np.cov(self.sample(10_000), rowvar=False)
+        self.cov = np.diag(np.diag(self.cov)) # remove off-diagonal elements
 
     def _check_and_reshape_args(self, r, v):
         r, v = [np.array(a) for a in (r, v)]
@@ -542,11 +545,11 @@ double_mixture = Setup(target, proposal)
 ###########################
 ## 2-dimensional experiments
 target = Funnel(2)
-proposal = Gaussian([0,0], 9)
+proposal = Gaussian([-3,0], 9)
 funnel = Setup(target, proposal)
 
 banana = Banana([0, 0], [4, 1]) # ie y = x**2 + eps; std 2 and 1 respectively
-gauss = Gaussian([0, 0], [4, 4])
+gauss = Gaussian([2, -4], [4, 4])
 banana_target = Setup(banana, gauss)
 banana_proposal = Setup(gauss, banana)
 

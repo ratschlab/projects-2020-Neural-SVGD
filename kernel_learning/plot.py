@@ -2,7 +2,7 @@ import numpy as onp
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from scipy.ndimage.filters import gaussian_filter
-# from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.animation import FuncAnimation
 
 import jax.numpy as np
 from jax import vmap
@@ -177,7 +177,7 @@ def plot_3d(x, y, z, ax=None, **kwargs):
     plt.show()
     return ax
 
-def plot_fun_2d(pdf, lims=(-5, 5), xlims=None, ylims=None, type="colormesh", num_gridpoints=150, ax=None, **kwargs):
+def plot_fun_2d(pdf, lims=(-5, 5), xlims=None, ylims=None, type="colormesh", num_gridpoints=150, ax=None, cmap="Oranges", **kwargs):
     """
     Arguments
     * pdf: callable, computes a distribution on R2.
@@ -197,7 +197,7 @@ def plot_fun_2d(pdf, lims=(-5, 5), xlims=None, ylims=None, type="colormesh", num
     elif type=="contour":
         return ax.contour(*meshgrid, **kwargs)
     elif type=="colormesh":
-        return ax.pcolormesh(*meshgrid, **kwargs)
+        return ax.pcolormesh(*meshgrid, cmap=cmap, **kwargs)
     else:
         raise ValueError("type must be one of 'colormesh', '3d', or 'contour'.")
 
@@ -328,3 +328,23 @@ def quiverplot(f, samples=None, num_gridpoints=50, ax=None, lims=[-10, 10], xlim
         ax.scatter(x, y, color="black")
         ax.quiver(x, y, u, v, angles=angles, scale=scale, **kwargs)
 
+def animate_array(arr, fig=None, ax=None):
+    """Animate array of shape (n_timesteps, n_points, 2)
+    as moving scatterplot. Needs `%matplotlib widget` to work in Jupyter lab."""
+    if ax is None:
+        ax = plt.gca()
+    if fig is None:
+        fig = plt.gcf()
+
+    # plot the first frame
+    scat = ax.scatter(arr[0, :, 0], arr[0, :, 1])
+
+    # animation fn
+    def animate(i):
+        scat.set_offsets(arr[i])
+        ax.set_title(f"Timestep {i}")
+
+    # call animation
+    t = len(arr)
+    anim = FuncAnimation(fig, animate, interval=100, frames=t)
+    return anim

@@ -20,12 +20,13 @@ import kernels
 import nets
 import distributions
 import plot
+import models
 
 
 def neural_score_flow(key,
                       setup,
                       n_particles=300,
-                      n_steps=1000,
+                      n_steps=100,
                       sizes=[32, 32, 1],
                       particle_lr=1e-1,
                       learner_lr=1e-2,
@@ -55,12 +56,12 @@ def neural_score_flow(key,
         score_learner.train(train_x, val_x, key=subkey, n_steps=500, noise_level=noise)
         score_particles.step(score_learner.get_params(), noise_pre=noise)
 
-    return score_learner, score_particles
+    return score_learner, score_particles, None
 
 def neural_svgd_flow(key,
                      setup,
                      n_particles=300,
-                     n_steps=1000,
+                     n_steps=100,
                      sizes=[32, 32, 1],
                      particle_lr=1e-1,
                      learner_lr=1e-2,
@@ -84,6 +85,7 @@ def neural_svgd_flow(key,
     for _ in tqdm(range(n_steps)):
         try:
             key, subkey = random.split(key)
+            learner.initialize_optimizer(keep_params=False)
             particles.reshuffle_tv()
             train_x, val_x, _ = particles.get_params(split_by_group=True)
             learner.train(train_x, val_x, key=subkey, n_steps=500, noise_level=noise_level)
@@ -95,7 +97,7 @@ def neural_svgd_flow(key,
 def svgd_flow(key,
               setup,
               n_particles=300,
-              n_steps=1000,
+              n_steps=100,
               particle_lr=1e-1,
               lambda_reg=1/2,
               noise_level=0,
@@ -109,7 +111,7 @@ def svgd_flow(key,
     gradient = partial(kernel_gradient.gradient, scaled=scaled) # scale to match lambda_reg
 
     svgd_particles = models.Particles(key=keyb,
-                                     gradient=kernel_gradient.gradient,
+                                     gradient=gradient,
                                      proposal=proposal,
                                      n_particles=n_particles,
                                      learning_rate=particle_lr)
@@ -117,4 +119,4 @@ def svgd_flow(key,
     for _ in tqdm(range(n_steps)):
         svgd_particles.step(None, noise_pre=noise_level)
 
-    return kernel_gradient, svgd_particles
+    return kernel_gradient, svgd_particles, None
