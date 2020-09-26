@@ -13,6 +13,7 @@ import time
 from tqdm import tqdm
 from functools import partial
 import json_tricks as json
+import warnings
 
 import utils
 import metrics
@@ -85,7 +86,7 @@ class Particles():
                  gradient: callable,
                  proposal,
                  target=None,
-                 n_particles: int = 400,
+                 n_particles: int = 900,
                  learning_rate=0.1):
         """
         Arguments
@@ -101,8 +102,8 @@ class Particles():
 
         # optimizer for particle updates
         self.opt = optax.chain(
-            optax.clip_by_global_norm(10),
-            optax.sgd(learning_rate))
+            #optax.clip_by_global_norm(10), # careful to not break noise scaling
+            optax.adagrad(learning_rate))
         self.threadkey, subkey = random.split(key)
         self.initialize_optimizer(subkey)
         self.step_counter = 0
@@ -120,7 +121,8 @@ class Particles():
         return None
 
     def reshuffle_tv(self, key=None):
-        """Reshuffle indices of training and validation particles"""
+        """Reshuffle indices of training and validation particles, keeping
+        indices of test particles fixed."""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         t, v, _ = self.group_idx
@@ -149,18 +151,41 @@ class Particles():
         else:
             return self.particles
 
-    def perturb(self, key, particles, opt_state, noise_level=1e-2):
-        noise = -random.normal(key, shape=particles.shape) * noise_level
-        noise_rescaled, _ = self.opt.update(noise, opt_state, particles)
-        return optax.apply_updates(particles, noise_rescaled)
+    @partial(jit, static_argnums=0)
+    def perturb(self, key, particles, opt_state, noise_level=1.):
+        """Add Gaussian noise scaled proportionally to the step size, that is
+        noise = sqrt(2 * stepsize) * eps, where eps is distributed as a standard
+        normal.
+        Returns:
+            pertubed particles"""
+        step_sizes, _ = self.opt.update(np.ones(particles.shape), opt_state, particles)
+        noise = random.normal(key, shape=particles.shape) * noise_level
+        noise *= np.sqrt(2*np.abs(step_sizes) + 1e-9)
+        return particles + noise
+
+    def next_batch(self, key, noise_level=1.): # TODO make this a generator or something
+        """Return next batch of particles (training and validation) for the
+        training of a gradient field approximator. That is, take current
+        particles, perturb, subsample etc (based on current optimizer state) and return."""
+        particles = self.get_params()
+        perturbed_particles = self.perturb(
+            key, particles, self.optimizer_state, noise_level=noise_level)
+        return [perturbed_particles[idx] for idx in self.group_idx[:-1]]
 
     @partial(jit, static_argnums=0)
-    def _step(self, key, particles, optimizer_state, params, noise_pre=0):
+    def _step(self, key, particles, optimizer_state, params, noise_pre: float = 0):
         """
         Updates particles in direction of the gradient.
-
-        params can be anything. e.g. inducing particles in the case of SVGD,
+        Arguments:
+            params: can be anything. e.g. inducing particles in the case of SVGD,
         deep NN params for learned f, or None.
+            noise_pre: scalar indiciating scale of noise to be added to particles
+        before the computation of gradient & the update.
+
+        Returns:
+            particles (updated)
+            optimizer_state (updated)
+            grad_aux: dict containing auxdata
         """
         key1, key2 = random.split(key)
         particles = self.perturb(key1, particles, optimizer_state, noise_pre)
@@ -168,26 +193,29 @@ class Particles():
         grads = np.clip(grads, a_max=50, a_min=-50) # TODO: put in optimizer
         grads, optimizer_state = self.opt.update(grads, optimizer_state, particles)
         particles = optax.apply_updates(particles, grads)
-        auxdata = grads
-        return particles, optimizer_state, auxdata, grad_aux # grad_aux is a dict
+        grad_aux.update({"grads": grads})
+        return particles, optimizer_state, grad_aux
 
     def step(self, params, key=None, noise_pre=0):
         """Log rundata, take step. Mutates state"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
-        updated_particles, self.optimizer_state, auxdata, grad_aux = self._step(
+        updated_particles, self.optimizer_state, auxdata = self._step(
             key, self.particles, self.optimizer_state, params, noise_pre)
-        self.log(auxdata, grad_aux)
+        self.write_to_log(self._log(auxdata, self.particles, self.step_counter))
         self.particles = updated_particles
         self.step_counter += 1
         return None
 
-    def log(self, auxdata, grad_aux):
-        gradient = auxdata
-        particles = self.get_params()
-        metrics.append_to_log(self.rundata, grad_aux)
-        metrics.append_to_log(self.rundata, {
-            "step": self.step_counter,
+    def write_to_log(self, step_data: Mapping[str, np.ndarray]):
+        """Append dictionary to log."""
+        metrics.append_to_log(self.rundata, step_data)
+
+    @partial(jit, static_argnums=0)
+    def _log(self, auxdata, particles, step):
+        gradient = auxdata["grads"]
+        auxdata.update({
+            "step": step,
             "gradient_norm": np.linalg.norm(gradient),
             "max_grad": np.max(np.abs(gradient)),
             "mean_grad": np.mean(np.abs(gradient)),
@@ -196,12 +224,14 @@ class Particles():
             "std": np.std(particles, axis=0),
             "particles": particles,
         })
-        for k, idx in zip(self.group_names, self.group_idx): # TODO: iterate thru particle groups directly instead
-            metrics.append_to_log(self.rundata, {
+        for k, idx in zip(self.group_names, self.group_idx):
+            # TODO: iterate thru particle groups directly instead
+            auxdata.update({
                 f"{k}_mean": np.mean(particles[idx], axis=0),
                 f"{k}_std":  np.std(particles[idx], axis=0),
             })
-        return
+            step_data = auxdata
+        return step_data
 
     def plot_mean_and_std(self, target=None, axs=None, **kwargs):
         """axs: two axes"""
@@ -258,8 +288,8 @@ class GradientLearner():
     """
     Superclass. Learn a gradient vector field to transport particles.
     Need to implement the following methods:
-    * loss_fn(self, params, samples) --> (loss, aux)
-    * _log(self, samples, validation_samples, aux) --> step_log
+    * loss_fn(self, params, particles) --> (loss, aux)
+    * _log(self, particles, validation_particles, aux) --> step_log
     * gradient(self, params, key, particles, aux=False) --> particle_gradient
     """
     def __init__(self,
@@ -273,9 +303,9 @@ class GradientLearner():
                  patience: int = 20):
         # warnings
         if sizes[-1] != target.d:
-            raise ValueError(f"Output dim must equal target dim; instead "
-                             f"received output dim {sizes[-1]} and "
-                             f"target dim {target.d}.")
+            warnings.warn(f"Output dim must equal target dim; instead "
+                          f"received output dim {sizes[-1]} and "
+                          f"target dim {target.d}.")
 
         # init
         self.sizes = sizes if sizes is not None else [32, 32, target.d]
@@ -288,54 +318,50 @@ class GradientLearner():
                                   skip_connection=skip_connection,
                                   with_bias=True, activate_final=activate_final)
         self.opt = optax.adam(learning_rate)
+        self.params = self.init_mlp()
+        self.optimizer_state = self.opt.init(self.params)
+
+        # other state
+        self.learning_rate = learning_rate
         self.step_counter = 0
-        self.initialize_optimizer(subkey)
         self.rundata = {"train_steps": []}
         self.frozen_states = []
         self.patience = Patience(patience)
 
-
-    def initialize_optimizer(self, key=None, keep_params=False):
-        """Initialize optimizer. If keep_params=True, then only the learning
-        rate schedule is reinitialized, otherwise the model parameters are
-        also reinitialized."""
-        if keep_params:
-            self.optimizer_state = self.opt.init(self.get_params())
-        else:
-            x_dummy = np.ones(self.target.d)
-            if key is None:
-                self.threadkey, subkey = random.split(self.threadkey)
-            else:
-                key, subkey = random.split(key)
-            self.params = self.mlp.init(subkey, x_dummy)
-            self.optimizer_state = self.opt.init(self.params)
-        return None
+    def init_mlp(self, key=None, keep_params=False):
+        """Initialize MLP"""
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        x_dummy = np.ones(self.target.d)
+        params = self.mlp.init(key, x_dummy)
+        return params
 
     def get_params(self):
         return self.params
 
-    def loss_fn(self, params, samples):
+    def loss_fn(self, params, key, particles):
         raise NotImplementedError()
 
     def gradient(self, params, key, particles, aux=False):
         raise NotImplementedError()
 
-    def _step_unjitted(self, params, optimizer_state, samples, validation_samples):
+    def _step_unjitted(self, key, params, optimizer_state, particles, validation_particles):
         """update parameters and compute validation loss"""
-        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, samples)
-        _, val_loss_aux = self.loss_fn(params, validation_samples)
+        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, key, particles)
+        _, val_loss_aux = self.loss_fn(params, key, validation_particles)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
         auxdata = (loss_aux, val_loss_aux, grads)
         return params, optimizer_state, auxdata
     _step = jit(_step_unjitted, static_argnums=0)
 
-    def step(self, samples, validation_samples, disable_jit=False):
+    def step(self, particles, validation_particles, disable_jit=False):
         """Step and mutate state"""
+        self.threadkey, key = random.split(self.threadkey)
         step_fn = self._step_unjitted if disable_jit else self._step
-        self.params, self.optimizer_state, auxdata = step_fn(
-            self.params, self.optimizer_state, samples, validation_samples)
-        self.write_to_log(self._log(samples, validation_samples, auxdata))
+        self.params, self.optimizer_state, auxdata = step_fn(key,
+            self.params, self.optimizer_state, particles, validation_particles)
+        self.write_to_log(self._log(particles, validation_particles, auxdata))
         self.step_counter += 1
         return None
 
@@ -345,26 +371,25 @@ class GradientLearner():
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, samples, validation_samples, key=None, n_steps=100, noise_level=0, progress_bar=False):
+    def train(self, next_batch: callable, key=None, n_steps=100, noise_level=0, progress_bar=False):
         """
         Arguments:
-        * samples: batch to train on
-        * validation_samples
+        * next_batch: callable, outputs next training batch. Signature:
+            next_batch(key, noise_level=1.)
         """
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
 
-        def step(key, samples):
-            step_samples = samples + random.normal(key, samples.shape)*noise_level
-            step_samples_val = validation_samples + random.normal(
-                key, validation_samples.shape)*noise_level
-            self.step(step_samples, step_samples_val)
-
-        for i in tqdm(range(n_steps), disable=not progress_bar):
+        def step(key):
             key, subkey = random.split(key)
-            step(subkey, samples)
+            train_x, val_x = next_batch(subkey, noise_level=noise_level)
+            self.step(train_x, val_x)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
+            return key
+
+        for i in tqdm(range(n_steps), disable=not progress_bar):
+            key = step(key)
             if self.patience.out_of_patience():
                 self.patience.reset()
                 break
@@ -377,12 +402,12 @@ class GradientLearner():
             self.threadkey, key = random.split(self.threadkey)
 
         key, subkey = random.split(key)
-        validation_samples = proposal.sample(batch_size)
+        validation_particles = proposal.sample(batch_size)
         for _ in tqdm(range(n_steps), disable=not progress_bar):
             try:
                 key, subkey = random.split(key)
-                samples = proposal.sample(batch_size, key=subkey)
-                self.step(samples, validation_samples)
+                particles = proposal.sample(batch_size, key=subkey)
+                self.step(particles, validation_particles)
             except FloatingPointError as err:
                 if catch_nan_errors:
                     return
@@ -403,33 +428,33 @@ class SDLearner(GradientLearner):
     def __init__(self, target, **kwargs):
         super().__init__(target, **kwargs)
 
-    def get_field(self, init_samples, params=None):
+    def get_field(self, init_particles, params=None):
         """Return vector field v(\cdot) that approximates \nabla KL.
         This is used to compute particle updates x <-- x - eps * v(x)
         v = -f, where f maximizes the stein discrepancy.
         Arguments:
-            init_samples: samples from current distribution, shape (n, d). These
+            init_particles: samples from current distribution, shape (n, d). These
             are used to compute mean and stddev for normalization."""
         if params is None:
             params = self.get_params()
-        m = np.mean(init_samples)
-        std = np.std(init_samples)
+        m = np.mean(init_particles)
+        std = np.std(init_particles)
         def v(x):
             x_normalized = (x - m) / (std + 1e-4)
             return self.mlp.apply(params, None, x_normalized)
         return v
 
-    def loss_fn(self, params, samples):
-        f = utils.negative(self.get_field(samples, params))
+    def loss_fn(self, params, key, particles):
+        f = utils.negative(self.get_field(particles, params))
         stein_discrepancy, stein_aux = stein.stein_discrepancy(
-            samples, self.target.logpdf, f, aux=True)
-        l2_f_sq = utils.l2_norm_squared(samples, f)
+            particles, self.target.logpdf, f, aux=True)
+        l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
         return loss, aux
 
     @partial(jit, static_argnums=0)
-    def _log(self, samples, validation_samples, aux):
+    def _log(self, particles, validation_particles, aux):
         train_aux, val_aux, g = aux
         loss, sd, l2v, stein_aux = train_aux
         drift, repulsion = stein_aux # shape (2, d)
@@ -461,49 +486,39 @@ class SDLearner(GradientLearner):
 
 class KernelLearner(GradientLearner):
     """Parametrize kernel to learn the KSD"""
-    def __init__(self, target, **kwargs):
+    def __init__(self, target, num_leaders=0, **kwargs):
         super().__init__(target, **kwargs)
         self.activation_kernel = kernels.get_rbf_kernel(1)
+        self.num_leaders = num_leaders if num_leaders > 0 else 10**7
+        self.params = (self.init_mlp(), 1.)
+        self.optimizer_state = self.opt.init(self.params)
 
-    def initialize_optimizer(self, key=None, keep_params=False):
-        """Initialize optimizer. If keep_params=True, then only the learning
-        rate schedule is reinitialized, otherwise the model parameters are
-        also reinitialized."""
-        if keep_params:
-            self.optimizer_state = self.opt.init(self.get_params())
-        else:
-            x_dummy = np.ones(self.target.d)
-            if key is None:
-                self.threadkey, subkey = random.split(self.threadkey)
-            else:
-                key, subkey = random.split(key)
-            init_params_enc = self.mlp.init(subkey, x_dummy)
-            init_params = (init_params_enc, 1.) # (mlp params, scaling_param)
-            self.optimizer_state = self.opt.init(init_params)
-        return None
-
-    def get_field(self, inducing_samples, params=None):
+    def get_field(self, inducing_particles, params=None):
         """return -phistar(\cdot)"""
         if params is None:
             params = self.get_params()
-        kernel = self.get_kernel(inducing_samples, params)
+        kernel = self.get_kernel(inducing_particles, params)
         def phistar(x):
-            return stein.phistar_i(x, inducing_samples, self.target.logpdf, kernel, aux=False)
+            return stein.phistar_i(x, inducing_particles, self.target.logpdf, kernel, aux=False)
         return utils.negative(phistar)
 
-    def loss_fn(self, params, samples):
-        kernel = self.get_kernel(samples, params)
-        ksd_squared = stein.ksd_squared_u(
-            samples, self.target.logpdf, kernel, include_stddev=False)
-        kxx = np.mean(vmap(kernel)(samples, samples))
-        phi = self.get_field(samples, params=params)
-        loss = -ksd_squared + self.lambda_reg * utils.l2_norm_squared(samples, phi)
-        aux = [loss, ksd_squared, kxx]
+    def loss_fn(self, params, key, particles):
+        # *params, leaders = params # keep inducing particles fixed
+        particles = random.permutation(key, particles)
+        leaders = particles[:self.num_leaders]
+        phi = utils.negative(self.get_field(leaders, params=params))
+        kernel = self.get_kernel(leaders)
+        ksd_squared = stein.stein_discrepancy(particles, self.target.logpdf, phi)
+        #ksd_squared = stein.ksd_squared_l(particles, self.target.logpdf, kernel)
+        #ksd_squared = stein.ksd_squared_u(particles, self.target.logpdf, kernel)
+        l2_squared = utils.l2_norm_squared(particles, phi)
+        loss = -ksd_squared + self.lambda_reg * l2_squared
+        aux = [loss, ksd_squared, l2_squared]
         return loss, aux
 
     @partial(jit, static_argnums=0)
-    def _log(self, samples, validation_samples, aux):
-        names = "loss ksd kxx".split()
+    def _log(self, particles, validation_particles, aux):
+        names = "loss ksd".split()
         step_log = {}
         for group, data in zip(["training", "validation"], aux[:-1]):
             step_log.update({
@@ -512,23 +527,23 @@ class KernelLearner(GradientLearner):
         return step_log
 
     def gradient(self, params, _, particles, aux=False):
-        v = self.get_field(params, inducing_samples=particles)
+        v = self.get_field(params, inducing_particles=particles)
         if aux:
             return vmap(v)(particles), None
         else:
             return vmap(v)(particles)
 
-    def get_kernel(self, init_samples, params=None):
+    def get_kernel(self, init_particles, params=None):
         """
         Arguments:
-        init_samples: samples from current dist q, shaped (n, d). Used
+        init_particles: samples from current dist q, shaped (n, d). Used
             to compute mean and stddev for normalziation.
         """
         if params is None:
             params = self.get_params()
         mlp_params, scale = params
-        m = np.mean(init_samples)
-        std = np.std(init_samples)
+        m = np.mean(init_particles)
+        std = np.std(init_particles)
         def kernel(x, y):
             x, y = np.asarray(x), np.asarray(y)
             x_normalized = (x - m) / (std + 1e-4)
@@ -541,52 +556,52 @@ class KernelLearner(GradientLearner):
 
 class ScoreLearner(GradientLearner):
     """Neural score matching"""
-    def __init__(self, target, lam=0.1, **kwargs):
+    def __init__(self, target, lam=0., **kwargs):
         super().__init__(target, **kwargs)
         self.lam=lam
 
-    def get_score(self, init_samples, params=None):
-        """Return callable s approximating score of q = grad(log q)
+    def get_score(self, init_particles, params=None):
+        """Return callables approximating score of q = grad(log q)
         Arguments:
-        init_samples: samples from current dist q, shaped (n, d). Used
+        init_particles: particles from current dist q, shaped (n, d). Used
             to compute mean and stddev for normalziation.
         """
         if params is None:
             params = self.get_params()
-        m = np.mean(init_samples)
-        std = np.std(init_samples)
+        m = np.mean(init_particles)
+        std = np.std(init_particles)
         def score(x):
             x_normalized = (x - m) / (std + 1e-4)
             return self.mlp.apply(params, None, x_normalized)
         return score
 
-    def get_field(self, init_samples, params=None):
+    def get_field(self, init_particles, params=None):
         """Return vector field v(\cdot) that approximates
         \nabla KL = grad(log q) - grad(log p). This is used to compute
         particle updates x <-- x - eps * v(x)
 
         Arguments:
-        init_samples: samples from current dist q, shaped (n, d). Used
+        init_particles: samples from current dist q, shaped (n, d). Used
             to compute mean and stddev for normalziation.
         """
-        score = self.get_score(init_samples=init_samples, params=params)
+        score = self.get_score(init_particles=init_particles, params=params)
 
         def v(x):
             return score(x) - grad(self.target.logpdf)(x) / (2*self.lambda_reg)
         return v
 
-    def loss_fn(self, params, samples):
+    def loss_fn(self, params, key, particles):
         """Evaluates E[div(score)] + lambda * l2_norm(score)^2"""
-        score = self.get_score(samples, params=params)
-        mean_divergence  = np.mean(vmap(utils.div(score))(samples))
-        mean_squared_div = np.mean(vmap(utils.div_sq(score))(samples))
-        l2_norm_sq = utils.l2_norm_squared(samples, score)
+        score = self.get_score(particles, params=params)
+        mean_divergence  = np.mean(vmap(utils.div(score))(particles))
+        mean_squared_div = np.mean(vmap(utils.div_sq(score))(particles))
+        l2_norm_sq = utils.l2_norm_squared(particles, score)
         loss = mean_divergence + self.lambda_reg * l2_norm_sq + self.lam * mean_squared_div
         aux = [loss, mean_divergence, l2_norm_sq]
         return loss, aux
 
     @partial(jit, static_argnums=0)
-    def _log(self, samples, validation_samples, aux):
+    def _log(self, particles, validation_particles, aux):
         train_aux, val_aux, g = aux
         loss, mean_div, l2 = train_aux
         val_loss, val_mean_div, val_l2 = val_aux
@@ -624,10 +639,10 @@ class KernelGradient():
         self.kernel = kernel
         self.lambda_reg = lambda_reg
 
-    def get_field(self, inducing_samples):
+    def get_field(self, inducing_particles):
         """return -phistar(\cdot)"""
         def phistar(x):
-            return stein.phistar_i(x, inducing_samples, self.target.logpdf, self.kernel, aux=False)
+            return stein.phistar_i(x, inducing_particles, self.target.logpdf, self.kernel, aux=False)
         return utils.negative(phistar)
 
     def gradient(self, params, key, particles, aux=False, scaled=False):
@@ -639,10 +654,10 @@ class KernelGradient():
         else:
             return vmap(v)(particles)
 
-    def get_field_scaled(self, inducing_samples):
-        phi = stein.get_phistar(self.kernel, self.target.logpdf, inducing_samples)
-        l2_phi_squared = utils.l2_norm_squared(inducing_samples, phi)
-        ksd = stein.stein_discrepancy(inducing_samples, self.target.logpdf, phi)
+    def get_field_scaled(self, inducing_particles):
+        phi = stein.get_phistar(self.kernel, self.target.logpdf, inducing_particles)
+        l2_phi_squared = utils.l2_norm_squared(inducing_particles, phi)
+        ksd = stein.stein_discrepancy(inducing_particles, self.target.logpdf, phi)
         alpha = ksd / (2*self.lambda_reg*l2_phi_squared)
         return utils.mul(phi, -alpha)
 
@@ -661,32 +676,32 @@ class KernelizedScoreMatcher():
         self.kernel = kernel
         self.lambda_reg = lambda_reg
 
-    def objective(self, samples, f):
-        divergence_term = -np.mean(vmap(utils.div(f))(samples))
+    def objective(self, particles, f):
+        divergence_term = -np.mean(vmap(utils.div(f))(particles))
         return divergence_term
 
     def target_score(self, x):
         return grad(self.target.logpdf)(x) / (2*self.lambda_reg)
 
-    def get_score(self, inducing_samples):
+    def get_score(self, inducing_particles):
         def kernelized_score(x):
             """Return E_y[grad(kernel)(y, x)]"""
-            return -np.mean(vmap(grad(self.kernel), (0, None))(inducing_samples, x), axis=0)
+            return -np.mean(vmap(grad(self.kernel), (0, None))(inducing_particles, x), axis=0)
 
         # rescale s.t. l2_norm(kernelized_score) = M / 2*lambda
-        kernelized_score = utils.l2_normalize(kernelized_score, inducing_samples)
-        M = self.objective(inducing_samples, kernelized_score)
+        kernelized_score = utils.l2_normalize(kernelized_score, inducing_particles)
+        M = self.objective(inducing_particles, kernelized_score)
         self.scaler = M / (2*self.lambda_reg)
 #         M = np.clip(M, 0)
         kernelized_score = utils.l2_normalize(
-            kernelized_score, inducing_samples, M / (2*self.lambda_reg))
+            kernelized_score, inducing_particles, M / (2*self.lambda_reg))
         return kernelized_score
 
-    def get_field(self, inducing_samples):
+    def get_field(self, inducing_particles):
         """Return vector field v(\cdot) that approximates
         \nabla KL = grad(log q) - grad(log p).
         This is used to compute particle updates x <-- x - eps * v(x)"""
-        score = self.get_score(inducing_samples)
+        score = self.get_score(inducing_particles)
 
         def v(x):
             return score(x) - self.target_score(x)
@@ -696,6 +711,33 @@ class KernelizedScoreMatcher():
         """Compute approximate KL gradient"""
         v = self.get_field(particles)
         if aux:
-            return v(particles), {}
+            return vmap(v)(particles), {}
         else:
-            return v(particles)
+            return vmap(v)(particles)
+
+
+class EnergyGradient():
+    """Compute pure SGLD gradient $\nabla \log p(x)$ (without noise)"""
+    def __init__(self,
+                target,
+                key=random.PRNGKey(42),
+                lambda_reg=1/2):
+        self.target = target
+        self.threadkey, subkey = random.split(key)
+        self.lambda_reg = lambda_reg
+
+    def target_score(self, x):
+        return grad(self.target.logpdf)(x) / (2*self.lambda_reg)
+
+    def get_field(self, inducing_particles):
+        """Return vector field used for updating, $\nabla \log p(x)$
+        (without noise)."""
+        return utils.negative(self.target_score)
+
+    def gradient(self, params, key, particles, aux=False):
+        """Compute gradient used for SGD particle update"""
+        v = self.get_field(particles)
+        if aux:
+            return vmap(v)(particles), {}
+        else:
+            return vmap(v)(particles)

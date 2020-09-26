@@ -267,7 +267,7 @@ def ksd_squared_v(xs, logp, k, dummy_arg1, dummy_arg2):
     return np.sum(ksd_matrix) / n**2
 
 #@partial(jit, static_argnums=(1,2,3))
-def ksd_squared_l(samples, logp, k, return_variance=False):
+def ksd_squared_l(samples, logp, k, return_stddev=False):
     """
     O(n) time estimator for the KSD.
     Arguments:
@@ -292,8 +292,8 @@ def ksd_squared_l(samples, logp, k, return_variance=False):
             return stein_operator(kx, y, logp)
         return stein_operator(inner, x, logp, transposed=True)
     outs = vmap(h)(xs, ys)
-    if return_variance:
-        return np.mean(outs), np.var(outs, ddof=1) / xs.shape[0]
+    if return_stddev:
+        return np.mean(outs), np.std(outs, ddof=1) / xs.shape[0]
     else:
         return np.mean(outs)
 

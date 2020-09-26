@@ -551,6 +551,7 @@ funnel = Setup(target, proposal)
 banana = Banana([0, 0], [4, 1]) # ie y = x**2 + eps; std 2 and 1 respectively
 gauss = Gaussian([2, -4], [4, 4])
 banana_target = Setup(banana, gauss)
+gauss = Gaussian([0, 0], [4, 4])
 banana_proposal = Setup(gauss, banana)
 
 ring = Ring(10, .1)

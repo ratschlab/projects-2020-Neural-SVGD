@@ -339,10 +339,11 @@ def animate_array(arr, fig=None, ax=None):
     # plot the first frame
     scat = ax.scatter(arr[0, :, 0], arr[0, :, 1])
 
+    title = ax.get_title()
     # animation fn
     def animate(i):
         scat.set_offsets(arr[i])
-        ax.set_title(f"Timestep {i}")
+        ax.set_title(title + f": Timestep {i}")
 
     # call animation
     t = len(arr)

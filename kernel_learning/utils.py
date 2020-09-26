@@ -450,7 +450,7 @@ def l2_norm_squared(samples, fun):
 def l2_normalize(fun: callable, samples, target_norm=1):
     """Rescale function fun so it has L2(q) norm equal to 1 (or target_norm, if supplied).
     samples need to be samples from q (used to compute the expectation)."""
-    l2_fun = np.sqrt(l2_norm_squared(samples, fun))
+    l2_fun = np.sqrt(l2_norm_squared(samples, fun) + 1e-9)
     def fun_normed(x):
         return fun(x) * target_norm / l2_fun
     return fun_normed
@@ -501,3 +501,15 @@ def mul(fun, factor):
 
 def normsq(x):
     return np.inner(x, x)
+
+
+import optax
+def adagrad(
+    learning_rate: float,
+    initial_accumulator_value: float = 0.1,
+    eps: float = 1e-7) -> optax.GradientTransformation:
+  return optax.chain(
+      transform.scale_by_rss(
+          initial_accumulator_value=initial_accumulator_value, eps=eps),
+      transform.scale(-learning_rate),
+  )

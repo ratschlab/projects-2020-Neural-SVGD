@@ -41,23 +41,39 @@ key = random.PRNGKey(0)
 
 
 get_ipython().run_line_magic("matplotlib", " inline")
-setup = distributions.funnel
-target, proposal = setup.get()
+# setup = distributions.ring_target
+# target, proposal = setup.get()
+target = distributions.Banana([0, 0], [4, 1])
+proposal = distributions.Gaussian([-5, -5], 1)
+setup = distributions.Setup(target, proposal)
 setup.plot(lims=(-15, 15))
 
 
 get_ipython().run_line_magic("autoreload", "")
 
 
-n_steps = 500
-
+n_steps = 800
+noise = 1.
+particle_lr = 5e-1
 key, subkey = random.split(key)
-neural_svgd_learner, neural_svgd_particles, err = flows.neural_svgd_flow(subkey, setup, n_steps=n_steps, sizes=[32, 32, 2], particle_lr=5e-2)
-kernel_gradient, svgd_particles, err = flows.svgd_flow(subkey, setup, scaled=True, n_steps=n_steps, particle_lr=5e-2)
+neural_learner, neural_particles, err = flows.neural_score_flow(subkey, setup, n_steps=n_steps, sizes=[32, 32, 2], particle_lr=particle_lr, noise_level=noise)
+kernel_gradient, kernel_particles, err = flows.score_flow(subkey, setup, n_steps=n_steps, particle_lr=particle_lr)
 
 
-neural_trajectories = np.asarray(neural_svgd_particles.rundata["particles"])
-svgd_trajectories = np.asarray(svgd_particles.rundata["particles"])
+get_ipython().run_line_magic("matplotlib", " inline")
+n_steps = neural_learner.rundata["train_steps"]
+plt.plot(n_steps)
+
+
+get_ipython().run_line_magic("matplotlib", " inline")
+plt.subplots(figsize=[20, 6])
+plt.plot(neural_learner.rundata["training_loss"], "--.", label="Trainging Loss")
+plt.plot(neural_learner.rundata["validation_loss"], "--.", label="Validation Loss")
+plt.legend()
+
+
+neural_trajectories = np.asarray(neural_particles.rundata["particles"])
+kernel_trajectories = np.asarray(kernel_particles.rundata["particles"])
 
 
 get_ipython().run_line_magic("matplotlib", " widget")
@@ -68,7 +84,8 @@ for ax in axs:
     ax.set(xlim=lim, ylim=lim)
 
 animations = []
-for ax, trajectories in zip(axs, [neural_trajectories, svgd_trajectories]):
+for ax, trajectories, title in zip(axs, [neural_trajectories, kernel_trajectories], ["Neural", "Kernel"]):
+    ax.set_title(title)
     plot.plot_fun_2d(target.pdf, lims=(-13, 13), ax=ax)
     animations.append(plot.animate_array(trajectories, fig, ax))
 
@@ -78,25 +95,13 @@ fig, axs = plt.subplots(1, 3, figsize=[25, 8])
 axs = axs.flatten()
 for ax in axs:
     ax.set(xlim=lim, ylim=lim)
-ax1 = neural_svgd_particles.plot_final(ax=axs[0], target=target, cmap="Greens")
+ax1 = neural_particles.plot_final(ax=axs[0], target=target, cmap="Greens")
 ax1.set_title("Neural SVGD")
 
-ax2 = svgd_particles.plot_final(ax=axs[1], target=target, cmap="Greens")
+ax2 = kernel_particles.plot_final(ax=axs[1], target=target, cmap="Greens")
 ax2.set_title("SVGD")
 
 ax = axs[2]
 plot.plot_fun_2d(target.pdf, lims=(-13, 13), ax=ax, cmap="Greens")
 plot.scatter(target.sample(300), ax=ax, color="tab:orange")
 ax.set_title("True Samples")
-
-
-get_ipython().run_line_magic("matplotlib", " inline")
-fig, axs = plt.subplots(2, 2, figsize=[20, 10])
-neural_svgd_particles.plot_mean_and_std(target, axs=axs[0])
-svgd_particles.plot_mean_and_std(target, axs=axs[1])
-
-
-
-
-
-
