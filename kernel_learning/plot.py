@@ -328,9 +328,10 @@ def quiverplot(f, samples=None, num_gridpoints=50, ax=None, lims=[-10, 10], xlim
         ax.scatter(x, y, color="black")
         ax.quiver(x, y, u, v, angles=angles, scale=scale, **kwargs)
 
-def animate_array(arr, fig=None, ax=None):
+def animate_array(arr, fig=None, ax=None, interval=100):
     """Animate array of shape (n_timesteps, n_points, 2)
-    as moving scatterplot. Needs `%matplotlib widget` to work in Jupyter lab."""
+    as moving scatterplot. Needs `%matplotlib widget` to work in Jupyter lab.
+    interval = ms between frames."""
     if ax is None:
         ax = plt.gca()
     if fig is None:
@@ -347,5 +348,19 @@ def animate_array(arr, fig=None, ax=None):
 
     # call animation
     t = len(arr)
-    anim = FuncAnimation(fig, animate, interval=100, frames=t)
+    anim = FuncAnimation(fig, animate, interval=interval, frames=t)
     return anim
+
+def plot_gradient_field(v: callable, ax=None, lims=(-5, 5), color="green", **kwargs):
+    """Plot the gradient field v.
+    v is a function that maps a (n, 2) batch of points in 2D
+    to an (n, 2) batch of vectors."""
+    if ax is None:
+        ax = plt.gca()
+    grid = np.linspace(*lims, 50)
+    xx = np.stack(np.meshgrid(grid, grid), axis=-1).reshape(-1, 2)
+    scores = v(xx)
+    scores_norm = np.linalg.norm(scores, axis=-1, ord=2, keepdims=True)
+    scores_log1p = scores / (scores_norm + 1e-9) * np.log1p(scores_norm)
+    ax.quiver(*xx.T, *scores_log1p.T, width=0.002, color=color, **kwargs)
+    return

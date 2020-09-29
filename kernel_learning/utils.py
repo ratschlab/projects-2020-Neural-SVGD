@@ -502,14 +502,8 @@ def mul(fun, factor):
 def normsq(x):
     return np.inner(x, x)
 
-
 import optax
-def adagrad(
-    learning_rate: float,
-    initial_accumulator_value: float = 0.1,
-    eps: float = 1e-7) -> optax.GradientTransformation:
-  return optax.chain(
-      transform.scale_by_rss(
-          initial_accumulator_value=initial_accumulator_value, eps=eps),
-      transform.scale(-learning_rate),
-  )
+optimizer_mapping = {
+    "sgd": optax.sgd,
+    "adam": optax.adam,
+}

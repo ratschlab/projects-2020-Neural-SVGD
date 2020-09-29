@@ -23,21 +23,20 @@ def append_to_log(dct, update_dict):
 # Metrics
 from scipy.spatial.distance import cdist
 import ot
-def compute_final_metrics(particles, svgd):
+def compute_final_metrics(particles, target):
     """
     Compute the ARD KSD between particles and target.
     particles: np.array of shape (n, d)
-    svgd: instance of svgd.SVGD
     """
     n = len(particles)
 
-    target_sample = svgd.target.sample(n)
+    target_sample = target.sample(n)
     emd = wasserstein_distance(particles, target_sample)
 #    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
 #    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
-    ksd = stein.ksd_squared_u(particles, svgd.target.logpdf, kernels.get_rbf_kernel_logscaled(0), False)
-    se_mean = np.mean((np.mean(particles, axis=0) - svgd.target.mean)**2)
-    se_var = np.mean((np.cov(particles, rowvar=False) - svgd.target.cov)**2)
+    ksd = stein.ksd_squared_u(particles, target.logpdf, kernels.get_rbf_kernel_logscaled(0), False)
+    se_mean = np.mean((np.mean(particles, axis=0) - target.mean)**2)
+    se_var = np.mean((np.cov(particles, rowvar=False) - target.cov)**2)
     return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_var=se_var)
 
 def wasserstein_distance(s1, s2):
@@ -56,16 +55,6 @@ def sqrt_kxx(kernel: callable, particles_a, particles_b):
     svv = vmap(sv,     (None, 0))
     return np.mean(svv(particles_a, particles_b))
 #    return np.mean(vmap(sqrt_k)(particles_a, particles_b))
-
-### Some nice target distributions
-# 2D
-l = np.asarray((1, 2, 1.5, 3, 3.3, 3.8))
-l = onp.concatenate([-l, [0], l])
-means = list(zip(l, (l**2)**0.8))
-variances = [[1,1]]*len(means)
-weights = [1]*len(means)
-#bent = GaussianMixture(means, variances, weights)
-bent_args = [means, variances, weights]
 
 ## KL Divergence
 def estimate_kl(logq: callable, logp: callable, samples):

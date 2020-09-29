@@ -16,6 +16,9 @@ import kernels
 import plot
 import stein
 
+from tensorflow_probability.substrates import jax as tfp
+tfd = tfp.distributions
+
 # check wikipedia for computation of higher moments
 # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
 # also recall form of characteristic function
@@ -145,8 +148,7 @@ class Gaussian(Distribution):
         """mutates self.key if key is None"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
-        key, subkey = random.split(key)
-        out = random.multivariate_normal(subkey, self.mean, self.cov, shape=(n_samples,))
+        out = random.multivariate_normal(key, self.mean, self.cov, shape=(n_samples,))
         shape = (n_samples, self.d)
         return out.reshape(shape)
 
@@ -182,6 +184,12 @@ class GaussianMixture(Distribution):
         self.num_components = len(weights)
         self.sample_metrics = dict()
         self.initialize_metric_names()
+        self.tfp_dist = tfd.MixtureSameFamily(
+            mixture_distribution=tfd.Categorical(probs=self.weights),
+            components_distribution=tfd.MultivariateNormalFullCovariance(
+                loc=self.means,
+                covariance_matrix=self.covs)
+        )
 
     def _check_and_reshape_args(self, means, covs, weights):
         """
@@ -190,10 +198,10 @@ class GaussianMixture(Distribution):
         covs: (k, d, d), (), (k,), (d, d)
         weights: (k,)
         """
-        means = np.asarray(means)
-        covs = np.asarray(covs)
-        weights = np.asarray(weights)
-        weights = weights / np.sum(weights) # normalize
+        means = np.asarray(means, np.float32)
+        covs = np.asarray(covs, np.float32)
+        weights = np.asarray(weights, np.float32)
+        weights = weights / weights.sum() # normalize
         k = len(means) # must equal the number of mixture components
         if means.ndim == 0:
             raise ValueError
@@ -258,26 +266,8 @@ class GaussianMixture(Distribution):
         shape = (n_samples, self.d)
         return out.reshape(shape)
 
-    def _logpdf(self, x):
-        """unnormalized"""
-        x = np.array(x)
-        if x.shape != (self.d,):
-            raise ValueError(f"Input x must be an np.array of length {self.d} "
-                             "and dimension one.")
-
-        def exponent(x, mean, cov):
-            sigmax = np.dot(np.linalg.inv(cov), (x - mean))
-            return - np.vdot((x - mean), sigmax) / 2
-        exponents = vmap(exponent, (None, 0, 0))(x,
-                                                 self.means,
-                                                 self.covs) + np.log(self.weights)
-
-        out = special.logsumexp(exponents)
-        return np.squeeze(out)
-
-
     def logpdf(self, x):
-        return np.log(self.pdf(x))
+        return self.tfp_dist.log_prob(x)
 
     def pdf(self, x):
         x = np.asarray(x)
@@ -405,7 +395,11 @@ class Uniform(Distribution):
 
 class Banana(Gaussian):
     def __init__(self, mean, cov):
-        self.mean, self.cov = self._check_and_reshape_args(mean, cov)
+        self.gauss_mean, self.gauss_cov = self._check_and_reshape_args(mean, cov)
+        self.mean = np.array([0, self.gauss_cov[0,0]])
+        self.cov = np.array([
+            [self.gauss_cov[0,0], 0                                                    ],
+            [0, 3*self.gauss_cov[0,0]**2 + self.gauss_cov[1,1] - self.gauss_cov[0,0]**2]])
         self.d = len(self.mean)
         self.threadkey = random.PRNGKey(0)
 
@@ -430,14 +424,19 @@ class Banana(Gaussian):
 
     def logpdf(self, z):
         x = self.debananify(z)
-        return super().logpdf(x)
+        x = self._checkx(x)
+        return stats.multivariate_normal.logpdf(x, self.gauss_mean, self.gauss_cov)
 
     def pdf(self, z):
         x = self.debananify(z)
-        return super().pdf(x)
+        x = self._checkx(x)
+        return stats.multivariate_normal.pdf(x, self.gauss_mean, self.gauss_cov)
 
     def sample(self, n_samples, key=None):
-        return vmap(self.bananify)(super().sample(n_samples, key=key))
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        out = random.multivariate_normal(key, self.gauss_mean, self.gauss_cov, shape=(n_samples,))
+        return vmap(self.bananify)(out.reshape((n_samples, self.d)))
 
 class Ring(Distribution):
     def __init__(self, radius, var):
@@ -446,7 +445,7 @@ class Ring(Distribution):
         super().__init__()
         self.radius, self.var = self._check_and_reshape_args(radius, var)
         self.d = 2
-        self.mean = [0, 0]
+        self.mean = np.array([0, 0])
         self.cov = np.cov(self.sample(10_000), rowvar=False)
         self.cov = np.diag(np.diag(self.cov)) # remove off-diagonal elements
 
@@ -492,6 +491,52 @@ class Ring(Distribution):
         r = random.normal(keyb, shape=(n_samples,)) + self.radius
         polar_coords = np.stack([r, phi], axis=1)
         return vmap(self.to_cartesian)(polar_coords)
+
+
+class Squiggle(Gaussian):
+    def __init__(self, mean, cov):
+        self.mean, self.gauss_cov = self._check_and_reshape_args(mean, cov)
+        self.cov = np.array([[self.gauss_cov[0,0], 0                      ],
+                             [0, self.gauss_cov[1,1] + (1 + np.exp(-10))/2 - np.exp(-25)]])
+        self.d = len(self.mean)
+        self.threadkey = random.PRNGKey(0)
+
+    def _check_and_reshape_args(self, mean, cov):
+        if len(mean) != 2:
+            raise ValueError("Squiggle exists only in 2 dim."
+            f"Received dimension len(mean) = {len(mean)}")
+        return super()._check_and_reshape_args(mean, cov)
+
+    def squiggle(self, v):
+        """If v is 2D normal, then
+        squiggle(v) is distributed as a Squiggle."""
+        *x, y = v
+        x, y = np.asarray(x), np.asarray(y)
+        return np.append(x, np.cos(5*x) + y)
+
+    def desquiggle(self, z):
+        """Inverse of squiggle."""
+        *x, y = z
+        x, y = np.asarray(x), np.asarray(y)
+        return np.append(x, y - np.cos(5*x))
+
+    def logpdf(self, z):
+        x = self.desquiggle(z)
+        x = self._checkx(x)
+        return stats.multivariate_normal.logpdf(x, self.mean, self.gauss_cov)
+
+    def pdf(self, z):
+        x = self.desquiggle(z)
+        x = self._checkx(x)
+        return stats.multivariate_normal.pdf(x, self.mean, self.gauss_cov)
+
+    def sample(self, n_samples, key=None):
+        """mutates self.key if key is None"""
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        out = random.multivariate_normal(key, self.mean, self.gauss_cov, shape=(n_samples,))
+        return vmap(self.squiggle)(out.reshape((n_samples, self.d)))
+
 
 ### Test distributions for experiments:
 class Setup():
@@ -562,3 +607,13 @@ ring_proposal = Setup(gauss, ring)
 target = Ring(10, .1)
 proposal = Ring(15, .1)
 double_ring = Setup(target, proposal)
+
+target = Squiggle([0, 0], [1, .1])
+proposal = Gaussian([-2, 0], [1, 1])
+squiggle_target = Setup(target, proposal)
+
+means = np.array([np.exp(2j*np.pi*x) for x in np.linspace(0, 1, 6)[:-1]])
+means = np.column_stack((means.real,means.imag))
+target = GaussianMixture(means, .03, np.ones(5))
+proposal = Gaussian([-2, 0], [.5, .5])
+mix_of_gauss = Setup(target, proposal)
