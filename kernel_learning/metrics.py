@@ -29,6 +29,7 @@ def compute_final_metrics(particles, target):
     particles: np.array of shape (n, d)
     """
     n = len(particles)
+    particles = np.asarray(particles)
 
     target_sample = target.sample(n)
     emd = wasserstein_distance(particles, target_sample)

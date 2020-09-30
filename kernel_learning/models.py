@@ -86,8 +86,8 @@ class Particles():
                  gradient: callable,
                  proposal,
                  target=None,
-                 n_particles: int = 120,
-                 learning_rate=0.1,
+                 n_particles: int = 50,
+                 learning_rate=1e-2,
                  optimizer="sgd",
                  num_groups=3,
                  noise_level=1.):
@@ -124,8 +124,8 @@ class Particles():
             self.threadkey, key = random.split(self.threadkey)
         self.group_names = ("training", "validation", "test")[:self.num_groups] # TODO make this a dict or namedtuple
         key, subkey = random.split(key)
-        idx = random.permutation(subkey, np.arange(self.n_particles))
-        self.group_idx = idx.split(len(self.group_names))
+        idx = random.permutation(subkey, np.arange(self.n_particles*self.num_groups))
+        self.group_idx = idx.split(self.num_groups)
         return None
 
     def reshuffle_tv(self, key=None):
@@ -151,7 +151,7 @@ class Particles():
         return None
 
     def init_particles(self, key):
-        particles = self.proposal.sample(self.n_particles, key=key)
+        particles = self.proposal.sample(self.n_particles*self.num_groups, key=key)
         return particles
 
     def get_params(self, split_by_group=False):
@@ -261,17 +261,21 @@ class Particles():
                 ax.plot(self.rundata[f"test_{stat_key}"], label=f"{stat_key}")
         return
 
-    def plot_trajectories(self, ax=None, **kwargs):
+    def plot_trajectories(self, ax=None, idx=None, **kwargs):
+        if idx is None:
+            idx = np.arange(self.n_particles*self.num_groups)
         if ax is None:
             ax = plt.gca()
         p_over_time = np.array(self.rundata["particles"])
-        ax.plot(p_over_time[:, :, 0], **kwargs)
+        ax.plot(p_over_time[:, idx, 0], **kwargs)
         return ax
 
-    def plot_final(self, target, ax=None, xlim=None, **kwargs):
+    def plot_final(self, target, ax=None, xlim=None, idx=None, **kwargs):
+        if idx is None:
+            idx = np.arange(self.n_particles*self.num_groups)
         if ax is None:
             ax = plt.gca()
-        p = self.get_params()
+        p = self.get_params()[idx]
         if target.d == 1:
             ax.hist(p[:, 0], density=True, alpha=0.5, label="Samples",   bins=25)
             plot.plot_fun(target.pdf, lims=ax.get_xlim(), ax=ax, label="Target density")
@@ -286,9 +290,11 @@ class Particles():
         ax.legend()
         return ax
 
-    def animate_trajectory(self, target=None, fig=None, ax=None, interval=100, **kwargs):
+    def animate_trajectory(self, target=None, fig=None, ax=None, interval=100, idx=None, **kwargs):
         """Create animated scatterplot of particle trajectory"""
-        trajectory = np.asarray(self.rundata["particles"])
+        if idx is None:
+            idx = np.arange(self.n_particles*self.num_groups)
+        trajectory = np.asarray(self.rundata["particles"])[:, idx, :]
         if target is not None:
             plot.plot_fun_2d(target.pdf, lims=(-20, 20), ax=ax)
         anim = plot.animate_array(trajectory, fig, ax, interval=interval)

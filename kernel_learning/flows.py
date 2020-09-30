@@ -23,7 +23,7 @@ import distributions
 import plot
 import models
 
-default_num_particles = 300
+default_num_particles = 50
 default_num_steps = 100
 #default_particle_lr = 1e-1
 #default_learner_lr = 1e-2
@@ -36,10 +36,11 @@ def neural_score_flow(key,
                       n_particles=default_num_particles,
                       n_steps=default_num_steps,
                       sizes=[32, 32, 2],
-                      particle_lr=1e-1,
+                      particle_lr=1e-2,
                       learner_lr=1e-2,
                       lambda_reg=1/2,
                       noise_level=default_noise_level,
+                      particle_optimizer="sgd",
                       patience=default_patience,
                       lam=0.):
     key, keya, keyb = random.split(key, 3)
@@ -53,16 +54,21 @@ def neural_score_flow(key,
                                        lam=lam)
 
     score_particles = models.Particles(key=keyb,
-                                         gradient=score_learner.gradient,
-                                         proposal=proposal,
-                                         n_particles=n_particles,
-                                         learning_rate=particle_lr,
-                                       noise_level=noise_level)
+                                       gradient=score_learner.gradient,
+                                       proposal=proposal,
+                                       n_particles=n_particles,
+                                       learning_rate=particle_lr,
+                                       noise_level=noise_level,
+                                       optimizer=particle_optimizer)
 
     for i in tqdm(range(n_steps), disable=disable_tqdm):
-        key, subkey = random.split(key)
-        score_learner.train(score_particles.next_batch, key=subkey, n_steps=500)
-        score_particles.step(score_learner.get_params())
+        try:
+            key, subkey = random.split(key)
+            score_learner.train(score_particles.next_batch, key=subkey, n_steps=500)
+            score_particles.step(score_learner.get_params())
+        except Exception as err:
+            warnings.warn(f"Caught Exception!")
+            return score_learner, score_particles, err
     return score_learner, score_particles, None
 
 def neural_svgd_flow(key,
@@ -147,6 +153,7 @@ def svgd_flow(key,
               particle_lr=1e-1,
               lambda_reg=1/2,
               noise_level=default_noise_level,
+              particle_optimizer="sgd",
               scaled=True):
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
@@ -162,7 +169,8 @@ def svgd_flow(key,
                                       n_particles=n_particles,
                                       learning_rate=particle_lr,
                                       num_groups=2,
-                                      noise_level=noise_level)
+                                      noise_level=noise_level,
+                                      optimizer=particle_optimizer)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             svgd_particles.step(None)

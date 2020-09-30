@@ -53,10 +53,14 @@ setup.plot(lims=(-15, 15))
 get_ipython().run_line_magic("autoreload", "")
 
 
-n_steps = 600
+key, subkey = random.split(key)
+
+
+n_steps = 300
 noise = 1.
+n_particles = 50
 # key, subkey = random.split(key)
-# learner, neural_particles, err =        deep_kernel_flow(subkey, setup, n_steps=n_steps, particle_lr=1e-2, noise_level=noise, sizes=[32, 32, 2])
+learner, neural_particles, err =  flows.deep_kernel_flow(subkey, setup, n_steps=n_steps, particle_lr=1e-2, noise_level=noise, sizes=[32, 32, 2])
 kernel_gradient, kernel_particles, err = flows.svgd_flow(subkey, setup, n_steps=n_steps, particle_lr=1e-2, noise_level=0)
 
 
@@ -79,19 +83,26 @@ plt.plot(learner.rundata["validation_ksd"], "--.", label="Validation KSD")
 plt.legend()
 
 
-learner.rundata.keys()
+neural_trajectories = np.asarray(neural_particles.rundata["particles"])
+kernel_trajectories = np.asarray(kernel_particles.rundata["particles"])
 
 
 get_ipython().run_line_magic("matplotlib", " inline")
-plt.subplots(figsize=[20, 6])
-plt.plot(learner.rundata["training_l2_norm"], "--.", label="L2 squared")
-plt.plot(learner.rundata["validation_l2_norm"], "--.", label="val")
-plt.yscale("log")
-plt.legend()
+fig, axs = plt.subplots(1, 3, figsize=[25, 8])
+axs = axs.flatten()
+lim=(-10, 10)
+for ax in axs:
+    ax.set(xlim=lim, ylim=lim)
+ax1 = neural_particles.plot_final(ax=axs[0], target=target, cmap="Greens")
+ax1.set_title("Neural SVGD")
 
+ax2 = kernel_particles.plot_final(ax=axs[1], target=target, cmap="Greens")
+ax2.set_title("SVGD")
 
-neural_trajectories = np.asarray(neural_particles.rundata["particles"])
-kernel_trajectories = np.asarray(kernel_particles.rundata["particles"])
+ax = axs[2]
+plot.plot_fun_2d(target.pdf, lims=lim, ax=ax, cmap="Greens")
+plot.scatter(target.sample(300), ax=ax, color="tab:orange")
+ax.set_title("True Samples")
 
 
 get_ipython().run_line_magic("matplotlib", " widget")
@@ -104,25 +115,8 @@ for ax in axs:
 animations = []
 for ax, trajectories, title in zip(axs, [neural_trajectories, kernel_trajectories], ["Neural", "Kernel"]):
     ax.set_title(title)
-    plot.plot_fun_2d(target.pdf, lims=(-13, 13), ax=ax)
+    plot.plot_fun_2d(target.pdf, lims=lim, ax=ax)
     animations.append(plot.animate_array(trajectories, fig, ax))
-
-
-get_ipython().run_line_magic("matplotlib", " inline")
-fig, axs = plt.subplots(1, 3, figsize=[25, 8])
-axs = axs.flatten()
-for ax in axs:
-    ax.set(xlim=lim, ylim=lim)
-ax1 = neural_particles.plot_final(ax=axs[0], target=target, cmap="Greens")
-ax1.set_title("Neural SVGD")
-
-ax2 = kernel_particles.plot_final(ax=axs[1], target=target, cmap="Greens")
-ax2.set_title("SVGD")
-
-ax = axs[2]
-plot.plot_fun_2d(target.pdf, lims=(-13, 13), ax=ax, cmap="Greens")
-plot.scatter(target.sample(300), ax=ax, color="tab:orange")
-ax.set_title("True Samples")
 
 
 
