@@ -8,6 +8,7 @@ Every kernel takes as input two jax scalars or arrays x, y of shape (d,),
 where d is the particle dimension, and outputs a scalar.
 """
 def _check_xy(x, y, dim=None):
+    """If dim is supplied, also check for correct dimension"""
     x, y = [np.asarray(v) for v in (x, y)]
     if x.shape != y.shape:
         raise ValueError(f"Shapes of particles x and y need to match. "
@@ -17,7 +18,7 @@ def _check_xy(x, y, dim=None):
                          f"dimension. Instead they have rank {x.ndim}")
     if dim is not None:
         if dim > 1:
-            if not x.shape[0] == dim:
+            if x.ndim != 1 or x.shape[0] != dim:
                 raise ValueError(f"x must have shape {(dim,)}. Instead received "
                                  f"shape {x.shape}.")
         elif dim == 1:
@@ -48,14 +49,19 @@ def _normalizing_factor(bandwidth):
         return (2*np.pi)**(-d/2) * 1/np.sqrt(np.prod(bandwidth))
 
 
-def get_rbf_kernel(bandwidth, normalize=False, dim=None):
+def get_rbf_kernel(bandwidth, squared=True, normalize=False, dim=None):
+    """If squared, then take the square of bandwidth, ie
+    k(x, y) = exp(- (x - y)^2 / bandwidth^2 / 2). Otherwise don't take
+    the square (in this case bandwidth must be > 0 always)"""
     bandwidth = _check_bandwidth(bandwidth, dim)
     def rbf(x, y):
+        # TODO: add version with param=bandwidth**2 instead of bandwidth
         x, y = _check_xy(x, y, dim)
+        h_squared = bandwidth**2 if squared else bandwidth
         if normalize:
-            return np.prod(stats.norm.pdf(x, loc=y, scale=bandwidth))
+            return np.prod(stats.norm.pdf(x, loc=y, scale=np.sqrt(h_squared)))
         else:
-            return np.exp(- np.sum((x - y)**2 / bandwidth**2) / 2)
+            return np.exp(- np.sum((x - y)**2 / h_squared) / 2)
     return rbf
 
 def get_tophat_kernel(bandwidth, normalize=False, dim=None):
@@ -71,12 +77,19 @@ def get_tophat_kernel(bandwidth, normalize=False, dim=None):
 
 def get_rbf_kernel_logscaled(logh, normalize=False):
     logh = np.asarray(logh)
-    bandwidth = np.exp(logh/2) # TODO remove 1/2
+    bandwidth = np.exp(logh)
     return get_rbf_kernel(bandwidth, normalize)
+
+def get_multivariate_gaussian_kernel(sigma, dim=None):
+    def ard(x, y):
+        x, y = _check_xy(x, y, dim)
+        s = np.dot(sigma, x-y)
+        return np.squeeze(np.exp(-utils.normsq(s)/2))
+    return ard
 
 def get_tophat_kernel_logscaled(logh):
     logh = np.asarray(logh)
-    bandwidth = np.exp(logh/2) # TODO remove 1/2
+    bandwidth = np.exp(logh/2) # TODO remove 1/2?
     return get_tophat_kernel(bandwidth)
 
 def constant_kernel(x, y):
@@ -145,42 +158,14 @@ def get_imq_score_kernel(alpha: float, beta: float, logp: callable):
 ### Utils
 def median_heuristic(x):
     """
-    Heuristic for choosing RBF bandwidth.
+    Heuristic for choosing the squared RBF bandwidth.
 
     IN: np array of shape (n,) or (n,d): set of particles
     OUT: scalar: bandwidth parameter for RBF kernel, based on the
     heuristic from the SVGD paper.
     Note: assumes k(x, y) = exp(- (x - y)^2 / h / 2)
     """
-    if x.ndim == 2:
-        return vmap(median_heuristic, 1)(x)
-    elif x.ndim == 1:
-        n = x.shape[0]
-        medsq = np.median(utils.squared_distance_matrix(x))
-        h = medsq / np.log(n) / 2
-        return h
-    else:
-        raise ValueError("Shape of x has to be either (n,) or (n, d)")
-
-
-def _ard_m(x, y, sigma):
-    """
-    Arguments:
-    * x, y : array-like. Shape (d,)
-    * sigma: array-like. Shape (d, d). Must be positive definite.
-
-    Returns:
-    Scalar given by
-    \[ e^{- 1/2 (x - y)^T \Sigma^{-1} (x - y)} \]
-    """
-    x, y = _check_xy(x, y)
-    sigma = np.asarray(sigma)
-    d = x.shape[0]
-    if sigma.ndim != 2 and d != 1:
-        raise ValueError(f"Sigma needs to be a square matrix. Instead, received shape {sigma.shape}.")
-
-    inv = np.linalg.inv(sigma) # TODO better: cholesky. also check PD
-    return np.exp(- np.matmul(np.matmul(x - y, inv), x - y) / 2)
-
-def ard_m(sigma):
-    return lambda x, y: _ard_m(x, y, sigma)
+    pairwise_dists = utils.squared_distance_matrix(x)
+    medsq = np.median(pairwise_dists)
+    h = np.sqrt(0.5 * medsq / np.log(x.shape[0] + 1))
+    return h

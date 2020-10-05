@@ -30,7 +30,7 @@ disable_tqdm = on_cluster
 eps = 1e-4
 
 
-class Logger():
+class Logger:
     def __init__(self):
         self.data = {}
 
@@ -44,16 +44,7 @@ class Logger():
         self.data = {}
 
 
-class Optimizer():
-    def __init__(self, opt_init, opt_update, get_params):
-        """opt_init, opt_update, get_params are the three functions obtained
-        from a stax.optimizer call."""
-        self.init = jit(opt_init)
-        self.update = jit(opt_update)
-        self.get_params = jit(get_params)
-
-
-class Patience():
+class Patience:
     """Criterion for early stopping"""
     def __init__(self, patience: int = 20):
         self.patience = patience
@@ -76,7 +67,8 @@ class Patience():
     def reset(self):
         self.time_waiting = 0
 
-class Particles():
+
+class Particles:
     """
     Container class for particles, particle optimizer,
     particle update step method, and particle metrics.
@@ -301,76 +293,82 @@ class Particles():
         return anim
 
 
-class GradientLearner():
-    """
-    Superclass. Learn a gradient vector field to transport particles.
-    Need to implement the following methods:
-    * loss_fn(self, params, particles) --> (loss, aux)
-    * _log(self, particles, validation_particles, aux) --> step_log
-    * gradient(self, params, key, particles, aux=False) --> particle_gradient
-    """
+class VectorFieldMixin:
+    """Methods for init of Vector field MLP"""
     def __init__(self,
                  target,
                  key=random.PRNGKey(42),
                  sizes: list = None,
-                 skip_connection=False,
-                 activate_final=False,
-                 learning_rate: float = 1e-2,
-                 lambda_reg: float = 1/2,
-                 patience: int = 20):
-        # warnings
-        self.sizes = sizes if sizes is not None else [32, 32, target.d]
+                 **kwargs):
+        self.sizes = sizes if sizes else [32, 32, target.d]
         if self.sizes[-1] != target.d:
-            warnings.warn(f"Output dim must equal target dim; instead "
+            warnings.warn(f"Output dim should equal target dim; instead "
                           f"received output dim {sizes[-1]} and "
                           f"target dim {target.d}.")
 
-        # init
-        self.target = target
-        self.lambda_reg = lambda_reg
         self.threadkey, subkey = random.split(key)
+        self.target = target
 
         # net and optimizer
-        self.mlp = nets.build_mlp(self.sizes, name="MLP",
-                                  skip_connection=skip_connection,
-                                  with_bias=True, activate_final=activate_final)
-        self.opt = optax.adam(learning_rate)
-        self.params = self.init_mlp()
-        self.optimizer_state = self.opt.init(self.params)
+        self.field = hk.transform(lambda x: nets.VectorField(self.sizes)(x))
+        self.params = self.init_params()
+        super().__init__(**kwargs)
 
-        # other state
-        self.learning_rate = learning_rate
-        self.step_counter = 0
-        self.rundata = {"train_steps": []}
-        self.frozen_states = []
-        self.patience = Patience(patience)
-
-    def init_mlp(self, key=None, keep_params=False):
-        """Initialize MLP"""
+    def init_params(self, key=None, keep_params=False):
+        """Initialize MLP parameter"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         x_dummy = np.ones(self.target.d)
-        params = self.mlp.init(key, x_dummy)
+        params = self.field.init(key, x_dummy)
         return params
 
     def get_params(self):
         return self.params
 
-    def loss_fn(self, params, key, particles):
-        raise NotImplementedError()
+    def get_field(self, init_particles, params=None):
+        """Retuns function v. v is a vector field, can take either single
+        particle of shape (d,) or batch shaped (..., d)."""
+        if params is None:
+            params = self.get_params()
+        norm = nets.get_norm(init_particles)
+        def v(x):
+            """x should have shape (n, d) or (d,)"""
+            return self.field.apply(params, None, norm(x))
+        return v
 
-    def gradient(self, params, key, particles, aux=False):
-        raise NotImplementedError()
 
-    def _step_unjitted(self, key, params, optimizer_state, particles, validation_particles):
+class TrainingMixin:
+    """
+    Methods for training NNs.
+    Needs existence of a self.params at initialization.
+    Methods to implement:
+    * self.loss_fn
+    * self._log
+    """
+    def __init__(self,
+                 learning_rate: float = 1e-2,
+                 patience: int = 10,
+                 **kwargs):
+        self.opt = optax.adam(learning_rate)
+        self.optimizer_state = self.opt.init(self.params)
+
+        # state and logging
+        self.step_counter = 0
+        self.rundata = {"train_steps": []}
+        self.frozen_states = []
+        self.patience = Patience(patience)
+        super().__init__(**kwargs)
+
+    @partial(jit, static_argnums=0)
+    def _step(self, key, params, optimizer_state, particles, validation_particles):
         """update parameters and compute validation loss"""
         [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, key, particles)
-        _, val_loss_aux = self.loss_fn(params, key, validation_particles)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
+
+        _, val_loss_aux = self.loss_fn(params, key, validation_particles)
         auxdata = (loss_aux, val_loss_aux, grads)
         return params, optimizer_state, auxdata
-    _step = jit(_step_unjitted, static_argnums=0)
 
     def step(self, particles, validation_particles, disable_jit=False):
         """Step and mutate state"""
@@ -389,7 +387,7 @@ class GradientLearner():
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, next_batch: callable, key=None, n_steps=100, progress_bar=False):
+    def train(self, next_batch: callable, key=None, n_steps=5, progress_bar=False):
         """
         Arguments:
         * next_batch: callable, outputs next training batch. Signature:
@@ -408,10 +406,11 @@ class GradientLearner():
 
         for i in tqdm(range(n_steps), disable=not progress_bar):
             key = step(key)
+            self.write_to_log({"model_params": self.get_params()})
             if self.patience.out_of_patience():
                 self.patience.reset()
                 break
-        self.rundata["train_steps"].append(i+1)
+        self.write_to_log({"train_steps": i+1})
         return
 
     def train_sampling_every_time(self, proposal, key=None, n_steps=100, batch_size=400,
@@ -439,27 +438,24 @@ class GradientLearner():
                                    self.rundata))
         return
 
+    def loss_fn(self, params, key, particles):
+        raise NotImplementedError()
 
-class SDLearner(GradientLearner):
-    """Parametrize function to maximize the stein discrepancy"""
-    def __init__(self, target, **kwargs):
-        super().__init__(target, **kwargs)
+    def gradient(self, params, key, particles, aux=False):
+        raise NotImplementedError()
 
-    def get_field(self, init_particles, params=None):
-        """Return vector field v(\cdot) that approximates \nabla KL.
-        This is used to compute particle updates x <-- x - eps * v(x)
-        v = -f, where f maximizes the stein discrepancy.
-        Arguments:
-            init_particles: samples from current distribution, shape (n, d). These
-            are used to compute mean and stddev for normalization."""
-        if params is None:
-            params = self.get_params()
-        m = np.mean(init_particles)
-        std = np.std(init_particles)
-        def v(x):
-            x_normalized = (x - m) / (std + 1e-4)
-            return self.mlp.apply(params, None, x_normalized)
-        return v
+
+class SDLearner(VectorFieldMixin, TrainingMixin):
+    """Parametrize vector field to maximize the stein discrepancy"""
+    def __init__(self,
+                 target,
+                 key: np.array = random.PRNGKey(42),
+                 sizes: list = None,
+                 learning_rate: float = 1e-2,
+                 patience: int = 10):
+        super().__init__(target, key=key, sizes=sizes,
+                         learning_rate=learning_rate, patience=patience)
+        self.lambda_reg = 1/2
 
     def loss_fn(self, params, key, particles):
         f = utils.negative(self.get_field(particles, params))
@@ -501,20 +497,59 @@ class SDLearner(GradientLearner):
             return v(particles)
 
 
-class KernelLearner(GradientLearner):
+class KernelLearner(TrainingMixin):
     """Parametrize kernel to learn the KSD"""
-    def __init__(self, target, num_leaders=0, **kwargs):
-        super().__init__(target, **kwargs)
-        self.activation_kernel = kernels.get_rbf_kernel(1)
-        self.num_leaders = num_leaders if num_leaders > 0 else 10**7
-        self.params = (self.init_mlp(), 1.)
-        self.optimizer_state = self.opt.init(self.params)
+    def __init__(self,
+                 target,
+                 key: np.array = random.PRNGKey(42),
+                 sizes: list = None,
+                 learning_rate: float = 1e-2,
+                 patience: int = 10):
+        self.target = target
+        self.lambda_reg = 1/2
+        self.threadkey, key = random.split(key)
+        self.num_leaders = None # first num_leaders of training particles used to find RKHS fit
+        self.sizes = sizes
+        if sizes:
+            self.kernel = hk.transform(lambda x: nets.DeepKernel(sizes)(x))
+        else:
+            self.kernel = hk.transform(lambda x: nets.RBFKernel(
+                scale_param=True, parametrization="log_diagonal")(x))
+        self.params = self.init_params(key)
+        super().__init__(learning_rate, patience)
+
+    def init_params(self, key=None, keep_params=False):
+        """Initialize kernel parameters"""
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        x_dummy = np.ones(self.target.d)
+        params = self.kernel.init(key, np.stack([x_dummy, x_dummy]))
+        return params
+
+    def get_params(self):
+        return self.params
+
+    def get_kernel_fn(self, init_particles, params=None):
+        """
+        Arguments:
+        init_particles: samples from current dist q, shaped (n, d). Used
+            to compute mean and stddev for normalziation.
+        """
+        if params is None:
+            params = self.get_params()
+        if self.sizes:
+            norm = nets.get_norm(init_particles)
+        else:
+            norm = lambda x: x
+        def kernel(x, y):
+            return self.kernel.apply(params, None, np.stack([norm(x), norm(y)]))
+        return kernel
 
     def get_field(self, inducing_particles, params=None):
         """return -phistar(\cdot)"""
         if params is None:
             params = self.get_params()
-        kernel = self.get_kernel(inducing_particles, params)
+        kernel = self.get_kernel_fn(inducing_particles, params)
         def phistar(x):
             return stein.phistar_i(x, inducing_particles, self.target.logpdf, kernel, aux=False)
         return utils.negative(phistar)
@@ -524,8 +559,8 @@ class KernelLearner(GradientLearner):
         particles = random.permutation(key, particles)
         leaders = particles[:self.num_leaders]
         phi = utils.negative(self.get_field(leaders, params=params))
-        kernel = self.get_kernel(leaders)
         ksd_squared = stein.stein_discrepancy(particles, self.target.logpdf, phi)
+        #kernel = self.get_kernel_fn(leaders, params=params)
         #ksd_squared = stein.ksd_squared_l(particles, self.target.logpdf, kernel)
         #ksd_squared = stein.ksd_squared_u(particles, self.target.logpdf, kernel)
         l2_squared = utils.l2_norm_squared(particles, phi)
@@ -550,62 +585,22 @@ class KernelLearner(GradientLearner):
         else:
             return vmap(v)(particles)
 
-    def get_kernel(self, init_particles, params=None):
-        """
-        Arguments:
-        init_particles: samples from current dist q, shaped (n, d). Used
-            to compute mean and stddev for normalziation.
-        """
-        if params is None:
-            params = self.get_params()
-        mlp_params, scale = params
-        m = np.mean(init_particles)
-        std = np.std(init_particles)
-        def kernel(x, y):
-            x, y = np.asarray(x), np.asarray(y)
-            x_normalized = (x - m) / (std + 1e-4)
-            y_normalized = (y - m) / (std + 1e-4)
-            k = self.activation_kernel(self.mlp.apply(mlp_params, None, x_normalized),
-                                       self.mlp.apply(mlp_params, None, y_normalized))
-            return scale * k
-        return kernel
 
 
-class ScoreLearner(GradientLearner):
+class ScoreLearner(VectorFieldMixin, TrainingMixin):
     """Neural score matching"""
-    def __init__(self, target, lam=0., **kwargs):
-        super().__init__(target, **kwargs)
+    def __init__(self,
+                 target,
+                 key: np.array = random.PRNGKey(42),
+                 sizes: list = None,
+                 learning_rate: float = 1e-2,
+                 patience: int = 10,
+                 lam: float = 0.):
+        super().__init__(target, key=key, sizes=sizes,
+                         learning_rate=learning_rate, patience=patience)
         self.lam=lam
-
-    def get_score(self, init_particles, params=None):
-        """Return callables approximating score of q = grad(log q)
-        Arguments:
-        init_particles: particles from current dist q, shaped (n, d). Used
-            to compute mean and stddev for normalziation.
-        """
-        if params is None:
-            params = self.get_params()
-        m = np.mean(init_particles)
-        std = np.std(init_particles)
-        def score(x):
-            x_normalized = (x - m) / (std + 1e-4)
-            return self.mlp.apply(params, None, x_normalized)
-        return score
-
-    def get_field(self, init_particles, params=None):
-        """Return vector field v(\cdot) that approximates
-        \nabla KL = grad(log q) - grad(log p). This is used to compute
-        particle updates x <-- x - eps * v(x)
-
-        Arguments:
-        init_particles: samples from current dist q, shaped (n, d). Used
-            to compute mean and stddev for normalziation.
-        """
-        score = self.get_score(init_particles=init_particles, params=params)
-
-        def v(x):
-            return score(x) - grad(self.target.logpdf)(x) / (2*self.lambda_reg)
-        return v
+        self.get_score = self.get_field
+        self.lambda_reg = 1/2
 
     def loss_fn(self, params, key, particles):
         """Evaluates E[div(score)] + lambda * l2_norm(score)^2"""
@@ -636,48 +631,57 @@ class ScoreLearner(GradientLearner):
         return step_log
 
     def gradient(self, params, _, particles, aux=False):
-        v = self.get_field(particles, params=params)
+        score = self.get_score(init_particles=particles, params=params)
+        grads = score(particles) - vmap(grad(self.target.logpdf))(particles)
         if aux:
-            return vmap(v)(particles), {}
+            return grads, {}
         else:
-            return vmap(v)(particles)
+            return grads
 
+    def grads(self, particles):
+        """Same as `self.gradient` but uses state"""
+        return self.gradient(self.get_params(), None, particles)
 
 class KernelGradient():
     """Computes the SVGD approximation to grad(KL), ie
     phi*(y) = E[grad(log p)(y) k(x, y) + div(k)(x, y)]"""
     def __init__(self,
-                target,
-                key=random.PRNGKey(42),
-                kernel = kernels.get_rbf_kernel(1),
-                lambda_reg = 1/2):
+                 target,
+                 key=random.PRNGKey(42),
+                 kernel = kernels.get_rbf_kernel,
+                 bandwidth=None,
+                 lambda_reg = 1/2):
         self.target = target
         self.threadkey, subkey = random.split(key)
+        self.bandwidth = bandwidth
         self.kernel = kernel
         self.lambda_reg = lambda_reg
         self.rundata = {}
 
-    def get_field(self, inducing_particles, aux=False):
+    def get_field(self, inducing_particles):
         """return -phistar(\cdot)"""
-        def phistar(x):
-            return stein.phistar_i(x, inducing_particles, self.target.logpdf, self.kernel)
-        return utils.negative(phistar)
+        bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
+        kernel = self.kernel(bandwidth)
+        phi = stein.get_phistar(kernel, self.target.logpdf, inducing_particles)
+        return utils.negative(phi), bandwidth
 
     def gradient(self, params, key, particles, aux=False, scaled=False):
         """Compute approximate KL gradient.
         params and key args are not used."""
-        v = self.get_field_scaled(particles) if scaled else self.get_field(particles)
+        v, h = self.get_field_scaled(particles) if scaled else self.get_field(particles)
         if aux:
-            return vmap(v)(particles), {}
+            return vmap(v)(particles), {"bandwidth": h}
         else:
             return vmap(v)(particles)
 
     def get_field_scaled(self, inducing_particles):
-        phi = stein.get_phistar(self.kernel, self.target.logpdf, inducing_particles)
+        bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
+        kernel = self.kernel(bandwidth)
+        phi = stein.get_phistar(kernel, self.target.logpdf, inducing_particles)
         l2_phi_squared = utils.l2_norm_squared(inducing_particles, phi)
         ksd = stein.stein_discrepancy(inducing_particles, self.target.logpdf, phi)
         alpha = ksd / (2*self.lambda_reg*l2_phi_squared)
-        return utils.mul(phi, -alpha)
+        return utils.mul(phi, -alpha), bandwidth
 
 
 class KernelizedScoreMatcher():
@@ -686,8 +690,8 @@ class KernelizedScoreMatcher():
                 target,
                 key=random.PRNGKey(42),
                 kernel = kernels.get_rbf_kernel(1),
-                 lambda_reg=1/2,
-                 scale=1.):
+                lambda_reg=1/2,
+                scale=1.):
         self.target = target
         self.threadkey, subkey = random.split(key)
         self.kernel = kernel

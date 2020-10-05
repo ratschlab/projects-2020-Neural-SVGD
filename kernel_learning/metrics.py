@@ -13,7 +13,8 @@ import stein
 import kernels
 
 def append_to_log(dct, update_dict):
-    """appends update_dict to dict, entry-wise.
+    """appends update_dict to dict, entry-wise. Creates list entry
+    if it doesn't exist.
     """
     for key, newvalue in update_dict.items():
         dct.setdefault(key, []).append(newvalue)
@@ -37,8 +38,8 @@ def compute_final_metrics(particles, target):
 #    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
     ksd = stein.ksd_squared_u(particles, target.logpdf, kernels.get_rbf_kernel_logscaled(0), False)
     se_mean = np.mean((np.mean(particles, axis=0) - target.mean)**2)
-    se_var = np.mean((np.cov(particles, rowvar=False) - target.cov)**2)
-    return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_var=se_var)
+    se_std = np.mean((np.std(particles, axis=0) - np.sqrt(np.diag(target.cov)))**2)
+    return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_std=se_std)
 
 def wasserstein_distance(s1, s2):
     """

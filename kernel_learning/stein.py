@@ -119,6 +119,19 @@ def get_phistar(kernel, logp, samples):
     return phistar
 
 
+def get_phistar_batched(h, logp, samples):
+    pairwise_dists = utils.squared_distance_matrix(samples)
+    Kxy = np.exp( -pairwise_dists / h**2 / 2)
+
+    dxkxy = -np.matmul(Kxy, theta)
+    sumkxy = np.sum(Kxy, axis=1)
+    for i in range(theta.shape[1]):
+        dxkxy[:, i] = dxkxy[:,i] + np.multiply(theta[:,i],sumkxy)
+    dxkxy = dxkxy / (h**2)
+    lnpgrad = vmap(grad(logp))(samples)
+    return np.matmul(kxy, lnpgrad) + dxkxy
+
+
 def phistar(particles, leaders, logp, kernel):
     """
     O(nl) where n=#particles, l=#leaders

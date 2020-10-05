@@ -180,7 +180,7 @@ def plot_3d(x, y, z, ax=None, **kwargs):
 def plot_fun_2d(pdf, lims=(-5, 5), xlims=None, ylims=None, type="colormesh", num_gridpoints=150, ax=None, cmap="Oranges", **kwargs):
     """
     Arguments
-    * pdf: callable, computes a distribution on R2.
+    * pdf: callable, computes a distribution on R2. (ie takes a (2,) array as input)
     * lims: list of two floats (limits)
     * type: string, one of "3d", "contour".
     """

@@ -169,6 +169,7 @@ def squared_distance_matrix(x):
     * np array of shape (n, n):
     consisting of squared distances ||xi - xj||^2
     """
+    assert x.ndim < 3 and x.ndim > 0
     n = x.shape[0]
     if x.ndim == 1:
         x = np.reshape(x, (n, 1)) # add dummy dimension
@@ -176,13 +177,11 @@ def squared_distance_matrix(x):
     diff = xx - xx.transpose((1, 0, 2))
 
     def normsq(x):
-        assert x.ndim == 1
-        x = np.array(x)
-        return np.vdot(x, x)
+        return np.inner(x, x)
     v_normsq = vmap(normsq) # outputs vector of norms
     vv_normsq = vmap(v_normsq)
-
     return vv_normsq(diff)
+
 
 def getn(l):
     """

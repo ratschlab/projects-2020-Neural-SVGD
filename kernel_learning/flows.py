@@ -29,7 +29,7 @@ default_num_steps = 100
 #default_learner_lr = 1e-2
 default_noise_level = 0.
 default_patience = 10
-disable_tqdm = True
+disable_tqdm = False
 
 def neural_score_flow(key,
                       setup,
@@ -38,7 +38,6 @@ def neural_score_flow(key,
                       sizes=[32, 32, 2],
                       particle_lr=1e-2,
                       learner_lr=1e-2,
-                      lambda_reg=1/2,
                       noise_level=default_noise_level,
                       particle_optimizer="sgd",
                       patience=default_patience,
@@ -49,7 +48,6 @@ def neural_score_flow(key,
                                        target=target,
                                        sizes=sizes,
                                        learning_rate=learner_lr,
-                                       lambda_reg=lambda_reg,
                                        patience=patience,
                                        lam=lam)
 
@@ -64,7 +62,7 @@ def neural_score_flow(key,
     for i in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            score_learner.train(score_particles.next_batch, key=subkey, n_steps=500)
+            score_learner.train(score_particles.next_batch, key=subkey, n_steps=1)
             score_particles.step(score_learner.get_params())
         except Exception as err:
             warnings.warn(f"Caught Exception!")
@@ -78,7 +76,6 @@ def neural_svgd_flow(key,
                      sizes=[32, 32, 2],
                      particle_lr=1e-1,
                      learner_lr=1e-2,
-                     lambda_reg=1/2,
                      noise_level=default_noise_level,
                      patience=default_patience):
     key, keya, keyb = random.split(key, 3)
@@ -87,7 +84,6 @@ def neural_svgd_flow(key,
                                target=target,
                                sizes=sizes,
                                learning_rate=learner_lr,
-                               lambda_reg=lambda_reg,
                                patience=patience)
 
     particles = models.Particles(key=keyb,
@@ -100,7 +96,7 @@ def neural_svgd_flow(key,
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            learner.train(particles.next_batch, key=subkey, n_steps=500)
+            learner.train(particles.next_batch, key=subkey, n_steps=1)
             particles.step(learner.get_params())
         except FloatingPointError as err:
             warnings.warn(f"Caught floating point error")
@@ -115,7 +111,6 @@ def deep_kernel_flow(key,
                      sizes=[32, 32, 2],
                      particle_lr=1e-2,
                      learner_lr=1e-3,
-                     lambda_reg=1/2,
                      noise_level=default_noise_level,
                      patience=default_patience):
     key, keya, keyb = random.split(key, 3)
@@ -124,9 +119,7 @@ def deep_kernel_flow(key,
                                    key=keya,
                                    sizes=sizes,
                                    learning_rate=learner_lr,
-                                   lambda_reg=lambda_reg,
-                                   patience=patience,
-                                   skip_connection=True)
+                                   patience=patience)
 
     particles = models.Particles(key=keyb,
                                  gradient=learner.gradient,
@@ -138,7 +131,7 @@ def deep_kernel_flow(key,
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            learner.train(particles.next_batch, key=subkey, n_steps=500)
+            learner.train(particles.next_batch, key=subkey, n_steps=1)
             particles.step(learner.get_params())
         except (FloatingPointError, KeyboardInterrupt) as err:
             warnings.warn(f"Caught floating point error")
@@ -154,13 +147,16 @@ def svgd_flow(key,
               lambda_reg=1/2,
               noise_level=default_noise_level,
               particle_optimizer="sgd",
-              scaled=True):
+              scaled=True,
+              bandwidth=1.):
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
 
     kernel_gradient = models.KernelGradient(target=target,
                                             key=keya,
-                                           lambda_reg=lambda_reg)
+                                            kernel=kernels.get_rbf_kernel,
+                                            bandwidth=bandwidth,
+                                            lambda_reg=lambda_reg)
     gradient = partial(kernel_gradient.gradient, scaled=scaled) # scale to match lambda_reg
 
     svgd_particles = models.Particles(key=keyb,

@@ -617,3 +617,7 @@ means = np.column_stack((means.real,means.imag))
 target = GaussianMixture(means, .03, np.ones(5))
 proposal = Gaussian([-2, 0], [.5, .5])
 mix_of_gauss = Setup(target, proposal)
+
+target = Gaussian([0, 0], [1e-4, 9])
+proposal = Gaussian([0, 0], [1, 1])
+thin_target = Setup(target, proposal)
