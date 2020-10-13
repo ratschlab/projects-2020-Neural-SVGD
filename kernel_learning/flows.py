@@ -41,7 +41,7 @@ def neural_score_flow(key,
                       noise_level=default_noise_level,
                       particle_optimizer="sgd",
                       patience=default_patience,
-                      lam=0.):
+                      lam=1e-2):
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
     score_learner = models.ScoreLearner(key=keya,
@@ -53,7 +53,7 @@ def neural_score_flow(key,
 
     score_particles = models.Particles(key=keyb,
                                        gradient=score_learner.gradient,
-                                       proposal=proposal,
+                                       init_samples=proposal.sample,
                                        n_particles=n_particles,
                                        learning_rate=particle_lr,
                                        noise_level=noise_level,
@@ -74,7 +74,7 @@ def neural_svgd_flow(key,
                      n_particles=default_num_particles,
                      n_steps=default_num_steps,
                      sizes=[32, 32, 2],
-                     particle_lr=1e-1,
+                     particle_lr=1e-2,
                      learner_lr=1e-2,
                      noise_level=default_noise_level,
                      patience=default_patience):
@@ -88,18 +88,20 @@ def neural_svgd_flow(key,
 
     particles = models.Particles(key=keyb,
                                  gradient=learner.gradient,
-                                 proposal=proposal,
+                                 init_samples=proposal.sample,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
-                                 noise_level=noise_level)
+                                 noise_level=noise_level,
+                                 optimizer="sgd")
 
+    next_batch = partial(particles.next_batch, batch_size=None)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            learner.train(particles.next_batch, key=subkey, n_steps=1)
+            learner.train(next_batch, key=subkey, n_steps=1)
             particles.step(learner.get_params())
-        except FloatingPointError as err:
-            warnings.warn(f"Caught floating point error")
+        except Exception as err:
+            warnings.warn(f"Caught Exception")
             return learner, particles, err
     return learner, particles, None
 
@@ -123,7 +125,7 @@ def deep_kernel_flow(key,
 
     particles = models.Particles(key=keyb,
                                  gradient=learner.gradient,
-                                 proposal=proposal,
+                                 init_samples=proposal.sample,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
                                  noise_level=noise_level)
@@ -152,7 +154,7 @@ def svgd_flow(key,
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
 
-    kernel_gradient = models.KernelGradient(target=target,
+    kernel_gradient = models.KernelGradient(target_logp=target.logpdf,
                                             key=keya,
                                             kernel=kernels.get_rbf_kernel,
                                             bandwidth=bandwidth,
@@ -161,10 +163,10 @@ def svgd_flow(key,
 
     svgd_particles = models.Particles(key=keyb,
                                       gradient=gradient,
-                                      proposal=proposal,
+                                      init_samples=proposal.sample,
                                       n_particles=n_particles,
                                       learning_rate=particle_lr,
-                                      num_groups=2,
+                                      num_groups=1,
                                       noise_level=noise_level,
                                       optimizer=particle_optimizer)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
@@ -192,7 +194,7 @@ def score_flow(key,
                                                     scale=scale)
     particles = models.Particles(key=keyb,
                                  gradient=kernel_gradient.gradient,
-                                 proposal=proposal,
+                                 init_samples=proposal.sample,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
                                  num_groups=2,
@@ -210,19 +212,23 @@ def sgld_flow(key,
               n_steps=default_num_steps,
               particle_lr=1e-2,
               lambda_reg=1/2,
-              noise_level=default_noise_level,
-              particle_optimizer="adam"):
+              noise_level=1,
+              particle_optimizer="sgd"):
     keya, keyb = random.split(key)
     target, proposal = setup.get()
     energy_gradient = models.EnergyGradient(target, keya, lambda_reg=lambda_reg)
     particles = models.Particles(key=keyb,
                                  gradient=energy_gradient.gradient,
-                                 proposal=proposal,
+                                 init_samples=proposal.sample,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
                                  optimizer=particle_optimizer,
                                  num_groups=1,
                                  noise_level=noise_level)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
-        particles.step(None)
+        try:
+            particles.step(None)
+        except Exception as err:
+            warnings.warn("Caught and returned exception")
+            return energy_gradient, particles, err
     return energy_gradient, particles, None

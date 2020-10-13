@@ -20,7 +20,7 @@ class RBFKernel(hk.Module):
         i.e. parameters habe shape (d,).
         * If params=log_diagonal, same but parametrize log(bandwidth)
         * If params='full', parametrize kernel using full (d, d) matrix.
-        Params are initialized st the two options are equivalent at initialization."""
+        Params are initialized st the three options are equivalent at initialization."""
         super().__init__(name=name)
         self.parametrization = parametrization
         self.scale_param = scale_param

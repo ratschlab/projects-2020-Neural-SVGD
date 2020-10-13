@@ -501,6 +501,77 @@ def mul(fun, factor):
 def normsq(x):
     return np.inner(x, x)
 
+
+def qmult(key, b):
+    """
+    QMULT  Pre-multiply by random orthogonal matrix.
+       QMULT(A) is Q*A where Q is a random real orthogonal matrix from
+       the Haar distribution, of dimension the number of rows in A.
+       Special case: if A is a scalar then QMULT(A) is the same as
+                     QMULT(EYE(A)).
+       Called by RANDSVD.
+       Reference:
+       G.W. Stewart, The efficient generation of random
+       orthogonal matrices with an application to condition estimators,
+       SIAM J. Numer. Anal., 17 (1980), 403-409.
+    """
+    try:
+        n = b.shape[0]
+        a = b.copy()
+    except AttributeError:
+        n = b
+        a = np.eye(n)
+
+    d = np.zeros(n)
+    for k in range(n - 2, -1, -1):
+        # Generate random Householder transformation.
+        key, subkey = random.split(key)
+        x = random.normal(subkey, (n - k,))
+        s = np.linalg.norm(x)
+
+        # Modification to make sign(0) == 1
+        sgn = np.sign(x[0]) + float(x[0] == 0)
+        s = sgn * s
+        d = index_update(d, k, -sgn)
+        x = index_update(x, 0, x[0] + s)
+        beta = s * x[0]
+
+        # Apply the transformation to a
+        y = np.dot(x, a[k:n, :])
+        a = index_update(a, index[k:n, :], a[k:n, :] - np.outer(x, (y / beta)))
+
+    # Tidy up signs.
+    for i in range(n - 1):
+        a = index_update(a, index[i, :], d[i] * a[i, :])
+
+    # Now randomly change the sign (Gaussian dist)
+    a = index_update(a, index[n - 1, :], a[n - 1, :] * np.sign(random.normal(key, ())))
+    return a
+
+
+def get_particle_lims(particles):
+    """particles is a (n, 2) array of 2d points.
+    return lims (-a, a) st particles fit into square with
+    corners at +- a."""
+    a = np.max(np.abs(particles))
+    return (-a, a)
+
+
+def add_gauss(key: np.ndarray, param: np.ndarray, scale: float):
+    return param + random.normal(key, param.shape) * scale
+
+
+def return_none_if_none(fun, argnum=0):
+    """wrapper to tell function to return none
+    when it gets None as argument."""
+    def out_fun(*args, **kwargs):
+        if args[argnum] is None:
+            return
+        else:
+            return fun(*args, **kwargs)
+    return out_fun
+
+
 import optax
 from distributions import funnel, banana_target, ring_target, squiggle_target, mix_of_gauss
 optimizer_mapping = {

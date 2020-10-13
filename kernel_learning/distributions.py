@@ -621,3 +621,17 @@ mix_of_gauss = Setup(target, proposal)
 target = Gaussian([0, 0], [1e-4, 9])
 proposal = Gaussian([0, 0], [1, 1])
 thin_target = Setup(target, proposal)
+
+d = 50
+variances = np.logspace(-2, 0, num=d)
+target = Gaussian(np.zeros(d), variances)
+proposal = Gaussian(np.zeros(d), np.ones(d))
+high_d_gaussian = Setup(target, proposal)
+
+# rotated gaussian
+subkey = random.PRNGKey(0)
+Q = utils.qmult(subkey, d)
+cov = Q.T @ np.diag(variances) @ Q
+proposal = Gaussian(np.zeros(d), np.ones(d))
+target = Gaussian(np.zeros(d), cov)
+rotated_gaussian = Setup(target, proposal)

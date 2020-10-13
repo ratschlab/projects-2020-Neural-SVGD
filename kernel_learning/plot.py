@@ -180,7 +180,8 @@ def plot_3d(x, y, z, ax=None, **kwargs):
 def plot_fun_2d(pdf, lims=(-5, 5), xlims=None, ylims=None, type="colormesh", num_gridpoints=150, ax=None, cmap="Oranges", **kwargs):
     """
     Arguments
-    * pdf: callable, computes a distribution on R2. (ie takes a (2,) array as input)
+    * pdf: callable, computes a distribution on R2. (ie takes a (2,) array as input
+    and returns a scalar)
     * lims: list of two floats (limits)
     * type: string, one of "3d", "contour".
     """
@@ -295,7 +296,7 @@ def errorfill(x, y, yerr, color="r", alpha_fill=0.3, ax=None):
 def scatter(x, *args, ax=None, **kwargs):
     if ax is None:
         ax=plt.gca()
-    ax.scatter(x[:, 0], x[:, 1], *args, **kwargs)
+    ax.scatter(*np.rollaxis(x, 1), *args, **kwargs)
 
 def quiverplot(f, samples=None, num_gridpoints=50, ax=None, lims=[-10, 10], xlims=None, ylims=None, angles="xy", scale=2, **kwargs):
     """
@@ -357,10 +358,11 @@ def plot_gradient_field(v: callable, ax=None, lims=(-5, 5), color="green", **kwa
     to an (n, 2) batch of vectors."""
     if ax is None:
         ax = plt.gca()
-    grid = np.linspace(*lims, 50)
+    grid = np.linspace(*lims, 25)
     xx = np.stack(np.meshgrid(grid, grid), axis=-1).reshape(-1, 2)
     scores = v(xx)
     scores_norm = np.linalg.norm(scores, axis=-1, ord=2, keepdims=True)
     scores_log1p = scores / (scores_norm + 1e-9) * np.log1p(scores_norm)
-    ax.quiver(*xx.T, *scores_log1p.T, width=0.002, color=color, **kwargs)
+    # change width to make arrows thicker
+    ax.quiver(*xx.T, *scores_log1p.T, width=0.005, color=color, **kwargs)
     return
