@@ -17,7 +17,7 @@ import plot
 import distributions
 import models
 import flows
-    
+
 key = random.PRNGKey(0)
 
 
@@ -78,7 +78,7 @@ def run_nuts_chain(key, state):
       current_state=state,
       kernel=kernel,
       trace_fn=lambda _, results: results.target_log_prob,
-      num_burnin_steps=0, # CHANGED
+      num_burnin_steps=500, # CHANGED
       seed=key)
 
 states, log_probs = run_nuts_chain(sample_key, init_params)
@@ -89,10 +89,21 @@ plt.xlabel('Iterations of NUTS')
 plt.show()
 
 
+params = dist.sample(seed=key)
+dists, _ = dist.sample_distributions(seed=random.PRNGKey(0),
+                                   value=params + (None,))
+
+
+dists[-1].distribution.probs_parameter().shape
+
+
+dists[-1].distribution.probs_parameter
+
+
 def classifier_probs(params):
     dists, _ = dist.sample_distributions(seed=random.PRNGKey(0),
                                        value=params + (None,))
-    return dists[-1].distribution.probs_parameter()
+    return dists[-1].distribution.probs_parameter() # ie pdf of categorical(logit)
 
 
 all_probs = jit(vmap(classifier_probs))(states)
@@ -110,7 +121,7 @@ def run_lmc_chain(key, state):
       current_state=state,
       kernel=kernel,
       trace_fn=lambda _, results: results.target_log_prob,
-      num_burnin_steps=0, # CHANGED
+      num_burnin_steps=500, # CHANGED
       seed=key)
 
 states, log_probs = run_lmc_chain(sample_key, init_params)
@@ -121,20 +132,31 @@ plt.xlabel('Iterations of LMC')
 plt.show()
 
 
-n = 3
-keys = random.split(key, n)
-init_batch = dist.sample(n, seed=key)[:-1]
+n_particles = 500
+keys = random.split(key, n_particles)
+init_batch = dist.sample(n_particles, seed=key)[:-1]
 
 # NUTS
 nuts_states, nuts_logp = vmap(run_nuts_chain)(keys, init_batch)
+final_nuts_states = [param[:, -1, :] for param in nuts_states]
 
 # LMC
 lmc_states, lmc_logp = vmap(run_lmc_chain)(keys, init_batch)
+final_lmc_states = [param[:, -1, :] for param in lmc_states]
 
 
 plt.plot(np.rollaxis(nuts_logp, 1), color="green", label="NUTS")
-plt.plot(np.rollaxis(lmc_logp, 1), color="red", label="LMC")
-plt.legend()
+plt.plot(np.rollaxis(lmc_logp, 1), color="red", label="LMC");
+# plt.legend()
+
+
+params = dist.sample(seed=key)[:-1]
+params_flat, unravel = jax.flatten_util.ravel_pytree(params)
+# unravel(params_flat) == params
+
+batch = dist.sample(3, seed=key)[:-1]
+batch_flat = batch_ravel(batch)
+# batch == batch_unravel(batch_flat)
 
 
 def logp(params_flat):
@@ -149,15 +171,6 @@ def batch_ravel(batch):
 
 def batch_unravel(batch_flat):
     return vmap(unravel)(batch_flat)
-
-
-params = dist.sample(seed=key)[:-1]
-params_flat, unravel = jax.flatten_util.ravel_pytree(params)
-# unravel(params_flat) == params
-
-batch = dist.sample(3, seed=key)[:-1]
-batch_flat = batch_ravel(batch)
-# batch == batch_unravel(batch_flat)
 
 
 def run_svgd(key, init_batch):
@@ -175,7 +188,6 @@ def run_svgd(key, init_batch):
                                       num_groups=1)
     for _ in range(500):
         svgd_particles.step(None)
-        
     return batch_unravel(svgd_particles.particles.training), kernel_gradient, svgd_particles
 
 
@@ -183,31 +195,55 @@ def run_lmc(key, init_batch):
     """init_batch is a batch of initial samples / particles."""
     init_batch = batch_ravel(init_batch)
     key, keya, keyb = random.split(key, 3)
-    energy_gradient = models.KernelGradient(target_logp=logp, key=keya)
+    energy_gradient = models.EnergyGradient(target_logp=logp, key=keya)
 
-    svgd_particles = models.Particles(key=keyb,
-                                      gradient=gradient,
-                                      init_samples=init_batch,
-                                      learning_rate=1e-2,
-                                      num_groups=1)
+    lmc_particles = models.Particles(key=keyb,
+                                     gradient=energy_gradient.gradient,
+                                     init_samples=init_batch,
+                                     learning_rate=1e-3,
+                                     num_groups=1,
+                                     noise_level=1.)
     for _ in range(500):
-        svgd_particles.step(None)
-        
-    return batch_unravel(svgd_particles.particles.training), kernel_gradient, svgd_particles
+        lmc_particles.step(None)
+    return batch_unravel(lmc_particles.particles.training), energy_gradient, lmc_particles
 
 
-init_batch = dist.sample(100, seed=key)[:-1]
-params, gradient, particles = run_svgd(key, init_batch)
+def run_neural_svgd(key, init_batch):
+    """init_batch is a batch of initial samples / particles."""
+    init_batch = batch_ravel(init_batch)
+    key, keya, keyb = random.split(key, 3)
+    learner = models.SDLearner(target_logp=logp, target_dim=init_batch.shape[1], key=keya)
+
+    particles = models.Particles(key=keyb,
+                                 gradient=learner.gradient,
+                                 init_samples=init_batch,
+                                 learning_rate=1e-3,
+                                 num_groups=2)
+    next_batch = partial(particles.next_batch, batch_size=None)
+    for _ in range(1000):
+        key, subkey = random.split(key)
+        learner.train(next_batch, key=subkey, n_steps=1)
+        particles.step(learner.get_params())
+    return batch_unravel(particles.particles.training), learner, particles
 
 
-particles.n_particles
+init_batch = dist.sample(n_particles, seed=key)[:-1]
+svgd_samples, gradient, particles = run_svgd(key, init_batch)
+lmc_samples, lmc_gradient, lmc_particles = run_lmc(key, init_batch)
+neural_samples, neural_gradient, neural_particles = run_neural_svgd(key, init_batch)
 
 
-plt.plot(particles.rundata["training_logp"]);
+all_probs.shape
 
 
-plt.plot(np.rollaxis(nuts_logp, 1), color="green", label="NUTS")
-plt.plot(np.rollaxis(lmc_logp, 1), color="red", label="LMC")
+# Neural samples
+all_probs = jit(vmap(classifier_probs))(neural_samples)
+print('Average accuracy:', jnp.mean(all_probs.argmax(axis=-1) == labels))
+print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels))
+
+
+plt.plot(neural_gradient.rundata["training_sd"])
+plt.plot(neural_gradient.rundata["validation_sd"])
 
 
 # NUTS samples
@@ -216,8 +252,26 @@ print('Average accuracy:', jnp.mean(all_probs.argmax(axis=-1) == labels))
 print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels))
 
 
+# Parallel NUTS final state
+all_probs = jit(vmap(classifier_probs))(tuple(final_nuts_states))
+print('Average accuracy:', jnp.mean(all_probs.argmax(axis=-1) == labels))
+print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels))
+
+
+# Parallel LMC (TFP) samples
+all_probs = jit(vmap(classifier_probs))(tuple(final_lmc_states))
+print('Average accuracy:', jnp.mean(all_probs.argmax(axis=-1) == labels))
+print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels))
+
+
+# Parallel LMC (Lauro) samples
+all_probs = jit(vmap(classifier_probs))(lmc_samples)
+print('Average accuracy:', jnp.mean(all_probs.argmax(axis=-1) == labels))
+print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels))
+
+
 # SVGD samples
-all_probs = jit(vmap(classifier_probs))(tuple(params))
+all_probs = jit(vmap(classifier_probs))(svgd_samples)
 print('Average accuracy:', jnp.mean(all_probs.argmax(axis=-1) == labels))
 print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels))
 
@@ -226,6 +280,49 @@ print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels
 all_probs = jit(vmap(classifier_probs))(tuple(dist.sample(100, seed=key)[:-1]))
 print('Average accuracy:', jnp.mean(all_probs.argmax(axis=-1) == labels))
 print('BMA accuracy:', jnp.mean(all_probs.mean(axis=0).argmax(axis=-1) == labels))
+
+
+# remember, we have final states of vmapped tfp samplers:
+w_nuts, b_nuts = final_nuts_states # all shaped (100, 3)
+w_lmc, b_lmc = final_lmc_states
+
+# as well as those from my methods
+w_svgd, b_svgd = svgd_samples
+w_lmc_l, b_lmc_l = lmc_samples
+w_neural, b_neural = neural_samples
+
+
+get_ipython().run_line_magic("matplotlib", " inline")
+fig = plt.figure(figsize=[13, 13])
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(*np.rollaxis(b_nuts, 1), label="NUTS")
+ax.scatter(*np.rollaxis(b_svgd, 1), label="SVGD")
+ax.scatter(*np.rollaxis(b_lmc, 1), label="LMC")
+ax.scatter(*np.rollaxis(b_lmc_l, 1), label="LMC Lauro")
+ax.legend()
+
+
+def e_score(samples):
+    """Should return c, where true_logp = logp + c"""
+    return np.mean(vmap(target_log_prob)(*samples))
+
+
+sample_categories = [
+    final_lmc_states,
+    final_nuts_states,
+    svgd_samples,
+    lmc_samples,
+]
+
+
+for sample in sample_categories:
+    print(e_score(sample))
+
+
+svgd_samples_flat = batch_ravel(svgd_samples)
+
+
+svgd_samples_flat.shape
 
 
 

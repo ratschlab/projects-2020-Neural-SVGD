@@ -160,14 +160,14 @@ class Particles:
         # subsample batch
         if batch_size is None:
             batch_size = self.n_particles
-        keys = random.split(key, len(jax.tree_leaves(particles)))
+        key, *keys = random.split(key, len(jax.tree_leaves(particles))+1)
         key_tree = jax.tree_unflatten(jax.tree_structure(particles), keys)
         subsample = partial(utils.subsample, n_subsamples=batch_size, replace=False)
         batch = jax.tree_multimap(subsample, key_tree, particles)
 
         # perturb
         if self.noise_level > 0:
-            batch = self.perturb(batch)
+            batch = self.perturb(key, batch)
         return batch
 
 
@@ -291,18 +291,20 @@ class Particles:
 class VectorFieldMixin:
     """Methods for init of Vector field MLP"""
     def __init__(self,
-                 target,
+                 target_logp: callable,
+                 target_dim: int,
                  key=random.PRNGKey(42),
                  sizes: list = None,
                  **kwargs):
-        self.sizes = sizes if sizes else [32, 32, target.d]
-        if self.sizes[-1] != target.d:
+        self.d = target_dim
+        self.sizes = sizes if sizes else [32, 32, self.d]
+        if self.sizes[-1] != self.d:
             warnings.warn(f"Output dim should equal target dim; instead "
                           f"received output dim {sizes[-1]} and "
-                          f"target dim {target.d}.")
+                          f"target dim {self.d}.")
 
         self.threadkey, subkey = random.split(key)
-        self.target = target
+        self.target_logp = target_logp
 
         # net and optimizer
         self.field = hk.transform(lambda x: nets.VectorField(self.sizes)(x))
@@ -313,7 +315,7 @@ class VectorFieldMixin:
         """Initialize MLP parameter"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
-        x_dummy = np.ones(self.target.d)
+        x_dummy = np.ones(self.d)
         params = self.field.init(key, x_dummy)
         return params
 
@@ -448,19 +450,20 @@ class TrainingMixin:
 class SDLearner(VectorFieldMixin, TrainingMixin):
     """Parametrize vector field to maximize the stein discrepancy"""
     def __init__(self,
-                 target,
+                 target_logp: callable,
+                 target_dim: int,
                  key: np.array = random.PRNGKey(42),
                  sizes: list = None,
                  learning_rate: float = 1e-2,
-                 patience: int = 10):
-        super().__init__(target, key=key, sizes=sizes,
+                 patience: int = 0):
+        super().__init__(target_logp, target_dim, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience)
         self.lambda_reg = 1/2
 
     def loss_fn(self, params, key, particles):
         f = utils.negative(self.get_field(particles, params))
         stein_discrepancy, stein_aux = stein.stein_discrepancy(
-            particles, self.target.logpdf, f, aux=True)
+            particles, self.target_logp, f, aux=True)
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
@@ -494,7 +497,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         v = self.get_field(particles, params)
         if aux:
             stein_discrepancy, stein_aux = stein.stein_discrepancy(
-                particles, self.target.logpdf, v, aux=True)
+                particles, self.target_logp, v, aux=True)
             auxdata = {"sd": stein_discrepancy}
             return v(particles), auxdata
         else:
@@ -508,15 +511,17 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
 class KernelLearner(TrainingMixin):
     """Parametrize kernel to learn the KSD"""
     def __init__(self,
-                 target,
+                 target_logp: callable,
+                 target_dim: int,
                  key: np.array = random.PRNGKey(42),
                  sizes: list = None,
                  learning_rate: float = 1e-2,
                  patience: int = 10):
-        self.target = target
+        self.target_logp = target_logp
         self.lambda_reg = 1/2
         self.threadkey, key = random.split(key)
         self.num_leaders = None # first num_leaders of training particles used to find RKHS fit
+        self.d = target_dim
         self.sizes = sizes
         if sizes:
             self.kernel = hk.transform(lambda x: nets.DeepKernel(sizes)(x))
@@ -530,7 +535,7 @@ class KernelLearner(TrainingMixin):
         """Initialize kernel parameters"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
-        x_dummy = np.ones(self.target.d)
+        x_dummy = np.ones(self.d)
         params = self.kernel.init(key, np.stack([x_dummy, x_dummy]))
         return params
 
@@ -559,7 +564,7 @@ class KernelLearner(TrainingMixin):
             params = self.get_params()
         kernel = self.get_kernel_fn(inducing_particles, params)
         def phistar(x):
-            return stein.phistar_i(x, inducing_particles, self.target.logpdf, kernel, aux=False)
+            return stein.phistar_i(x, inducing_particles, self.target_logp, kernel, aux=False)
         return utils.negative(phistar)
 
     def loss_fn(self, params, key, particles):
@@ -567,10 +572,10 @@ class KernelLearner(TrainingMixin):
         particles = random.permutation(key, particles)
         leaders = particles[:self.num_leaders]
         phi = utils.negative(self.get_field(leaders, params=params))
-        #ksd_squared = stein.stein_discrepancy(particles, self.target.logpdf, phi)
+        #ksd_squared = stein.stein_discrepancy(particles, self.target_logp, phi)
         kernel = self.get_kernel_fn(leaders, params=params)
-        #ksd_squared = stein.ksd_squared_l(particles, self.target.logpdf, kernel)
-        ksd_squared = stein.ksd_squared_u(particles, self.target.logpdf, kernel)
+        #ksd_squared = stein.ksd_squared_l(particles, self.target_logp, kernel)
+        ksd_squared = stein.ksd_squared_u(particles, self.target_logp, kernel)
         l2_squared = utils.l2_norm_squared(particles, phi)
         loss = -ksd_squared + self.lambda_reg * l2_squared
         aux = [loss, ksd_squared, l2_squared]
@@ -606,13 +611,14 @@ class KernelLearner(TrainingMixin):
 class ScoreLearner(VectorFieldMixin, TrainingMixin):
     """Neural score matching"""
     def __init__(self,
-                 target,
+                 target_logp,
+                 target_dim,
                  key: np.array = random.PRNGKey(42),
                  sizes: list = None,
                  learning_rate: float = 1e-2,
                  patience: int = 10,
                  lam: float = 0.):
-        super().__init__(target, key=key, sizes=sizes,
+        super().__init__(target_logp, target_dim, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience)
         self.lam=lam
         self.get_score = self.get_field
@@ -649,7 +655,7 @@ class ScoreLearner(VectorFieldMixin, TrainingMixin):
 
     def gradient(self, params, _, particles, aux=False):
         score = self.get_score(init_particles=particles, params=params)
-        grads = score(particles) - vmap(grad(self.target.logpdf))(particles)
+        grads = score(particles) - vmap(grad(self.target_logp))(particles)
         if aux:
             return grads, {}
         else:
@@ -706,12 +712,12 @@ class KernelGradient():
 class KernelizedScoreMatcher():
     """Compute kernelized score estimate"""
     def __init__(self,
-                target,
+                target_logp: callable,
                 key=random.PRNGKey(42),
                 kernel = kernels.get_rbf_kernel(1),
                 lambda_reg=1/2,
                 scale=1.):
-        self.target = target
+        self.target_logp = target_logp
         self.threadkey, subkey = random.split(key)
         self.kernel = kernel
         self.lambda_reg = lambda_reg
@@ -723,7 +729,7 @@ class KernelizedScoreMatcher():
         return divergence_term
 
     def target_score(self, x):
-        return grad(self.target.logpdf)(x) / (2*self.lambda_reg)
+        return grad(self.target_logp)(x) / (2*self.lambda_reg)
 
     def get_score(self, inducing_particles):
         def kernelized_score(x):
@@ -739,7 +745,7 @@ class KernelizedScoreMatcher():
         """Not using this yet"""
         def kernelized_score(x):
             def inner(x_, y):
-                return grad(target.logpdf)(y) * self.kernel(y, x_)
+                return grad(self.target_logp)(y) * self.kernel(y, x_)
             return -np.mean(vmap(inner)(x, inducing_particles), axis=0)
         M = self.objective(inducing_particles, kernelized_score)
         scaler = M / (utils.l2_norm_squared(inducing_particles, kernelized_score) * 2 * self.lambda_reg)

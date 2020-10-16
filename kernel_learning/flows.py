@@ -45,11 +45,11 @@ def neural_score_flow(key,
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
     score_learner = models.ScoreLearner(key=keya,
-                                       target=target,
-                                       sizes=sizes,
-                                       learning_rate=learner_lr,
-                                       patience=patience,
-                                       lam=lam)
+                                        target_logp=target.logpdf,
+                                        sizes=sizes,
+                                        learning_rate=learner_lr,
+                                        patience=patience,
+                                        lam=lam)
 
     score_particles = models.Particles(key=keyb,
                                        gradient=score_learner.gradient,
@@ -81,7 +81,7 @@ def neural_svgd_flow(key,
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
-                               target=target,
+                               target_logp=target.logpdf,
                                sizes=sizes,
                                learning_rate=learner_lr,
                                patience=patience)
@@ -117,7 +117,7 @@ def deep_kernel_flow(key,
                      patience=default_patience):
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
-    learner = models.KernelLearner(target=target,
+    learner = models.KernelLearner(target_logp=target.logpdf,
                                    key=keya,
                                    sizes=sizes,
                                    learning_rate=learner_lr,
@@ -188,7 +188,7 @@ def score_flow(key,
                scale=1.):
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
-    kernel_gradient = models.KernelizedScoreMatcher(target=target,
+    kernel_gradient = models.KernelizedScoreMatcher(target_logp=target.logpdf,
                                                     key=keya,
                                                     lambda_reg=lambda_reg,
                                                     scale=scale)
@@ -216,7 +216,7 @@ def sgld_flow(key,
               particle_optimizer="sgd"):
     keya, keyb = random.split(key)
     target, proposal = setup.get()
-    energy_gradient = models.EnergyGradient(target, keya, lambda_reg=lambda_reg)
+    energy_gradient = models.EnergyGradient(target.logpdf, keya, lambda_reg=lambda_reg)
     particles = models.Particles(key=keyb,
                                  gradient=energy_gradient.gradient,
                                  init_samples=proposal.sample,
