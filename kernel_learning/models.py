@@ -65,6 +65,7 @@ class Patience:
 
     def reset(self):
         self.time_waiting = 0
+        self.min_validation_loss = None
 
 
 @chex.dataclass
@@ -138,6 +139,7 @@ class Particles:
         except TypeError:
             particles = SplitData(*(self.init_samples,)*self.num_groups)
             self.n_particles = len(self.init_samples)
+        self.d = particles.training.shape[1]
         return particles
 
     def get_params(self):
@@ -221,14 +223,16 @@ class Particles:
     @partial(jit, static_argnums=0)
     def _log(self, auxdata, particles, step):
         gradient = auxdata["grads"]
-        auxdata.update({
-            "step": step,
-#            "gradient_norm": np.linalg.norm(gradient),
-#            "max_grad": np.max(np.abs(gradient)),
-#            "mean_grad": np.mean(np.abs(gradient)),
-#            "median_grad": np.median(np.abs(gradient)),
-#            "particles": particles,
-        })
+
+        if self.d < 3:
+            auxdata.update({
+                "step": step,
+                "particles": particles,
+    #            "gradient_norm": np.linalg.norm(gradient),
+    #            "max_grad": np.max(np.abs(gradient)),
+    #            "mean_grad": np.mean(np.abs(gradient)),
+    #            "median_grad": np.median(np.abs(gradient)),
+            })
         for k, v in particles.items():
             auxdata.update({
                 f"{k}_mean": np.mean(v, axis=0),
@@ -333,8 +337,8 @@ class VectorFieldMixin:
         particle of shape (d,) or batch shaped (..., d)."""
         if params is None:
             params = self.get_params()
-        #norm = nets.get_norm(init_particles)
-        norm = lambda x: x
+        norm = nets.get_norm(init_particles)
+        #norm = lambda x: x
         def v(x):
             """x should have shape (n, d) or (d,)"""
             return self.field.apply(params, None, norm(x))

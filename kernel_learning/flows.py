@@ -99,7 +99,7 @@ def neural_svgd_flow(key,
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            learner.train(next_batch, key=subkey, n_steps=1)
+            learner.train(next_batch, key=subkey, n_steps=50)
             particles.step(learner.get_params())
         except Exception as err:
             warnings.warn(f"Caught Exception")
