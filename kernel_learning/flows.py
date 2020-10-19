@@ -82,6 +82,7 @@ def neural_svgd_flow(key,
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
                                target_logp=target.logpdf,
+                               target_dim=target.d,
                                sizes=sizes,
                                learning_rate=learner_lr,
                                patience=patience)

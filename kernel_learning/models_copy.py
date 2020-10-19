@@ -93,9 +93,8 @@ class Particles:
     """
     def __init__(self,
                  key,
-                 gradient: callable,
                  init_samples,
-                 target=None,
+                 gradient: callable,
                  n_particles: int = 50,
                  learning_rate=1e-2,
                  optimizer="sgd",
@@ -110,7 +109,6 @@ class Particles:
         of shape (n, d) containing initial samples.
         """
         self.gradient = gradient
-        self.target = target
         self.n_particles = n_particles
         self.num_groups = num_groups
         self.threadkey, subkey = random.split(key)
@@ -178,7 +176,7 @@ class Particles:
         return batch
 
 
-    @partial(jit, static_argnums=0)
+#    @partial(jit, static_argnums=(0, 5))
     def _step(self, key, particles, optimizer_state, params):
         """
         Updates particles in direction of the gradient.
@@ -193,7 +191,7 @@ class Particles:
         """
         key1, *keys = random.split(key, 3)
         particles = self.perturb(key1, particles)
-        out = [self.gradient(params, k, p, aux=True) for p, k in zip(particles, keys)]
+        out = [gradient(params, k, p, aux=True) for p, k in zip(particles, keys)]
         grads, grad_aux = [SplitData(*o) for o in zip(*out)]
         grad_aux = {grouplabel + "_" + label: v
                     for grouplabel, d in grad_aux.items()
@@ -203,16 +201,22 @@ class Particles:
         grad_aux.update({"grads": updated_grads})
         return particles, optimizer_state, grad_aux
 
-    def step(self, params, key=None):
+    def step(self, params, key=None, gradient=None):
         """Log rundata, take step. Mutates state"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         updated_particles, self.optimizer_state, auxdata = self._step(
-            key, self.particles, self.optimizer_state, params)
+            key, self.particles, self.optimizer_state, params, gradient)
         self.write_to_log(self._log(auxdata, self.particles, self.step_counter))
         self.particles = updated_particles
         self.step_counter += 1
         return None
+
+    def step_to(self, updated_particles, auxdata={}):
+        """Alternative way to update particles using external updates."""
+        self.write_to_log(self._log(auxdata, self.particles, self.step_counter))
+        self.particles = updated_particles
+        self.step_counter += 1
 
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         """Append dictionary to log."""
@@ -220,7 +224,6 @@ class Particles:
 
     @partial(jit, static_argnums=0)
     def _log(self, auxdata, particles, step):
-        gradient = auxdata["grads"]
         auxdata.update({
             "step": step,
 #            "gradient_norm": np.linalg.norm(gradient),
@@ -234,7 +237,8 @@ class Particles:
                 f"{k}_mean": np.mean(v, axis=0),
                 f"{k}_std":  np.std(v, axis=0),
             })
-        del auxdata["grads"]
+       if "grads" in auxdata:
+            del auxdata["grads"]
         return auxdata
 
     def plot_mean_and_std(self, target=None, axs=None, **kwargs):
@@ -675,7 +679,7 @@ class KernelGradient():
     """Computes the SVGD approximation to grad(KL), ie
     phi*(y) = E[grad(log p)(y) k(x, y) + div(k)(x, y)]"""
     def __init__(self,
-                 target_logp,
+                 target_logp=None,
                  key=random.PRNGKey(42),
                  kernel = kernels.get_rbf_kernel,
                  bandwidth=None,
@@ -687,30 +691,40 @@ class KernelGradient():
         self.lambda_reg = lambda_reg
         self.rundata = {}
 
-    def get_field(self, inducing_particles):
+    def get_field(self, inducing_particles, target_logp=None):
         """return -phistar(\cdot)"""
+        if target_logp is None:
+            assert self.target_logp
+            target_logp = self.target_logp
         bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
         kernel = self.kernel(bandwidth)
-        phi = stein.get_phistar(kernel, self.target_logp, inducing_particles)
+        phi = stein.get_phistar(kernel, target_logp, inducing_particles)
         return utils.negative(phi), bandwidth
 
-    def gradient(self, params, key, particles, aux=False, scaled=False):
+    def gradient(self, params, key, particles, aux=False, scaled=False, target_logp=None):
         """Compute approximate KL gradient.
         params and key args are not used.
         particles is an np.ndarray of shape (n, d)"""
-        v, h = self.get_field_scaled(particles) if scaled else self.get_field(particles)
+        if target_logp is None:
+            assert self.target_logp
+            target_logp = self.target_logp
+        v, h = self.get_field_scaled(particles, target_logp) if scaled \
+            else self.get_field(particles, target_logp)
         if aux:
             return vmap(v)(particles), {"bandwidth": h,
-                                        "logp": vmap(self.target_logp)(particles)}
+                                        "logp": vmap(target_logp)(particles)}
         else:
             return vmap(v)(particles)
 
-    def get_field_scaled(self, inducing_particles):
+    def get_field_scaled(self, inducing_particles, target_logp=None):
+        if target_logp is None:
+            assert self.target_logp
+            target_logp = self.target_logp
         bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
         kernel = self.kernel(bandwidth)
-        phi = stein.get_phistar(kernel, self.target_logp, inducing_particles)
+        phi = stein.get_phistar(kernel, target_logp, inducing_particles)
         l2_phi_squared = utils.l2_norm_squared(inducing_particles, phi)
-        ksd = stein.stein_discrepancy(inducing_particles, self.target_logp, phi)
+        ksd = stein.stein_discrepancy(inducing_particles, target_logp, phi)
         alpha = ksd / (2*self.lambda_reg*l2_phi_squared)
         return utils.mul(phi, -alpha), bandwidth
 

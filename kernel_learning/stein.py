@@ -119,7 +119,7 @@ def get_phistar(kernel, logp, samples):
     return phistar
 
 
-def get_phistar_batched(h, logp, samples):
+def get_phistar_batched(h, logp, samples): # numpy from SVGD paper code????
     pairwise_dists = utils.squared_distance_matrix(samples)
     Kxy = np.exp( -pairwise_dists / h**2 / 2)
 
