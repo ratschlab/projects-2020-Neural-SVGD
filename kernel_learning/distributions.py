@@ -285,10 +285,13 @@ class Funnel(Distribution):
 
         self.xcov = np.eye(d-1) * np.exp(9/2)
         self.ycov = 9
-        self.cov = np.block([
-            [self.xcov,          np.zeros((d-1, 1))],
-            [np.zeros((1, d-1)), self.ycov         ]
-        ])
+        if d == 2:
+            self.cov = np.block([
+                [self.xcov,          np.zeros((d-1, 1))],
+                [np.zeros((1, d-1)), self.ycov         ]
+            ])
+        else:
+            self.cov = None
 
     def sample(self, n_samples, key=None):
         if key is None:
@@ -319,6 +322,7 @@ class Funnel(Distribution):
         logpy = stats.norm.logpdf(y, loc=0, scale=3)
         logpx = stats.multivariate_normal.logpdf(x, mean=xmean, cov=xcov)
         return np.squeeze(logpy + logpx)
+
 
 class FunnelizedGaussian(Gaussian):
     def __init__(self, mean, cov):

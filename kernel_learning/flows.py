@@ -93,13 +93,15 @@ def neural_svgd_flow(key,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
                                  noise_level=noise_level,
+                                 num_groups=1, # used to be 2
                                  optimizer="sgd")
 
-    next_batch = partial(particles.next_batch, batch_size=None)
+    next_batch = partial(particles.next_batch, batch_size=2*n_particles//3)
+    n_learner_steps = 50
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            learner.train(next_batch, key=subkey, n_steps=50)
+            learner.train(next_batch, key=subkey, n_steps=n_learner_steps)
             particles.step(learner.get_params())
         except Exception as err:
             warnings.warn(f"Caught Exception")

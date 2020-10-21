@@ -49,7 +49,7 @@ class Patience:
         self.patience = patience
         self.time_waiting = 0
         self.min_validation_loss = None
-        self.disable = patience == 0
+        self.disable = patience == -1
 
     def update(self, validation_loss):
         """Returns True when early stopping criterion is met"""
@@ -63,16 +63,18 @@ class Patience:
     def out_of_patience(self):
         return (self.time_waiting > self.patience) and not self.disable
 
-    def reset(self):
+    def reset(self, patience=None):
         self.time_waiting = 0
         self.min_validation_loss = None
+        if patience:
+            self.patience = patience
 
 
 @chex.dataclass
 class SplitData:
-    """Training-validation split"""
+    """Training-test split"""
     training: np.ndarray
-    validation: np.ndarray = None
+    test: np.ndarray = None
 
     def __iter__(self):
         return iter([p for p in astuple(self) if p is not None])
@@ -128,7 +130,7 @@ class Particles:
         self.noise_level = noise_level
 
     def init_particles(self, key):
-        """Returns namedtuple with training and validation particles"""
+        """Returns namedtuple with training and test particles"""
         assert self.num_groups <= 2 # SplitData only supports two groups
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
@@ -162,22 +164,21 @@ class Particles:
 
     def next_batch(self, key, batch_size=None): # TODO make this a generator or something
         """
-        Return next (subsampled) batch of particles (training and validation) for the
+        Return next subsampled batch of particles (training and validation) for the
         training of a gradient field approximator."""
-        assert self.num_groups <= 2
-        particles = self.get_params()
+        assert self.num_groups <= 2 # not strictly necessary anymore, but keep cause I'm not
+        # expecting to use more groups
+        particles, *_ = self.get_params()
         # subsample batch
         if batch_size is None:
-            batch_size = self.n_particles
-        key, *keys = random.split(key, len(jax.tree_leaves(particles))+1)
-        key_tree = jax.tree_unflatten(jax.tree_structure(particles), keys)
-        subsample = partial(utils.subsample, n_subsamples=batch_size, replace=False)
-        batch = jax.tree_multimap(subsample, key_tree, particles)
+            batch_size = self.n_particles//2
 
         # perturb
         if self.noise_level > 0:
-            batch = self.perturb(key, batch)
-        return batch
+            particles = self.perturb(key, particles)
+
+        shuffled_batch = random.permutation(key, particles)
+        return shuffled_batch[:batch_size], shuffled_batch[batch_size:]
 
 
     @partial(jit, static_argnums=0)
@@ -224,7 +225,7 @@ class Particles:
     def _log(self, auxdata, particles, step):
         gradient = auxdata["grads"]
 
-        if self.d < 3:
+        if self.d < 300:
             auxdata.update({
                 "step": step,
                 "particles": particles,
@@ -358,6 +359,12 @@ class TrainingMixin:
                  patience: int = 10,
                  **kwargs):
         self.opt = optax.adam(learning_rate)
+#        schedule = optax.polynomial_schedule(init_value=-learning_rate,
+#                                             end_value=-learning_rate/100,
+#                                             power=0.2,
+#                                             transition_steps=200)
+#        self.opt = optax.chain(optax.scale_by_adam(),
+#                               optax.scale_by_schedule(schedule))
         self.optimizer_state = self.opt.init(self.params)
 
         # state and logging
