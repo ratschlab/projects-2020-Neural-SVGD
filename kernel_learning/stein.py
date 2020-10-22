@@ -221,6 +221,7 @@ def ksd_squared(xs, ys, logp, k):
     ksd_matrix = gvv(xs, ys)
     return np.mean(ksd_matrix)
 
+
 #@partial(jit, static_argnums=(1, 2, 3))
 def ksd_squared_u(xs, logp, k, include_stddev=False):
     """
@@ -248,10 +249,11 @@ def ksd_squared_u(xs, logp, k, include_stddev=False):
     ksd_matrix = index_update(ksd_matrix, diagonal_indices, 0)
     ksd_squared = np.sum(ksd_matrix) / (n * (n-1))
     if include_stddev:
-        stddev = np.sqrt(np.clip(variance.var_ksd(ksd_matrix), a_min=1e-4))
+        stddev = np.sqrt(np.clip(variance.var_ksd(ksd_matrix), a_min=1e-4)) # or clip at variance=1?
         return ksd_squared, stddev
     else:
         return ksd_squared
+
 
 #@partial(jit, static_argnums=(1,2))
 def ksd_squared_v(xs, logp, k, dummy_arg1, dummy_arg2):

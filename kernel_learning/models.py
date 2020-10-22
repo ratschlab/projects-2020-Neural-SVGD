@@ -406,48 +406,33 @@ class TrainingMixin:
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, next_batch: callable, key=None, n_steps=5, progress_bar=False):
+    def train(self, batch = None, next_batch: callable = None, key=None, n_steps=5, progress_bar=False):
         """
+        batch and next_batch cannot both be None.
+
         Arguments:
+        * batch: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
         * next_batch: callable, outputs next training batch. Signature:
-            next_batch(key, noise_level=1.)
+            next_batch(key)
         """
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
 
         def step(key):
-            key, subkey = random.split(key)
-            train_x, val_x = next_batch(subkey)
+            train_x, val_x = next_batch(key) if next_batch else batch
             self.step(train_x, val_x)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
-            return key
+            return
 
         for i in tqdm(range(n_steps), disable=not progress_bar):
-            key = step(key)
+            key, subkey = random.split(key)
+            step(subkey)
             self.write_to_log({"model_params": self.get_params()})
             if self.patience.out_of_patience():
                 self.patience.reset()
                 break
         self.write_to_log({"train_steps": i+1})
-        return
-
-    def train_sampling_every_time(self, proposal, key=None, n_steps=100, batch_size=400,
-                                  catch_nan_errors=False, progress_bar=True):
-        if key is None:
-            self.threadkey, key = random.split(self.threadkey)
-        key, subkey = random.split(key)
-        validation_particles = proposal.sample(batch_size)
-        for _ in tqdm(range(n_steps), disable=not progress_bar):
-            try:
-                key, subkey = random.split(key)
-                particles = proposal.sample(batch_size, key=subkey)
-                self.step(particles, validation_particles)
-            except FloatingPointError as err:
-                if catch_nan_errors:
-                    return
-                else:
-                    raise err from None
         return
 
     def freeze_state(self):
