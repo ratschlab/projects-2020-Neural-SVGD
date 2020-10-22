@@ -21,6 +21,7 @@ import jax
 import pandas as pd
 import haiku as hk
 from jax.experimental import optimizers
+import optax
 
 import config
 
@@ -65,8 +66,93 @@ def animate(target_pdf, traj_list, lims=(-4, 4), interval=100):
     return anims
 
 
-neural_trajectories = []
-svgd_trajectories = []
+class NeuralSampler(hk.Module):
+    def __init__(self, layer_sizes: list = [2, 512, 2], batch_size=100, name: str = None):
+        super().__init__(name=name)
+        self.layer_sizes = layer_sizes
+        self.batch_size = batch_size
+
+    def __call__(self):
+        mlp = hk.nets.MLP(output_sizes=self.layer_sizes,
+                          w_init=hk.initializers.VarianceScaling(scale=2.0),
+                          activation=jax.nn.swish,
+                          activate_final=False)
+        key = hk.next_rng_key()
+        input_shape = (self.batch_size, 2) if self.batch_size else (2,)
+        xi = random.normal(key, shape=input_shape)
+        return mlp(xi)
+
+sampler = hk.transform(lambda: NeuralSampler(batch_size=1000)())
+key, subkey = random.split(key)
+sampler_params = sampler.init(key)
+
+sampler_opt = optax.adam(0.01)
+state = sampler_opt.init(sampler_params)
+
+plot.scatter(sampler.apply(sampler_params, key))
+plot.scatter(random.normal(subkey, (100,2)))
+plt.xlim((-3,3))
+plt.ylim((-3,3))
+
+
+setup = distributions.squiggle_target
+target, proposal = setup.get()
+
+learner = models.SDLearner(target.logpdf, target.d)
+
+
+def sampledot(sampler_params, key, v):
+    """v needs to have shape (m, n), where m is the nr of samples and n the sample dimension"""
+    return np.mean(vmap(np.dot)(sampler.apply(sampler_params, key), v))
+
+@jit
+def sampler_grads(key, sampler_params, gradient_params):
+    """Compute sample gradient and backpropagate into sampler"""
+    dkl = learner.gradient(gradient_params, None, sampler.apply(sampler_params, key))
+    return grad(sampledot)(sampler_params, key, dkl)
+
+
+def gradient_train(sampler_params, key, n_steps=50):
+    keys = random.split(key, n_steps)
+    for key in keys:
+        samples = sampler.apply(sampler_params, key)
+        learner.step(samples, samples)
+
+
+for _ in range(2500):
+    key, subkey = random.split(key)
+    gradient_train(sampler_params, subkey, n_steps=10)
+    
+    key, subkey = random.split(key)
+    grads = sampler_grads(subkey, sampler_params, learner.get_params())
+    grads, state = sampler_opt.update(grads, state, sampler_params)
+    sampler_params = optax.apply_updates(sampler_params, grads)
+
+
+key, subkey = random.split(key)
+samples = sampler.apply(sampler_params, subkey)
+fig, ax = plt.subplots(figsize=[9,9])
+lims=(-4, 4)
+ax.set(ylim=lims, xlim=lims)
+plot.plot_fun_2d(target.pdf, lims=lims, num_gridpoints=300)
+plot.scatter(samples)
+
+
+key, subkey = random.split(key)
+samples = target.sample(1000)
+fig, ax = plt.subplots(figsize=[9,9])
+lims=(-4, 4)
+ax.set(ylim=lims, xlim=lims)
+plot.plot_fun_2d(target.pdf, lims=lims, num_gridpoints=300)
+plot.scatter(samples)
+
+
+plt.plot(learner.rundata["training_loss"])
+# plt.plot(learner.rundata["validation_loss"])
+
+
+plt.plot(learner.rundata["training_sd"])
+# plt.plot(learner.rundata["validation_loss"])
 
 
 get_ipython().run_line_magic("autoreload", "")
@@ -105,15 +191,9 @@ traint_svgd = [p.training for p in svgd_particles.rundata["particles"]]
 traj = np.array(traint)
 traj_svgd = np.array(traint_svgd)
 
-neural_trajectories.append(traj)
-svgd_trajectories.append(traj_svgd)
 
-
-i = 0
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-lims=(-4, 4)
-animate(target.pdf, [traj, traj_svgd], lims=lims, interval=10)
+# get_ipython().run_line_magic("matplotlib", " widget")
+# animate(target.pdf, [traj, traj_svgd], lims=lims, interval=10)
 
 
 setup = distributions.mix_of_gauss
@@ -142,14 +222,9 @@ traint_svgd = [p.training for p in svgd_particles.rundata["particles"]]
 traj = np.array(traint)
 traj_svgd = np.array(traint_svgd)
 
-neural_trajectories.append(traj)
-svgd_trajectories.append(traj_svgd)
 
-
-i = 1
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-animate(target.pdf, [traj, traj_svgd], lims=mix_lims, interval=10)
+# get_ipython().run_line_magic("matplotlib", " widget")
+# animate(target.pdf, [traj, traj_svgd], lims=mix_lims, interval=10)
 
 
 target, proposal = distributions.mix_of_gauss.get()
@@ -187,24 +262,8 @@ svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n
 sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
 
-traint = [p.training for p in neural_particles.rundata["particles"]]
-traint_svgd = [p.training for p in svgd_particles.rundata["particles"]]
-
-traj = np.array(traint)
-traj_svgd = np.array(traint_svgd)
-
-neural_trajectories.append(traj)
-svgd_trajectories.append(traj_svgd)
-
-
-sample_list = [p.particles.training for p in (neural_particles, svgd_particles)] + [target.sample(n_particles)]
-plot_samples(target.pdf, sample_list, (-15, 15))
-
-
-# i = 2
-# traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-# get_ipython().run_line_magic("matplotlib", " widget")
-# animate(target.pdf, [traj, traj_svgd], lims=(-15, 15), interval=10)
+# sample_list = [p.particles.training for p in (neural_particles, svgd_particles)] + [target.sample(n_particles)]
+# plot_samples(target.pdf, sample_list, (-15, 15))
 
 
 setup = distributions.funnel
@@ -224,8 +283,7 @@ sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n
 
 get_ipython().run_line_magic("matplotlib", " inline")
 sample_list = [p.particles.training for p in (neural_particles, svgd_particles)] + [target.sample(n_particles)]
-funnel_lims=(-15, 15)
-plot_samples(target.pdf, sample_list, funnel_lims)
+plot_samples(target.pdf, sample_list, (-15, 15))
 
 
 traint = [p.training for p in neural_particles.rundata["particles"]]
@@ -234,14 +292,9 @@ traint_svgd = [p.training for p in svgd_particles.rundata["particles"]]
 traj = np.array(traint)
 traj_svgd = np.array(traint_svgd)
 
-neural_trajectories.append(traj)
-svgd_trajectories.append(traj_svgd)
 
-
-i = 3
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-animate(target.pdf, [traj, traj_svgd], lims=funnel_lims, interval=10)
+# get_ipython().run_line_magic("matplotlib", " widget")
+# animate(target.pdf, [traj, traj_svgd], lims=lims, interval=10)
 
 
 setup = distributions.banana_target
@@ -271,11 +324,9 @@ traint_svgd = [p.training for p in svgd_particles.rundata["particles"]]
 traj = np.array(traint)
 traj_svgd = np.array(traint_svgd)
 
-neural_trajectories.append(traj)
-svgd_trajectories.append(traj_svgd)
+
+# get_ipython().run_line_magic("matplotlib", " widget")
+# animate(target.pdf, [traj, traj_svgd], lims=banana_lims, interval=10)
 
 
-i = 4
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-animate(target.pdf, [traj, traj_svgd], lims=banana_lims, interval=10)
+
