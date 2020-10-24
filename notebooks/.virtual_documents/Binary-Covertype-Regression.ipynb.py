@@ -59,7 +59,8 @@ num_features = features.shape[-1]
 num_classes = len(onp.unique(labels))
 
 
-def get_batches(x, y, n_steps=500, batch_size=100):
+default_batch_size = 300
+def get_batches(x, y, n_steps=500, batch_size=default_batch_size):
     """Split x and y into batches"""
     assert len(x) == len(y)
     n = len(x)
@@ -69,7 +70,7 @@ def get_batches(x, y, n_steps=500, batch_size=100):
 #     batch_cycle = cycle(zip(*[onp.array_split(data, len(data)//batch_size) for data in (x, y)]))
 #     return islice(batch_cycle, n_steps)
 
-num_batches = len(x_train) // 100
+num_batches = len(x_train) // default_batch_size
 
 
 # def get_batches(x, y, n_steps=500, batch_size=100):
@@ -183,8 +184,6 @@ def batch_unravel(batch_flat):
 def get_schedule(eta):
     def polynomial_schedule(step):
         return eta / (step + 1)**0.55
-    def constant_schedule(step):
-        return eta/5
     return constant_schedule
 
 def get_probs(params):
@@ -216,6 +215,10 @@ def test_accuracy(params):
 get_ipython().run_line_magic("autoreload", "")
 
 
+NUM_VALS = 10 # number of test accuracy evaluations per run
+NUM_STEPS = num_batches*2
+
+
 def run_sgld(key, init_batch):
     """init_batch is a batch of initial samples / particles."""
     init_batch_flat = batch_ravel(init_batch)
@@ -230,16 +233,15 @@ def run_sgld(key, init_batch):
             return -grads
 
     particles = models.Particles(key, energy_gradient, init_batch_flat,
-                                noise_level=1.,
-                                learning_rate=1e-4)
+                                noise_level=1.)
 
     accs = []
-    n_steps = num_batches*3
-    for i, batch_xy in tqdm(enumerate(get_batches(x_train, y_train, n_steps+1)), total=n_steps):
+    for i, batch_xy in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
         particles.step(batch_xy)
-        if i % (n_steps//4)==0:
+        if i % (NUM_STEPS//NUM_VALS)==0:
             accs.append(test_accuracy(batch_unravel(particles.particles.training)))
     particles.perturb()
+    particles.done()
     return batch_unravel(particles.particles.training), accs, particles
 
 
@@ -249,13 +251,13 @@ def run_svgd(init_batch):
     accs = []
 
     svgd_grad = models.KernelGradient(get_target_logp=lambda batch: get_flat_logp(*batch))
-    particles = models.Particles(key, svgd_grad.gradient, init_batch_flat)
+    particles = models.Particles(key, svgd_grad.gradient, init_batch_flat, 1e-1, "adam")
 
-    n_steps = num_batches*3
-    for i, batch in tqdm(enumerate(get_batches(x_train, y_train, n_steps+1)), total=n_steps):
+    for i, batch in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
         particles.step(batch)
-        if i % (n_steps//4)==0:
+        if i % (NUM_STEPS//NUM_VALS)==0:
             accs.append(test_accuracy(batch_unravel(particles.particles.training)))
+    particles.done()
     return batch_unravel(particles.particles.training), accs, particles
 
 
@@ -266,27 +268,54 @@ def run_neural_svgd(key, init_batch):
     init_batch_flat = batch_ravel(init_batch)
     accs = []
 
-    key, key1, key2 = random.split(key, 3)
+    key1, key2 = random.split(key)
     neural_grad = models.SDLearner(target_dim=init_batch_flat.shape[1],
                                    get_target_logp=lambda batch: get_flat_logp(*batch),
                                    key=key1)
-    particles = models.Particles(key2, neural_grad.gradient, init_batch_flat)
+    particles = models.Particles(key2, neural_grad.gradient, init_batch_flat, optimizer="sgd")
 
-    n_steps = num_batches*3
-    for i, data_batch in tqdm(enumerate(get_batches(x_train, y_train, n_steps+1)), total=n_steps):
-        neural_grad.train(next_batch=particles.next_batch, n_steps=1, data=data_batch)
+    next_batch = partial(particles.next_batch, batch_size=150)
+    for i, data_batch in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
+        neural_grad.train(next_batch=next_batch, n_steps=10, data=data_batch)
         particles.step(neural_grad.get_params())
         particles.write_to_log({"logp": mean_logp(*data_batch, particles.particles.training)})
-        if i % (n_steps//4)==0:
+        if i % (NUM_STEPS//NUM_VALS)==0:
             accs.append(test_accuracy(batch_unravel(particles.particles.training)))
+    neural_grad.done()
+    particles.done()
     return batch_unravel(particles.particles.training), accs, particles, neural_grad
 
 
 # Run samplers
-init_batch = dist.sample(100, seed=key)[:-1]
+init_batch = dist.sample(200, seed=key)[:-1]
 sgld_samples, sgld_accs, sgld_p = run_sgld(key, init_batch)
 svgd_samples, svgd_accs, svgd_p = run_svgd(init_batch)
 neural_samples, neural_accs, neural_p, neural_grad = run_neural_svgd(key, init_batch)
+
+
+sgld_aux = sgld_p.rundata
+svgd_aux = svgd_p.rundata
+neural_aux = neural_p.rundata
+
+
+plt.plot(neural_grad.rundata["train_steps"])
+
+
+plt.subplots(figsize=[15, 8])
+plt.plot(neural_grad.rundata["training_loss"])
+plt.plot(neural_grad.rundata["validation_loss"])
+
+
+plt.subplots(figsize=[15, 8])
+plt.plot(sgld_aux["training_mean"]);
+
+
+plt.subplots(figsize=[15, 8])
+plt.plot(svgd_aux["training_mean"]);
+
+
+plt.subplots(figsize=[15, 8])
+plt.plot(neural_aux["training_mean"]);
 
 
 # plt.plot(lmc_aux["accuracy"], "--.", label="SGLD")
@@ -294,11 +323,6 @@ plt.plot(sgld_accs, "--.", label="SGLD")
 plt.plot(svgd_accs, "--.", label="SVGD")
 plt.plot(neural_accs, "--.", label="Neural")
 plt.legend()
-
-
-sgld_aux = sgld_p.rundata
-svgd_aux = svgd_p.rundata
-neural_aux = neural_p.rundata
 
 
 print("SGLD accuracy:", test_accuracy(sgld_samples))
@@ -311,28 +335,31 @@ print("prior samples accuracy:", test_accuracy(dist.sample(500, seed=subkey)[:-1
 test_batches = get_batches(x_test, y_test, batch_size=5000)
 
 
-plt.plot(sgld_aux["training_logp"], label="LMC")
+x, y = next(test_batches)
+test_logps = [mean_logp(x, y, batch_ravel(samples)) for samples in (sgld_samples, svgd_samples, neural_samples)]
+names = ["SGLD", "SVGD", "Neural"]
+
+
+plt.plot(sgld_aux["training_logp"], label="SGLD")
 plt.plot(onp.mean(svgd_aux["training_logp"], axis=1), label="SVGD")
 plt.plot(neural_aux["logp"], label="Neural")
+lines = plt.gca().get_lines()
+colors = [line.get_color() for line in lines]
+
+# for tlogp, color in zip(test_logps, colors):
+#     plt.axhline(y=tlogp, color=color)
+
+
 plt.legend()
 
-
-x, y = next(test_batches)
-test_logp = get_logp(x, y)
-
-
-test_logps = [mean_logp(x, y, batch_ravel(samples)) for samples in (sgld_samples, svgd_samples, neural_samples)]
-names = ["SVGD", "SGLD", "Neural"]
 
 fig, ax = plt.subplots(figsize=[8, 5])
 
 for i, meanlp in enumerate(test_logps):
     ax.bar(i, meanlp, label=names[i])
 
+# ax.bar(i+1, mean_logp(x, y, batch_ravel(init_batch)), label="Init")
 plt.legend()
-
-
-
 
 
 

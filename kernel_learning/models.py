@@ -152,7 +152,8 @@ class Particles:
         normal.
         Returns:
             pertubed particles"""
-        assert self.optimizer_str == "sgd"
+        if self.noise_level > 0:
+            assert self.optimizer_str == "sgd"
         keys = random.split(key, len(jax.tree_leaves(particles)))
         key_tree = jax.tree_unflatten(jax.tree_structure(particles), keys)
         scale = np.sqrt(2*self.learning_rate + 1e-8) * self.noise_level
@@ -225,7 +226,7 @@ class Particles:
     def _log(self, auxdata, particles, step):
         gradient = auxdata["grads"]
 
-        if self.d < 300:
+        if self.d < 30:
             auxdata.update({
                 "step": step,
                 "particles": particles,
@@ -241,6 +242,13 @@ class Particles:
             })
         del auxdata["grads"]
         return auxdata
+
+    def done(self):
+        """converts rundata into arrays"""
+        self.rundata = {
+            k: np.array(v) if k != "particles" else v
+            for k, v in self.rundata.items()
+        }
 
     def plot_mean_and_std(self, target=None, axs=None, **kwargs):
         """axs: two axes"""
@@ -525,6 +533,12 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         """Same as `self.gradient` but uses state"""
         return self.gradient(self.get_params(), particles)
 
+    def done(self):
+        """converts rundata into arrays"""
+        self.rundata = {
+            k: v if k in ["model_params", "gradient_norms"] else np.array(v)
+            for k, v in self.rundata.items()
+        }
 
 class KernelLearner(TrainingMixin):
     """Parametrize kernel to learn the KSD"""
@@ -691,10 +705,13 @@ class KernelGradient():
                  get_target_logp: callable = None,
                  kernel = kernels.get_rbf_kernel,
                  bandwidth=None,
+                 scaled=False,
                  lambda_reg = 1/2):
         """get_target_log is a callable that takes in a batch of data
         (can be any pytree of jnp.ndarrays) and returns a callable logp
         that computes the target log prob (up to an additive constant).
+        scaled: whether to rescale gradients st. they match
+        (grad(logp) - grad(logp))/(2 * lambda_reg) in scale
         """
         if target_logp:
             assert not get_target_logp
@@ -708,6 +725,7 @@ class KernelGradient():
         self.kernel = kernel
         self.lambda_reg = lambda_reg
         self.rundata = {}
+        self.scaled = scaled
 
     def get_field(self, inducing_particles, batch=None):
         """return -phistar(\cdot)"""
@@ -717,11 +735,12 @@ class KernelGradient():
         phi = stein.get_phistar(kernel, target_logp, inducing_particles)
         return utils.negative(phi), bandwidth
 
-    def gradient(self, batch, particles, aux=False, scaled=False):
+    def gradient(self, batch, particles, aux=False):
         """Compute approximate KL gradient.
         particles is an np.ndarray of shape (n, d)"""
         target_logp = self.get_target_logp(batch)
-        v, h = self.get_field_scaled(particles, batch) if scaled else self.get_field(particles, batch)
+        v, h = self.get_field_scaled(particles, batch) if self.scaled \
+            else self.get_field(particles, batch)
         if aux:
             return vmap(v)(particles), {"bandwidth": h,
                                         "logp": vmap(target_logp)(particles)}
