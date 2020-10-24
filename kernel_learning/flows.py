@@ -102,7 +102,7 @@ def neural_svgd_flow(key,
             key, subkey = random.split(key)
             batch = particles.next_batch(subkey, batch_size=2*n_particles//3)
             learner.train(batch, n_steps=n_learner_steps)
-            particles.step(learner.get_params())
+            particles.step([learner.get_params(), None]) # None = no data batch
         except Exception as err:
             warnings.warn(f"Caught Exception")
             return learner, particles, err
@@ -154,11 +154,10 @@ def svgd_flow(key,
               particle_optimizer="sgd",
               scaled=True,
               bandwidth=1.):
-    key, keya, keyb = random.split(key, 3)
+    key, keyb = random.split(key)
     target, proposal = setup.get()
 
     kernel_gradient = models.KernelGradient(target_logp=target.logpdf,
-                                            key=keya,
                                             kernel=kernels.get_rbf_kernel,
                                             bandwidth=bandwidth,
                                             lambda_reg=lambda_reg)

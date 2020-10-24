@@ -72,7 +72,7 @@ class Patience:
 
 @chex.dataclass
 class SplitData:
-    """Training-test split"""
+    """Train-test split"""
     training: np.ndarray
     test: np.ndarray = None
 
@@ -98,12 +98,11 @@ class Particles:
                  key,
                  gradient: callable,
                  init_samples,
-                 target=None,
-                 n_particles: int = 50,
                  learning_rate=1e-2,
                  optimizer="sgd",
-                 num_groups=2,
-                 noise_level=0.):
+                 num_groups=1,
+                 noise_level=0.,
+                 n_particles: int = 50):
         """
         Arguments
         ----------
@@ -113,7 +112,6 @@ class Particles:
         of shape (n, d) containing initial samples.
         """
         self.gradient = gradient
-        self.target = target
         self.n_particles = n_particles
         self.num_groups = num_groups
         self.threadkey, subkey = random.split(key)
@@ -148,9 +146,9 @@ class Particles:
         return self.particles
 
     @partial(jit, static_argnums=0)
-    def perturb(self, key, particles):
+    def _perturb(self, key, particles):
         """Add Gaussian noise scaled proportionally to the learning rate, that is
-        noise = sqrt(2 * lr) * eps, where eps is distributed as a standard
+        noise = sqrt(2 * lr) * z, where z is distributed as a standard
         normal.
         Returns:
             pertubed particles"""
@@ -161,6 +159,10 @@ class Particles:
         return jax.tree_multimap(partial(utils.add_gauss, scale=scale),
                                  key_tree,
                                  particles)
+
+    def perturb(self):
+        self.threadkey, key = random.split(self.threadkey)
+        self.particles = self._perturb(key, self.particles)
 
     def next_batch(self, key, batch_size=None): # TODO make this a generator or something
         """
@@ -175,11 +177,10 @@ class Particles:
 
         # perturb
         if self.noise_level > 0:
-            particles = self.perturb(key, particles)
+            particles = self._perturb(key, particles)
 
         shuffled_batch = random.permutation(key, particles)
         return shuffled_batch[:batch_size], shuffled_batch[batch_size:]
-
 
     @partial(jit, static_argnums=0)
     def _step(self, key, particles, optimizer_state, params):
@@ -194,9 +195,8 @@ class Particles:
             optimizer_state (updated)
             grad_aux: dict containing auxdata
         """
-        key1, *keys = random.split(key, 3)
-        particles = self.perturb(key1, particles)
-        out = [self.gradient(params, k, p, aux=True) for p, k in zip(particles, keys)]
+        particles = self._perturb(key, particles)
+        out = [self.gradient(params, p, aux=True) for p in particles]
         grads, grad_aux = [SplitData(*o) for o in zip(*out)]
         grad_aux = {grouplabel + "_" + label: v
                     for grouplabel, d in grad_aux.items()
@@ -244,8 +244,6 @@ class Particles:
 
     def plot_mean_and_std(self, target=None, axs=None, **kwargs):
         """axs: two axes"""
-        if target is None:
-            target = self.target
         if axs is None:
             fig, axs = plt.subplots(1, 2, figsize=[18,5])
 
@@ -302,7 +300,6 @@ class Particles:
 class VectorFieldMixin:
     """Methods for init of Vector field MLP"""
     def __init__(self,
-                 target_logp: callable,
                  target_dim: int,
                  key=random.PRNGKey(42),
                  sizes: list = None,
@@ -315,7 +312,6 @@ class VectorFieldMixin:
                           f"target dim {self.d}.")
 
         self.threadkey, subkey = random.split(key)
-        self.target_logp = target_logp
 
         # net and optimizer
         self.field = hk.transform(lambda x: nets.VectorField(self.sizes)(x))
@@ -375,22 +371,23 @@ class TrainingMixin:
         super().__init__(**kwargs)
 
     @partial(jit, static_argnums=0)
-    def _step(self, key, params, optimizer_state, particles, validation_particles):
-        """update parameters and compute validation loss"""
-        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, key, particles)
+    def _step(self, key, params, batch, optimizer_state, particles, validation_particles):
+        """update parameters and compute validation loss
+        batch: batch of data used to approximate logp"""
+        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, batch, key, particles)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
 
-        _, val_loss_aux = self.loss_fn(params, key, validation_particles)
+        _, val_loss_aux = self.loss_fn(params, batch, key, validation_particles)
         auxdata = (loss_aux, val_loss_aux, grads, params)
         return params, optimizer_state, auxdata
 
-    def step(self, particles, validation_particles, disable_jit=False):
+    def step(self, particles, validation_particles, batch):
         """Step and mutate state"""
         self.threadkey, key = random.split(self.threadkey)
-        step_fn = self._step_unjitted if disable_jit else self._step
-        self.params, self.optimizer_state, auxdata = step_fn(key,
-            self.params, self.optimizer_state, particles, validation_particles)
+        self.params, self.optimizer_state, auxdata = self._step(
+            key, self.params, batch, self.optimizer_state,
+            particles, validation_particles)
         self.write_to_log(
             self._log(particles, validation_particles, auxdata, self.step_counter))
         self.step_counter += 1
@@ -406,9 +403,11 @@ class TrainingMixin:
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, batch = None, next_batch: callable = None, key=None, n_steps=5, progress_bar=False):
+    def train(self, batch = None, next_batch: callable = None, key=None, n_steps=5, progress_bar=False, data = None):
         """
         batch and next_batch cannot both be None.
+        batch is an array of particles.
+        data_batch is data used to compute logp (passed through self.loss_fn)
 
         Arguments:
         * batch: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
@@ -420,7 +419,7 @@ class TrainingMixin:
 
         def step(key):
             train_x, val_x = next_batch(key) if next_batch else batch
-            self.step(train_x, val_x)
+            self.step(train_x, val_x, data)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
             return
@@ -442,30 +441,49 @@ class TrainingMixin:
                                    self.rundata))
         return
 
-    def loss_fn(self, params, key, particles):
+    def loss_fn(self, params, batch, key, particles):
         raise NotImplementedError()
 
-    def gradient(self, params, key, particles, aux=False):
+    def gradient(self, params, particles, aux=False):
         raise NotImplementedError()
 
 
 class SDLearner(VectorFieldMixin, TrainingMixin):
     """Parametrize vector field to maximize the stein discrepancy"""
     def __init__(self,
-                 target_logp: callable,
                  target_dim: int,
+                 target_logp: callable = None,
+                 get_target_logp: callable = None,
                  key: np.array = random.PRNGKey(42),
                  sizes: list = None,
                  learning_rate: float = 1e-2,
                  patience: int = 0):
-        super().__init__(target_logp, target_dim, key=key, sizes=sizes,
+        super().__init__(target_dim, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience)
         self.lambda_reg = 1/2
+        if target_logp:
+            assert not get_target_logp
+            self.get_target_logp = lambda *args: target_logp
+        elif get_target_logp:
+            self.get_target_logp = get_target_logp
+        else:
+            return ValueError(f"One of target_logp and get_target_logp must"
+                              f"be given.")
 
-    def loss_fn(self, params, key, particles):
+
+    def loss_fn(self, params, batch, key, particles):
+        """
+        params: neural net paramers
+        batch: data used to compute logp. Can be none if logp is known precisely
+        key: random PRNGKey
+        particles: array of shape (n, d)
+        """
+        target_logp = self.get_target_logp(batch)
         f = utils.negative(self.get_field(particles, params))
+        #f = lambda x: grad(target_logp)(x) - self.get_field(particles, params)(x)
+        # would also need to modify self.get_field, etc
         stein_discrepancy, stein_aux = stein.stein_discrepancy(
-            particles, self.target_logp, f, aux=True)
+            particles, target_logp, f, aux=True)
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
@@ -495,19 +513,17 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         }
         return step_log
 
-    def gradient(self, params, _, particles, aux=False):
+    def gradient(self, params, particles, aux=False):
+        """params is a pytree of neural net parameters"""
         v = self.get_field(particles, params)
         if aux:
-            stein_discrepancy, stein_aux = stein.stein_discrepancy(
-                particles, self.target_logp, v, aux=True)
-            auxdata = {"sd": stein_discrepancy}
-            return v(particles), auxdata
+            return v(particles), {}
         else:
             return v(particles)
 
     def grads(self, particles):
         """Same as `self.gradient` but uses state"""
-        return self.gradient(self.get_params(), None, particles)
+        return self.gradient(self.get_params(), particles)
 
 
 class KernelLearner(TrainingMixin):
@@ -602,7 +618,7 @@ class KernelLearner(TrainingMixin):
             })
         return step_log
 
-    def gradient(self, params, _, particles, aux=False):
+    def gradient(self, params, particles, aux=False):
         v = self.get_field(inducing_particles=particles, params=params)
         if aux:
             return vmap(v)(particles), {}
@@ -655,7 +671,7 @@ class ScoreLearner(VectorFieldMixin, TrainingMixin):
             })
         return step_log
 
-    def gradient(self, params, _, particles, aux=False):
+    def gradient(self, params, particles, aux=False):
         score = self.get_score(init_particles=particles, params=params)
         grads = score(particles) - vmap(grad(self.target_logp))(particles)
         if aux:
@@ -665,48 +681,60 @@ class ScoreLearner(VectorFieldMixin, TrainingMixin):
 
     def grads(self, particles):
         """Same as `self.gradient` but uses state"""
-        return self.gradient(self.get_params(), None, particles)
+        return self.gradient(self.get_params(), particles)
 
 class KernelGradient():
     """Computes the SVGD approximation to grad(KL), ie
     phi*(y) = E[grad(log p)(y) k(x, y) + div(k)(x, y)]"""
     def __init__(self,
-                 target_logp,
-                 key=random.PRNGKey(42),
+                 target_logp: callable = None,
+                 get_target_logp: callable = None,
                  kernel = kernels.get_rbf_kernel,
                  bandwidth=None,
                  lambda_reg = 1/2):
-        self.target_logp = target_logp
-        self.threadkey, subkey = random.split(key)
+        """get_target_log is a callable that takes in a batch of data
+        (can be any pytree of jnp.ndarrays) and returns a callable logp
+        that computes the target log prob (up to an additive constant).
+        """
+        if target_logp:
+            assert not get_target_logp
+            self.get_target_logp = lambda *args: target_logp
+        elif get_target_logp:
+            self.get_target_logp = get_target_logp
+        else:
+            return ValueError(f"One of target_logp and get_target_logp must"
+                              f"be given.")
         self.bandwidth = bandwidth
         self.kernel = kernel
         self.lambda_reg = lambda_reg
         self.rundata = {}
 
-    def get_field(self, inducing_particles):
+    def get_field(self, inducing_particles, batch=None):
         """return -phistar(\cdot)"""
+        target_logp = self.get_target_logp(batch)
         bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
         kernel = self.kernel(bandwidth)
-        phi = stein.get_phistar(kernel, self.target_logp, inducing_particles)
+        phi = stein.get_phistar(kernel, target_logp, inducing_particles)
         return utils.negative(phi), bandwidth
 
-    def gradient(self, params, key, particles, aux=False, scaled=False):
+    def gradient(self, batch, particles, aux=False, scaled=False):
         """Compute approximate KL gradient.
-        params and key args are not used.
         particles is an np.ndarray of shape (n, d)"""
-        v, h = self.get_field_scaled(particles) if scaled else self.get_field(particles)
+        target_logp = self.get_target_logp(batch)
+        v, h = self.get_field_scaled(particles, batch) if scaled else self.get_field(particles, batch)
         if aux:
             return vmap(v)(particles), {"bandwidth": h,
-                                        "logp": vmap(self.target_logp)(particles)}
+                                        "logp": vmap(target_logp)(particles)}
         else:
             return vmap(v)(particles)
 
-    def get_field_scaled(self, inducing_particles):
+    def get_field_scaled(self, inducing_particles, batch=None):
+        target_logp = self.get_target_logp(batch)
         bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
         kernel = self.kernel(bandwidth)
-        phi = stein.get_phistar(kernel, self.target_logp, inducing_particles)
+        phi = stein.get_phistar(kernel, target_logp, inducing_particles)
         l2_phi_squared = utils.l2_norm_squared(inducing_particles, phi)
-        ksd = stein.stein_discrepancy(inducing_particles, self.target_logp, phi)
+        ksd = stein.stein_discrepancy(inducing_particles, target_logp, phi)
         alpha = ksd / (2*self.lambda_reg*l2_phi_squared)
         return utils.mul(phi, -alpha), bandwidth
 
@@ -764,7 +792,7 @@ class KernelizedScoreMatcher():
             return score(x) - self.target_score(x)
         return v
 
-    def gradient(self, params, key, particles, aux=False):
+    def gradient(self, _, particles, aux=False):
         """Compute approximate KL gradient"""
         score = self.get_score(particles)
         score_batched = vmap(score)(particles)
@@ -796,7 +824,7 @@ class EnergyGradient():
         (without noise)."""
         return utils.negative(self.target_score)
 
-    def gradient(self, params, key, particles, aux=False):
+    def gradient(self, _, particles, aux=False):
         """Compute gradient used for SGD particle update"""
         v = self.get_field(particles)
         if aux:
