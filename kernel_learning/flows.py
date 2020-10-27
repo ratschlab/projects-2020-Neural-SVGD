@@ -93,7 +93,7 @@ def neural_svgd_flow(key,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
                                  noise_level=noise_level,
-                                 num_groups=1, # used to be 2
+                                 num_groups=1 if target.d > 2 else 2,
                                  optimizer="sgd")
 
     n_learner_steps = 50
@@ -102,7 +102,7 @@ def neural_svgd_flow(key,
             key, subkey = random.split(key)
             batch = particles.next_batch(subkey, batch_size=2*n_particles//3)
             learner.train(batch, n_steps=n_learner_steps)
-            particles.step([learner.get_params(), None]) # None = no data batch
+            particles.step(learner.get_params())
         except Exception as err:
             warnings.warn(f"Caught Exception")
             return learner, particles, err
@@ -160,15 +160,13 @@ def svgd_flow(key,
     kernel_gradient = models.KernelGradient(target_logp=target.logpdf,
                                             kernel=kernels.get_rbf_kernel,
                                             bandwidth=bandwidth,
-                                            lambda_reg=lambda_reg)
-    gradient = partial(kernel_gradient.gradient, scaled=scaled) # scale to match lambda_reg
-
+                                            lambda_reg=lambda_reg,
+                                            scaled=scaled)
     svgd_particles = models.Particles(key=keyb,
-                                      gradient=gradient,
+                                      gradient=kernel_gradient.gradient,
                                       init_samples=proposal.sample,
                                       n_particles=n_particles,
                                       learning_rate=particle_lr,
-                                      num_groups=1,
                                       noise_level=noise_level,
                                       optimizer=particle_optimizer)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):

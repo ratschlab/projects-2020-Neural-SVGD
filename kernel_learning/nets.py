@@ -1,5 +1,5 @@
 import jax.numpy as np
-from jax import vmap
+from jax import vmap, grad
 import jax
 import haiku as hk
 
@@ -81,6 +81,34 @@ class VectorField(hk.Module):
                           activation=jax.nn.swish,
                           activate_final=False)
         return mlp(x)
+
+
+class KLGrad(hk.Module):
+    def __init__(self, sizes: list, logp: callable, name: str = None):
+        """
+        Take care to choose sizes[-1] equal to the particle dimension.
+        init_x should have shape (n, d)
+        """
+        super().__init__(name=name)
+        self.sizes = sizes
+        self.logp = logp
+
+    def __call__(self, x):
+        """x is a batch of particles of shape (n, d) or a single particle
+        of shape (d,)"""
+        assert x.shape[-1] == self.sizes[-1]
+        mlp = hk.nets.MLP(output_sizes=self.sizes,
+                          w_init=hk.initializers.VarianceScaling(scale=2.0),
+                          activation=jax.nn.swish,
+                          activate_final=False)
+        s = hk.get_parameter("scale", (), init=np.ones)
+        if x.ndim == 1:
+            return mlp(x) - s*grad(self.logp)(x)
+        elif x.ndim == 2:
+            return mlp(x) - s*vmap(grad(self.logp))(x)
+        else:
+            raise ValueError("Input needs to have rank 1 or 2.")
+
 
 
 def build_rbf():

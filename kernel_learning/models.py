@@ -171,7 +171,7 @@ class Particles:
         training of a gradient field approximator."""
         assert self.num_groups <= 2 # not strictly necessary anymore, but keep cause I'm not
         # expecting to use more groups
-        particles, *_ = self.get_params()
+        particles, test_particles = self.get_params()
         # subsample batch
         if batch_size is None:
             batch_size = self.n_particles//2
@@ -182,6 +182,7 @@ class Particles:
 
         shuffled_batch = random.permutation(key, particles)
         return shuffled_batch[:batch_size], shuffled_batch[batch_size:]
+        #return particles, test_particles # TODO undo this, was just for testing
 
     @partial(jit, static_argnums=0)
     def _step(self, key, particles, optimizer_state, params):
@@ -245,8 +246,9 @@ class Particles:
 
     def done(self):
         """converts rundata into arrays"""
+        skip = "particles accuracy test_logp".split()
         self.rundata = {
-            k: np.array(v) if k != "particles" else v
+            k: v if k in skip else np.array(v)
             for k, v in self.rundata.items()
         }
 
@@ -309,6 +311,7 @@ class VectorFieldMixin:
     """Methods for init of Vector field MLP"""
     def __init__(self,
                  target_dim: int,
+                 target_logp: callable = None,
                  key=random.PRNGKey(42),
                  sizes: list = None,
                  **kwargs):
@@ -318,11 +321,12 @@ class VectorFieldMixin:
             warnings.warn(f"Output dim should equal target dim; instead "
                           f"received output dim {sizes[-1]} and "
                           f"target dim {self.d}.")
-
         self.threadkey, subkey = random.split(key)
 
         # net and optimizer
-        self.field = hk.transform(lambda x: nets.VectorField(self.sizes)(x))
+        self.field = hk.transform(
+            #lambda *args: nets.KLGrad(self.sizes, target_logp)(*args))
+            lambda *args: nets.VectorField(self.sizes)(*args))
         self.params = self.init_params()
         super().__init__(**kwargs)
 
@@ -464,9 +468,9 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                  get_target_logp: callable = None,
                  key: np.array = random.PRNGKey(42),
                  sizes: list = None,
-                 learning_rate: float = 1e-2,
+                 learning_rate: float = 5e-3,
                  patience: int = 0):
-        super().__init__(target_dim, key=key, sizes=sizes,
+        super().__init__(target_dim, target_logp, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience)
         self.lambda_reg = 1/2
         if target_logp:
@@ -478,6 +482,11 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
             return ValueError(f"One of target_logp and get_target_logp must"
                               f"be given.")
 
+    def _get_grad(self, particles, params):
+        # TODO this only works when target logp is fixed
+        """Return approximation of KL gradient as callable"""
+        target_logp = self.get_target_logp()
+        return self.get_field(particles, params)
 
     def loss_fn(self, params, batch, key, particles):
         """
@@ -488,8 +497,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         """
         target_logp = self.get_target_logp(batch)
         f = utils.negative(self.get_field(particles, params))
-        #f = lambda x: grad(target_logp)(x) - self.get_field(particles, params)(x)
-        # would also need to modify self.get_field, etc
+        #f = utils.negative(self._get_grad(particles, params)) # = - grad(KL)
         stein_discrepancy, stein_aux = stein.stein_discrepancy(
             particles, target_logp, f, aux=True)
         l2_f_sq = utils.l2_norm_squared(particles, f)
@@ -524,6 +532,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
     def gradient(self, params, particles, aux=False):
         """params is a pytree of neural net parameters"""
         v = self.get_field(particles, params)
+        #v = vmap(self._get_grad(particles, params))
         if aux:
             return v(particles), {}
         else:
