@@ -40,7 +40,8 @@ def neural_svgd_flow(key,
                      particle_lr=1e-2,
                      learner_lr=1e-2,
                      noise_level=default_noise_level,
-                     patience=default_patience):
+                     patience=default_patience,
+                     aux=True):
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
@@ -48,7 +49,8 @@ def neural_svgd_flow(key,
                                target_dim=target.d,
                                sizes=sizes,
                                learning_rate=learner_lr,
-                               patience=patience)
+                               patience=patience,
+                               aux=aux)
 
     particles = models.Particles(key=keyb,
                                  gradient=learner.gradient,

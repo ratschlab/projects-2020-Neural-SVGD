@@ -322,7 +322,10 @@ class VectorFieldMixin:
                  target_logp: callable = None,
                  key=random.PRNGKey(42),
                  sizes: list = None,
+                 aux = True,
                  **kwargs):
+        """if aux, then add mean and variance as auxiliary input to MLP."""
+        self.aux = aux
         self.d = target_dim
         self.sizes = sizes if sizes else [32, 32, self.d]
         self.auxdim = self.d*2
@@ -336,7 +339,8 @@ class VectorFieldMixin:
         def field(x, aux):
             mlp = nets.MLP(self.sizes)
             scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args))
-            return scale * mlp(np.concatenate([x, aux]))
+            mlp_input = np.concatenate([x, aux]) if self.aux else x
+            return scale * mlp(mlp_input)
         self.field = hk.transform(field)
         self.params = self.init_params()
         super().__init__(**kwargs)
@@ -345,17 +349,18 @@ class VectorFieldMixin:
         """Auxiliary data that will be concatenated onto MLP input.
         Output has shape (self.auxdim,).
         Can also be None."""
+        if not self.aux:
+            return None
         aux = np.concatenate([np.mean(particles, axis=0), np.std(particles, axis=0)])
         assert self.auxdim == len(aux)
         return aux
-        # return None
 
     def init_params(self, key=None, keep_params=False):
         """Initialize MLP parameter"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         x_dummy = np.ones(self.d)
-        aux_dummy = np.ones(self.auxdim) if self.auxdim > 0 else None
+        aux_dummy = np.ones(self.auxdim) if self.aux else None
         params = self.field.init(key, x_dummy, aux_dummy)
         return params
 
@@ -533,9 +538,12 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                  key: np.array = random.PRNGKey(42),
                  sizes: list = None,
                  learning_rate: float = 5e-3,
-                 patience: int = 0):
+                 patience: int = 0,
+                 aux=True):
+        """aux: bool, whether to concatenate particle dist info onto
+        mlp input"""
         super().__init__(target_dim, target_logp, key=key, sizes=sizes,
-                         learning_rate=learning_rate, patience=patience)
+                         learning_rate=learning_rate, patience=patience, aux=aux)
         self.lambda_reg = 1/2
         if target_logp:
             assert not get_target_logp
