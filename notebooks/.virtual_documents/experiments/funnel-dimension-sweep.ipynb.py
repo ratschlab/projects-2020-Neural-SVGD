@@ -43,11 +43,16 @@ figure_path = "/home/lauro/documents/msc-thesis/thesis/figures/"
 printsize = [5.4, 4]
 
 
+get_ipython().run_line_magic("autoreload", "")
+
+
 n_steps = 200
 particle_lr = 1e-2
 learner_lr = 1e-2
 n_particles = 200
-d = 7
+d = 25
+PATIENCE = 0
+# PATIENCE = 15 # try this
 
 
 target = distributions.Funnel(d)
@@ -56,7 +61,7 @@ funnel_setup = distributions.Setup(target, proposal)
 
 
 key, subkey = random.split(key)
-neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=0, learner_lr=learner_lr)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=PATIENCE, learner_lr=learner_lr)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
 sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
@@ -83,7 +88,7 @@ neural_final, svgd_final, sgld_final = final_particles_list
 
 
 def plot_projection(idx):
-    true_samples = target.sample(1000)
+    true_samples = target.sample(200)
     sample_list = [p.particles.training for p in (neural_particles, sgld_particles, svgd_particles)]
     fig, axs = plt.subplots(1, 3, figsize=[20, 5])
     titles = ("Neural SVGD", "Langevin", "SVGD")
@@ -124,9 +129,9 @@ plot_projection(idx)
 idx = np.array([1, -1])
 
 
-trajectory = neural_particles.rundata["particles"]
-trajectory = np.array([t.training for t in trajectory])
-trajectory_projected = trajectory[:, :, idx]
+# trajectory = neural_particles.rundata["training_particles"]
+# trajectory = np.array([t.training for t in trajectory])
+# trajectory_projected = trajectory[:, :, idx]
 
 
 
@@ -145,7 +150,7 @@ rbf = kernels.get_rbf_kernel(1.)
 funnel = kernels.get_funnel_kernel(1.)
 mix = lambda x, y: rbf(x, y) + funnel(x, y)
 
-kernel_matrix = vmap(vmap(funnel, (0, None)), (None, 0))
+kernel_matrix = vmap(vmap(rbf, (0, None)), (None, 0))
 
 def null_diagonal(matrix):
     """matrix is an (n,n) array.
@@ -225,23 +230,21 @@ for name, line in zip(names, lines):
 plt.ylabel("MMD(samples, target)")
 plt.xlabel("Dimensionality of sample space")
 plt.legend()
+plt.yscale("log")
 
 
-plt.subplots(figsize=printsize)
-names = "Neural SVGD SGLD".split()
-lines = plt.plot(mmd_sweep, "--.")
-for name, line in zip(names, lines):
-    line.set_label(name)
-plt.legend()
-plt.ylabel("MMD(samples, target)")
-plt.xlabel("Dimensionality of sample space")
-plt.savefig(figure_path + "funnel-dimension-sweep.pgf")
+# plt.subplots(figsize=printsize)
+# names = "Neural SVGD SGLD".split()
+# lines = plt.plot(mmd_sweep, "--.")
+# for name, line in zip(names, lines):
+#     line.set_label(name)
+# plt.legend()
+# plt.ylabel("MMD(samples, target)")
+# plt.xlabel("Dimensionality of sample space")
+# plt.savefig(figure_path + "funnel-dimension-sweep.pgf")
 
 
 
-
-
-idx
 
 
 get_ipython().run_line_magic("matplotlib", " inline")

@@ -45,6 +45,8 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
 
+import optax
+
 
 # set up exporting
 import matplotlib
@@ -57,6 +59,9 @@ matplotlib.rcParams.update({
 })
 
 # save figures by using plt.savefig('title of figure')
+
+
+get_ipython().run_line_magic("matplotlib", " inline")
 
 
 data = scipy.io.loadmat('/home/lauro/code/msc-thesis/wang_svgd/data/covertype.mat')
@@ -194,11 +199,6 @@ def batch_unravel(batch_flat):
     return vmap(unravel)(batch_flat)
 
 
-def get_schedule(eta):
-    def polynomial_schedule(step):
-        return eta / (step + 1)**0.55
-    return constant_schedule
-
 def get_probs(params):
     """
     Argument: sampled model parameters (single sample! need to vmap over sample batch)
@@ -237,8 +237,12 @@ from sklearn.calibration import calibration_curve
 
 
 NUM_VALS = 20 # number of test accuracy evaluations per run
-NUM_EPOCHS = 1
+NUM_EPOCHS = 3
 NUM_STEPS = num_batches*NUM_EPOCHS
+
+
+def sample(key):
+    return batch_ravel(dist.sample(200, seed=key)[:-1])
 
 
 def run_sgld(key, init_batch):
@@ -254,7 +258,7 @@ def run_sgld(key, init_batch):
         else:
             return -grads
 
-    particles = models.Particles(key, energy_gradient, init_batch_flat,
+    particles = models.Particles(key, energy_gradient, init_batch_flat, learning_rate=5e-3,
                                  noise_level=1.)
 
     for i, batch_xy in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
@@ -274,13 +278,17 @@ def run_sgld(key, init_batch):
     return batch_unravel(particles.particles.training), particles
 
 
+svgd_opt = optax.chain(optax.scale_by_schedule(utils.polynomial_schedule), 
+                       optax.scale_by_rms(),
+                       optax.scale(-5e-2))
+
 def run_svgd(init_batch):
     """init_batch is a batch of initial samples / particles."""
     init_batch_flat = batch_ravel(init_batch)
     accs = []
 
     svgd_grad = models.KernelGradient(get_target_logp=lambda batch: get_flat_logp(*batch), scaled=True)
-    particles = models.Particles(key, svgd_grad.gradient, init_batch_flat, optimizer="sgd")
+    particles = models.Particles(key, svgd_grad.gradient, init_batch_flat, custom_optimizer=svgd_opt)
 
     for i, batch in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
         particles.step(batch)
@@ -299,6 +307,10 @@ def run_svgd(init_batch):
     return batch_unravel(particles.particles.training), particles
 
 
+svgd_opt = optax.chain(optax.scale_by_schedule(utils.polynomial_schedule), 
+                       optax.scale_by_rms(),
+                       optax.scale(-1e-3))
+
 def run_neural_svgd(key, init_batch):
     """init_batch is a batch of initial samples / particles.
     Note: there's two types of things I call 'batch': a batch from the dataset
@@ -308,8 +320,13 @@ def run_neural_svgd(key, init_batch):
     key1, key2 = random.split(key)
     neural_grad = models.SDLearner(target_dim=init_batch_flat.shape[1],
                                    get_target_logp=lambda batch: get_flat_logp(*batch),
-                                   key=key1)
+                                   learning_rate=5e-3,
+                                   key=key1,
+                                   aux=False)
     particles = models.Particles(key2, neural_grad.gradient, init_batch_flat, optimizer="sgd")
+
+    # Warmup on first batch
+    neural_grad.train(next_batch=sample, n_steps=100, early_stopping=False, data=next(get_batches(x_train, y_train, 2)))
 
     next_batch = partial(particles.next_batch, batch_size=2*len(init_batch_flat)//3)
     for i, data_batch in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
@@ -335,6 +352,8 @@ key, subkey = random.split(key)
 
 
 # TODO: check if I'm doing batching right
+# cause it seems test accuracy and test likelihood don't track the 
+# new batch likelihood, even tho those should be the same
 
 
 get_ipython().run_line_magic("autoreload", "")
@@ -437,7 +456,7 @@ plt.legend()
 from sklearn.calibration import calibration_curve
 
 
-a, b = calibration_curve(y_test, probs)
+# a, b = calibration_curve(y_test, probs)
 
 
 @jit
@@ -469,4 +488,7 @@ for ax, probs, name in zip(axs, probabilities, names):
 
 
 certainty = np.max([1 - probs, probs])
+
+
+
 

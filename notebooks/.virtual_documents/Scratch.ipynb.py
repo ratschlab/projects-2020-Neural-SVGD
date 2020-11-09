@@ -56,17 +56,41 @@ tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
 
 
+def get_schedule(eta):
+    def polynomial_schedule(step):
+        return eta / (step + 1)**0.55
+    return polynomial_schedule
 
+
+pol1 = get_schedule(1)
+
+
+pol2 = optax.polynomial_schedule(init_value=1, end_value=.281838, power=0.55, transition_steps=9)
+
+
+plt.plot([pol1(t) for t in range(10)], "--.")
+plt.plot([pol2(t) for t in range(10)], "--.")
+
+
+[pol2(t) for t in range(11)]
 
 
 np.concatenate
 
 
-x = np.array([1,2,3])
-y = np.array([1,2])
+xs = random.normal(key, (100, 3))
 
 
-np.concatenate([x, y])
+aux = np.concatenate([np.mean(xs, axis=0), np.std(xs, axis=0)])
+
+
+aux.shape
+
+
+inp = np.concatenate([xs[0], aux])
+
+
+inp.shape
 
 
 get_ipython().run_line_magic("autoreload", "")
