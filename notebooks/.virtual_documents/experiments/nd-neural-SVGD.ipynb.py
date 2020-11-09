@@ -26,11 +26,28 @@ import flows
 key = random.PRNGKey(0)
 
 
+# set up exporting
+import matplotlib
+matplotlib.use("pgf")
+matplotlib.rcParams.update({
+    "pgf.texsystem": "pdflatex",
+#     'font.family': 'serif',
+    'text.usetex': True,
+    'pgf.rcfonts': False,
+})
+
+figure_path = "/home/lauro/documents/msc-thesis/thesis/figures/"
+# save figures by using plt.savefig('path/to/fig')
+# remember that latex textwidth is 5.4in
+# so use figsize=[5.4, 4], for example
+printsize = [5.4, 4]
+
+
 get_ipython().run_line_magic("autoreload", "")
 
 
 d = 50
-variances = np.logspace(-2, 0, num=d)
+variances = np.logspace(-4, 0, num=d)
 target = distributions.Gaussian(np.zeros(d), variances)
 proposal = distributions.Gaussian(np.zeros(d), np.ones(d))
 setup = distributions.Setup(target, proposal)
@@ -79,29 +96,50 @@ plt.ylim((1e-4, 1.5))
 #     ax.set_title(title)
 
 
-svgd_gradient2, svgd_particles2, err2 = flows.svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True, bandwidth=10)
+# svgd_gradient2, svgd_particles2, err2 = flows.svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True, bandwidth=100)
+svgd_gradient3, svgd_particles3, err3 = flows.svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True, bandwidth=8)
 
 
-# get final particles
-svgd_particles2 = svgd_particles2.get_params().training
-scov = np.cov(svgd_particles2, rowvar=False)
-covs2 = covs
-covs2[2] = scov
+all_covs = covs
+all_covs.extend([np.cov(p.get_params().training, rowvar=False) for p in (svgd_particles2, svgd_particles3)])
+all_names = ["Neural", "SVGD with median heuristic", "SGLD", "SVGD h = 100", "SVGD h = 10"]
 
 
 get_ipython().run_line_magic("matplotlib", " inline")
 plt.subplots(figsize=[20, 7])
+# plt.subplots(figsize=printsize)
 grid = np.arange(0, d)
 
 plt.plot(grid, np.diag(target.cov), label="True")
-for cov_diagonal, name in zip([np.diag(cov) for cov in covs2[1:]], ["Neural", "SVGD", "SGLD"]):
+for cov_diagonal, name in zip([np.diag(cov) for cov in all_covs[1:]], all_names):
     plt.plot(grid, cov_diagonal, label=name, marker="o")
+# plt.plot(grid, np.diag(target.cov), label="True", color="tab:blue")
 
+    
 plt.legend()
 plt.ylabel("Variance per axis")
 plt.xlabel("Axis index")
 plt.yscale("log")
 plt.ylim((1e-4, 1.5))
+
+
+# plt.subplots(figsize=[20, 7])
+plt.subplots(figsize=[5.4,4])
+grid = np.arange(0, d)
+
+plt.plot(grid, np.diag(target.cov), label="True")
+for cov_diagonal, name in zip([np.diag(cov) for cov in all_covs[1:]], all_names):
+    plt.plot(grid, cov_diagonal, label=name, marker=".")
+# plt.plot(grid, np.diag(target.cov), label="True", color="tab:blue")
+
+    
+plt.legend()
+plt.ylabel("Variance per axis")
+plt.xlabel("Axis index")
+plt.yscale("log")
+plt.ylim((1e-4, 1.5))
+
+plt.savefig(figure_path + "sampling-ill-conditioned-gaussian.pgf")
 
 
 n_steps = 200
@@ -182,30 +220,99 @@ trajectory_projected = trajectory[:, :, idx]
 
 
 
-get_ipython().run_line_magic("matplotlib", " widget")
-lims = (-15, 15)
-fig, ax = plt.subplots(figsize=[8,8])
-ax.scatter(*np.rollaxis(target.sample(n_particles)[:, idx], 1), label="True", alpha=0.25)
-ax.set(xlim=lims, ylim=lims)
-plot.animate_array(trajectory_projected, fig, ax)
+# get_ipython().run_line_magic("matplotlib", " widget")
+# lims = (-15, 15)
+# fig, ax = plt.subplots(figsize=[8,8])
+# ax.scatter(*np.rollaxis(target.sample(n_particles)[:, idx], 1), label="True", alpha=0.25)
+# ax.set(xlim=lims, ylim=lims)
+# plot.animate_array(trajectory_projected, fig, ax)
 
 
+d = 50
+key, subkey = random.split(key)
+alpha = 0.5
+beta = 1
+variances = random.gamma(subkey, alpha, shape=(d,)) / beta
+
+target = distributions.Gaussian(np.zeros(d), variances)
+proposal = distributions.Gaussian(np.zeros(d), np.ones(d))
+setup = distributions.Setup(target, proposal)
 
 
+get_ipython().run_line_magic("matplotlib", " inline")
 
 
+plt.hist(np.log10(variances))
 
 
+n_steps = 200
+particle_lr = 1e-3
+learner_lr = 1e-2
+n_particles = 200
+# n_particles = 600
+key, subkey = random.split(key)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0, sizes=[32, 32, d], patience=2, learner_lr=learner_lr)
+svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
+sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
 
+var = np.diag(target.cov)
+
+spar = sgld_particles.get_params().training
+svar = np.diag(np.cov(spar, rowvar=False))
+
+npar = neural_particles.get_params().training
+nvar = np.diag(np.cov(npar, rowvar=False))
+
+stpar = svgd_particles.get_params().training
+stvar = np.diag(np.cov(stpar, rowvar=False))
 
 
+plt.subplots(figsize=[15, 8])
+plt.plot(tvar, label="True")
+plt.plot(svar, label="LMC")
+plt.plot(nvar, label="Neural")
+plt.plot(stvar, label="SVGD")
+plt.yscale("log")
+plt.legend()
 
 
+# get_ipython().run_line_magic("matplotlib", " widget")
+plt.subplots(figsize=[15, 8])
+plt.plot(neural_learner.rundata["training_loss"])
+plt.plot(neural_learner.rundata["validation_loss"])
 
 
+# get final particles
+target_cov = target.cov
+final_particles_list = []
+for p in [neural_particles, svgd_particles, sgld_particles]:
+    particles = p.get_params()
+    final_particles_list.append(particles.training)
+covs = [target.cov] + [np.cov(p, rowvar=False) for p in final_particles_list]
+titles = ["True", "neural", "svgd", "sgld"]
+# neural_final, svgd_final, sgld_final = final_particles_list
 
 
+get_ipython().run_line_magic("matplotlib", " inline")
+plt.subplots(figsize=[20, 7])
+grid = np.arange(0, d)
+
+plt.plot(grid, np.diag(target.cov), label="True")
+for cov_diagonal, name in zip([np.diag(cov) for cov in covs[1:]], ["Neural", "SVGD", "SGLD"]):
+    plt.plot(grid, cov_diagonal, label=name, marker="o")
+
+plt.legend()
+plt.ylabel("Variance per axis")
+plt.xlabel("Axis index")
+plt.yscale("log")
+# plt.ylim((variances.min() / 10, variances.max()*10))
+
+
+neural_learner.rundata.keys()
+
+
+plt.plot(neural_learner.rundata["train_steps"])
 
 
 

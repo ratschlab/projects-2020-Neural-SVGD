@@ -40,6 +40,22 @@ from jax.experimental import optimizers
 key = random.PRNGKey(0)
 
 
+# set up exporting
+import matplotlib
+matplotlib.use("pgf")
+matplotlib.rcParams.update({
+    "pgf.texsystem": "pdflatex",
+#     'font.family': 'serif',
+#     'text.usetex': False,
+    'pgf.rcfonts': False,
+})
+
+figure_path = "/home/lauro/documents/msc-thesis/thesis/figures/"
+# save figures by using plt.savefig('title of figure')
+# remember that latex textwidth is 5.4in
+# so use figsize=[5.4, 4], for example
+
+
 def plot_samples(target_pdf, sample_list, lims=(-4, 4)):
     """sample_list: iterable of sets of samples"""
     fig, axs = plt.subplots(1, 3, figsize=[30, 9])
@@ -62,7 +78,7 @@ def animate(target_pdf, traj_list, lims=(-4, 4), interval=100):
         ax.set(xlim=lims, ylim=lims)
         plot.plot_fun_2d(target.pdf, lims=lims, ax=ax, alpha=0.5)
         anims.append(plot.animate_array(traj, fig, ax, interval=interval))
-    return anims
+    return anims, fig, axs
 
 
 neural_trajectories = []
@@ -83,7 +99,7 @@ particle_lr = 1e-2
 learner_lr = 2e-3
 
 key, subkey = random.split(key)
-neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., sizes=[32, 32, 2], patience=10, learner_lr=learner_lr)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=10, learner_lr=learner_lr)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
 sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
@@ -94,9 +110,19 @@ plot_samples(target.pdf, sample_list)
 
 
 get_ipython().run_line_magic("matplotlib", " inline")
+plt.plot(neural_learner.rundata["train_steps"])
+
+
+get_ipython().run_line_magic("matplotlib", " inline")
 plt.subplots(figsize=[15, 5])
-for loss in [neural_learner.rundata[k] for k in ("training_loss", "validation_loss")]:
-    plt.plot(loss)
+for loss, label in [(neural_learner.rundata[k], k) for k in ("training_loss", "validation_loss")]:
+    plt.plot(loss, "--o", label=label)
+    
+plt.legend()
+
+
+neural_trajectories = []
+svgd_trajectories = []
 
 
 traint = [p.training for p in neural_particles.rundata["particles"]]
@@ -109,11 +135,16 @@ neural_trajectories.append(traj)
 svgd_trajectories.append(traj_svgd)
 
 
-i = 0
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-lims=(-4, 4)
-animate(target.pdf, [traj, traj_svgd], lims=lims, interval=10)
+testt = np.array([p.test for p in neural_particles.rundata["particles"]])
+
+
+# i = 0
+# traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
+# get_ipython().run_line_magic("matplotlib", " widget")
+# lims=(-4, 4)
+# ans, fig, axs = animate(target.pdf, [traj, traj_svgd], lims=lims, interval=100)
+# # ans.append(plot.animate_array(testt, fig, axs[0]))
+# ans
 
 
 setup = distributions.mix_of_gauss
@@ -125,7 +156,7 @@ n_steps = 500
 # learner_lr = 1e-1
 
 key, subkey = random.split(key)
-neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., sizes=[32, 32, 2], patience=10, learner_lr=learner_lr)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=10, learner_lr=learner_lr)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
 sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
@@ -146,10 +177,10 @@ neural_trajectories.append(traj)
 svgd_trajectories.append(traj_svgd)
 
 
-i = 1
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-animate(target.pdf, [traj, traj_svgd], lims=mix_lims, interval=10)
+# i = 1
+# traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
+# get_ipython().run_line_magic("matplotlib", " widget")
+# animate(target.pdf, [traj, traj_svgd], lims=mix_lims, interval=10)
 
 
 target, proposal = distributions.mix_of_gauss.get()
@@ -162,7 +193,7 @@ n_steps = 300
 # learner_lr = 1e-1
 
 key, subkey = random.split(key)
-neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., sizes=[32, 32, 2], patience=10, learner_lr=learner_lr)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=10, learner_lr=learner_lr)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
 sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
@@ -182,7 +213,7 @@ n_steps = 300
 # learner_lr = 1e-1
 
 key, subkey = random.split(key)
-neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., sizes=[32, 32, 2], patience=10, learner_lr=learner_lr)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=10, learner_lr=learner_lr)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
 sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
@@ -217,7 +248,7 @@ n_steps = 500
 # learner_lr = 1e-1
 
 key, subkey = random.split(key)
-neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., sizes=[32, 32, 2], patience=10, learner_lr=learner_lr)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=10, learner_lr=learner_lr)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
 sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
@@ -238,10 +269,10 @@ neural_trajectories.append(traj)
 svgd_trajectories.append(traj_svgd)
 
 
-i = 3
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-animate(target.pdf, [traj, traj_svgd], lims=funnel_lims, interval=10)
+# i = 3
+# traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
+# get_ipython().run_line_magic("matplotlib", " widget")
+# animate(target.pdf, [traj, traj_svgd], lims=funnel_lims, interval=10)
 
 
 setup = distributions.banana_target
@@ -254,7 +285,7 @@ n_steps = 800
 # learner_lr = 1e-1
 
 key, subkey = random.split(key)
-neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., sizes=[32, 32, 2], patience=10, learner_lr=learner_lr)
+neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., patience=10, learner_lr=learner_lr)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=0., scaled=True,  bandwidth=None)
 # sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, noise_level=1.)
 
@@ -275,7 +306,15 @@ neural_trajectories.append(traj)
 svgd_trajectories.append(traj_svgd)
 
 
-i = 4
-traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
-get_ipython().run_line_magic("matplotlib", " widget")
-animate(target.pdf, [traj, traj_svgd], lims=banana_lims, interval=10)
+# i = 4
+# traj, traj_svgd = [lst[i] for lst in (neural_trajectories, svgd_trajectories)]
+# get_ipython().run_line_magic("matplotlib", " widget")
+# animate(target.pdf, [traj, traj_svgd], lims=banana_lims, interval=10)
+
+
+# get_ipython().run_line_magic("matplotlib", " widget")
+plt.plot(neural_learner.rundata["training_loss"])
+plt.plot(neural_learner.rundata["validation_loss"])
+
+
+

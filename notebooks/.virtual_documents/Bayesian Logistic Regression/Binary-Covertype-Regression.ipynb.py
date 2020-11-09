@@ -27,7 +27,7 @@ import stein
 import models
 import flows
 from itertools import cycle, islice
-    
+
 key = random.PRNGKey(0)
 
 from sklearn.model_selection import train_test_split
@@ -46,6 +46,19 @@ tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
 
 
+# set up exporting
+import matplotlib
+matplotlib.use("pgf")
+matplotlib.rcParams.update({
+    "pgf.texsystem": "pdflatex",
+    'font.family': 'serif',
+    'text.usetex': True,
+    'pgf.rcfonts': False,
+})
+
+# save figures by using plt.savefig('title of figure')
+
+
 data = scipy.io.loadmat('/home/lauro/code/msc-thesis/wang_svgd/data/covertype.mat')
 features = data['covtype'][:, 1:]
 features = onp.hstack([features, onp.ones([features.shape[0], 1])]) # add intercept term
@@ -59,7 +72,7 @@ num_features = features.shape[-1]
 num_classes = len(onp.unique(labels))
 
 
-default_batch_size = 300
+default_batch_size = 500
 def get_batches(x, y, n_steps=500, batch_size=default_batch_size):
     """Split x and y into batches"""
     assert len(x) == len(y)
@@ -95,7 +108,7 @@ plot.plot_fun(gamma_pdf, lims=(-10, 100))
 a0, b0 = 1, 0.01 # hyper-parameters
 # note that b0 is inverse scale, so this means alpha big, 1/alpha small! gaussian narrow! dunno why, check paper
 
-a0, b0 = 1, 10 # b approx equals variance
+# a0, b0 = 1, 10 # b approx equals variance
 
 Root = tfd.JointDistributionCoroutine.Root
 
@@ -212,11 +225,20 @@ def test_accuracy(params):
     return np.mean(get_preds(params) == y_test)
 
 
-get_ipython().run_line_magic("autoreload", "")
+# test loglikelihood
+test_batches = get_batches(x_test, y_test, batch_size=5000)
+xtest, ytest = next(test_batches)
+@jit
+def test_logp(flat_particles):
+    return mean_logp(xtest, ytest, flat_particles)
 
 
-NUM_VALS = 10 # number of test accuracy evaluations per run
-NUM_STEPS = num_batches*2
+from sklearn.calibration import calibration_curve
+
+
+NUM_VALS = 20 # number of test accuracy evaluations per run
+NUM_EPOCHS = 1
+NUM_STEPS = num_batches*NUM_EPOCHS
 
 
 def run_sgld(key, init_batch):
@@ -233,16 +255,23 @@ def run_sgld(key, init_batch):
             return -grads
 
     particles = models.Particles(key, energy_gradient, init_batch_flat,
-                                noise_level=1.)
+                                 noise_level=1.)
 
-    accs = []
     for i, batch_xy in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
         particles.step(batch_xy)
+        stepdata = {
+            "accuracy": None,
+            "test_logp": None
+        }
         if i % (NUM_STEPS//NUM_VALS)==0:
-            accs.append(test_accuracy(batch_unravel(particles.particles.training)))
+            stepdata = {
+                "accuracy": test_accuracy(batch_unravel(particles.particles.training)),
+                "test_logp": test_logp(particles.particles.training),
+            }
+        particles.write_to_log(stepdata)
     particles.perturb()
     particles.done()
-    return batch_unravel(particles.particles.training), accs, particles
+    return batch_unravel(particles.particles.training), particles
 
 
 def run_svgd(init_batch):
@@ -250,15 +279,24 @@ def run_svgd(init_batch):
     init_batch_flat = batch_ravel(init_batch)
     accs = []
 
-    svgd_grad = models.KernelGradient(get_target_logp=lambda batch: get_flat_logp(*batch))
-    particles = models.Particles(key, svgd_grad.gradient, init_batch_flat, 1e-1, "adam")
+    svgd_grad = models.KernelGradient(get_target_logp=lambda batch: get_flat_logp(*batch), scaled=True)
+    particles = models.Particles(key, svgd_grad.gradient, init_batch_flat, optimizer="sgd")
 
     for i, batch in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
         particles.step(batch)
-        if i % (NUM_STEPS//NUM_VALS)==0:
-            accs.append(test_accuracy(batch_unravel(particles.particles.training)))
+        stepdata = {
+            "accuracy": None,
+            "test_logp": None,
+        }
+        if i % (NUM_STEPS//NUM_VALS) == 0:
+            stepdata = {
+                "accuracy": test_accuracy(batch_unravel(particles.particles.training)),
+                "test_logp": test_logp(particles.particles.training),
+            }
+        particles.write_to_log(stepdata)
+
     particles.done()
-    return batch_unravel(particles.particles.training), accs, particles
+    return batch_unravel(particles.particles.training), particles
 
 
 def run_neural_svgd(key, init_batch):
@@ -266,7 +304,6 @@ def run_neural_svgd(key, init_batch):
     Note: there's two types of things I call 'batch': a batch from the dataset
     and a batch of particles. don't confuse them"""
     init_batch_flat = batch_ravel(init_batch)
-    accs = []
 
     key1, key2 = random.split(key)
     neural_grad = models.SDLearner(target_dim=init_batch_flat.shape[1],
@@ -274,23 +311,40 @@ def run_neural_svgd(key, init_batch):
                                    key=key1)
     particles = models.Particles(key2, neural_grad.gradient, init_batch_flat, optimizer="sgd")
 
-    next_batch = partial(particles.next_batch, batch_size=150)
+    next_batch = partial(particles.next_batch, batch_size=2*len(init_batch_flat)//3)
     for i, data_batch in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
         neural_grad.train(next_batch=next_batch, n_steps=10, data=data_batch)
         particles.step(neural_grad.get_params())
-        particles.write_to_log({"logp": mean_logp(*data_batch, particles.particles.training)})
+        stepdata = {
+            "accuracy": None,
+            "test_logp": None,
+            "training_logp": mean_logp(*data_batch, particles.particles.training)
+        }
         if i % (NUM_STEPS//NUM_VALS)==0:
-            accs.append(test_accuracy(batch_unravel(particles.particles.training)))
+            stepdata = {
+                "accuracy": test_accuracy(batch_unravel(particles.particles.training)),
+                "test_logp": test_logp(particles.particles.training),
+            }
+        particles.write_to_log(stepdata)
     neural_grad.done()
     particles.done()
-    return batch_unravel(particles.particles.training), accs, particles, neural_grad
+    return batch_unravel(particles.particles.training), particles, neural_grad
+
+
+key, subkey = random.split(key)
+
+
+# TODO: check if I'm doing batching right
+
+
+get_ipython().run_line_magic("autoreload", "")
 
 
 # Run samplers
-init_batch = dist.sample(200, seed=key)[:-1]
-sgld_samples, sgld_accs, sgld_p = run_sgld(key, init_batch)
-svgd_samples, svgd_accs, svgd_p = run_svgd(init_batch)
-neural_samples, neural_accs, neural_p, neural_grad = run_neural_svgd(key, init_batch)
+init_batch = dist.sample(200, seed=subkey)[:-1]
+sgld_samples, sgld_p = run_sgld(key, init_batch)
+svgd_samples, svgd_p = run_svgd(init_batch)
+neural_samples, neural_p, neural_grad = run_neural_svgd(key, init_batch)
 
 
 sgld_aux = sgld_p.rundata
@@ -307,6 +361,10 @@ plt.plot(neural_grad.rundata["validation_loss"])
 
 
 plt.subplots(figsize=[15, 8])
+plt.plot(neural_aux["training_mean"]);
+
+
+plt.subplots(figsize=[15, 8])
 plt.plot(sgld_aux["training_mean"]);
 
 
@@ -314,14 +372,15 @@ plt.subplots(figsize=[15, 8])
 plt.plot(svgd_aux["training_mean"]);
 
 
+sgld_accs, svgd_accs, neural_accs = [aux["accuracy"] for aux in (sgld_aux, svgd_aux, neural_aux)]
+
+
 plt.subplots(figsize=[15, 8])
-plt.plot(neural_aux["training_mean"]);
-
-
-# plt.plot(lmc_aux["accuracy"], "--.", label="SGLD")
-plt.plot(sgld_accs, "--.", label="SGLD")
-plt.plot(svgd_accs, "--.", label="SVGD")
-plt.plot(neural_accs, "--.", label="Neural")
+names = ["SGLD", "SVGD", "Neural"]
+accs = [sgld_accs, svgd_accs, neural_accs]
+for name, acc in zip(names, accs):
+    acc = onp.array(acc)
+    plt.plot(acc[np.isfinite(acc.astype(np.double))], "--.", label=name)
 plt.legend()
 
 
@@ -329,7 +388,8 @@ print("SGLD accuracy:", test_accuracy(sgld_samples))
 print("SVGD accuracy:", test_accuracy(svgd_samples))
 print("Neural accuracy:", test_accuracy(neural_samples))
 key, subkey = random.split(key)
-print("prior samples accuracy:", test_accuracy(dist.sample(500, seed=subkey)[:-1]))
+print("Prior samples accuracy:", test_accuracy(dist.sample(500, seed=subkey)[:-1]))
+print("Balance:", np.mean(y_test))
 
 
 test_batches = get_batches(x_test, y_test, batch_size=5000)
@@ -337,19 +397,31 @@ test_batches = get_batches(x_test, y_test, batch_size=5000)
 
 x, y = next(test_batches)
 test_logps = [mean_logp(x, y, batch_ravel(samples)) for samples in (sgld_samples, svgd_samples, neural_samples)]
-names = ["SGLD", "SVGD", "Neural"]
 
 
+plt.subplots(figsize=[15, 6])
 plt.plot(sgld_aux["training_logp"], label="SGLD")
 plt.plot(onp.mean(svgd_aux["training_logp"], axis=1), label="SVGD")
-plt.plot(neural_aux["logp"], label="Neural")
+plt.plot(neural_aux["training_logp"], label="Neural")
+# plt.ylim((-1500, -400))
+
 lines = plt.gca().get_lines()
 colors = [line.get_color() for line in lines]
+names = ["SGLD", "SVGD", "Neural"]
+logps = [aux["test_logp"] for aux in (sgld_aux, svgd_aux, neural_aux)]
+for name, lp, color in zip(names, logps, colors):
+    plt.plot(lp, "o", label=name, color=color)
 
-# for tlogp, color in zip(test_logps, colors):
-#     plt.axhline(y=tlogp, color=color)
+plt.legend()
 
 
+# Test accuracy
+plt.subplots(figsize=[15, 6])
+names = ["SGLD", "SVGD", "Neural"]
+logps = [aux["test_logp"] for aux in (sgld_aux, svgd_aux, neural_aux)]
+for name, lp in zip(names, logps):
+    lp = onp.array(lp)
+    plt.plot(lp[np.isfinite(lp.astype(np.double))], "--.", label=name)
 plt.legend()
 
 
@@ -362,4 +434,39 @@ for i, meanlp in enumerate(test_logps):
 plt.legend()
 
 
+from sklearn.calibration import calibration_curve
+
+
+a, b = calibration_curve(y_test, probs)
+
+
+@jit
+def batch_probs(param_batch):
+    """Returns test probabilities P(y=1) for
+    all y in the test set"""
+    return np.mean(vmap(get_probs)(param_batch), axis=0)
+
+
+probabilities = [batch_probs(samples) for samples in (sgld_samples, svgd_samples, neural_samples)]
+
+
+probabilities[1].min()
+
+
+probabilities[0]
+
+
+fig, axs = plt.subplots(1, 3, figsize=[17, 5])
+
+for ax, probs, name in zip(axs, probabilities, names):
+    true_freqs, bins = calibration_curve(y_test, probs, n_bins=10)
+    ax.plot(true_freqs, bins, "--o")
+#     print(bins)
+    ax.plot(bins, bins)
+    ax.set_ylabel("True frequency")
+    ax.set_xlabel("Predicted probability")
+    ax.set_title(name)
+
+
+certainty = np.max([1 - probs, probs])
 
