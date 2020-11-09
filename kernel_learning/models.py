@@ -319,7 +319,7 @@ class VectorFieldMixin:
                  **kwargs):
         self.d = target_dim
         self.sizes = sizes if sizes else [32, 32, self.d]
-        self.auxdim = 2
+        self.auxdim = self.d*2
         if self.sizes[-1] != self.d:
             warnings.warn(f"Output dim should equal target dim; instead "
                           f"received output dim {sizes[-1]} and "
@@ -337,9 +337,11 @@ class VectorFieldMixin:
 
     def compute_aux(self, particles):
         """Auxiliary data that will be concatenated onto MLP input.
-        Must have shape (self.auxdim, d).
+        Output has shape (self.auxdim,).
         Can also be None."""
-        return np.array([np.mean(particles, axis=0), np.std(particles, axis=0)])
+        aux = np.concatenate([np.mean(particles, axis=0), np.std(particles, axis=0)])
+        assert self.auxdim == len(aux)
+        return aux
         # return None
 
     def init_params(self, key=None, keep_params=False):
