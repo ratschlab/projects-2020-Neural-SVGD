@@ -171,7 +171,9 @@ class Particles:
         training of a gradient field approximator."""
         assert self.num_groups <= 2 # not strictly necessary anymore, but keep cause I'm not
         # expecting to use more groups
-        particles, test_particles = self.get_params()
+        particles, *_ = self.get_params()
+        #particles, test_particles = self.get_params()
+        # subsample batch
         # subsample batch
         if batch_size is None:
             batch_size = self.n_particles//2
@@ -317,6 +319,7 @@ class VectorFieldMixin:
                  **kwargs):
         self.d = target_dim
         self.sizes = sizes if sizes else [32, 32, self.d]
+        self.auxdim = 2
         if self.sizes[-1] != self.d:
             warnings.warn(f"Output dim should equal target dim; instead "
                           f"received output dim {sizes[-1]} and "
@@ -324,18 +327,28 @@ class VectorFieldMixin:
         self.threadkey, subkey = random.split(key)
 
         # net and optimizer
-        self.field = hk.transform(
-            #lambda *args: nets.KLGrad(self.sizes, target_logp)(*args))
-            lambda *args: nets.VectorField(self.sizes)(*args))
+        def field(x, aux):
+            mlp = nets.MLP(self.sizes)
+            scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args))
+            return scale * mlp(np.concatenate([x, aux]))
+        self.field = hk.transform(field)
         self.params = self.init_params()
         super().__init__(**kwargs)
+
+    def compute_aux(self, particles):
+        """Auxiliary data that will be concatenated onto MLP input.
+        Must have shape (self.auxdim, d).
+        Can also be None."""
+        return np.array([np.mean(particles, axis=0), np.std(particles, axis=0)])
+        # return None
 
     def init_params(self, key=None, keep_params=False):
         """Initialize MLP parameter"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         x_dummy = np.ones(self.d)
-        params = self.field.init(key, x_dummy)
+        aux_dummy = np.ones(self.auxdim) if self.auxdim > 0 else None
+        params = self.field.init(key, x_dummy, aux_dummy)
         return params
 
     def get_params(self):
@@ -347,11 +360,54 @@ class VectorFieldMixin:
         if params is None:
             params = self.get_params()
         norm = nets.get_norm(init_particles)
+        aux = self.compute_aux(init_particles)
         #norm = lambda x: x
         def v(x):
             """x should have shape (n, d) or (d,)"""
-            return self.field.apply(params, None, norm(x))
+            return self.field.apply(params, None, norm(x), aux)
         return v
+
+
+class EBMMixin():
+    def __init__(self,
+                 target_dim: int,
+                 target_logp: callable = None,
+                 key=random.PRNGKey(42),
+                 sizes: list = None,
+                 **kwargs):
+        self.d = target_dim
+        self.sizes = sizes if sizes else [32, 32, 1]
+        if self.sizes[-1] != 1:
+            warnings.warn(f"Output dim should equal 1; instead "
+                          f"received output dim {sizes[-1]}")
+        self.threadkey, subkey = random.split(key)
+
+        # net and optimizer
+        self.ebm = hk.transform(
+            lambda *args: nets.MLP(self.sizes)(*args))
+        self.params = self.init_params()
+        super().__init__(**kwargs)
+
+    def init_params(self, key=None):
+        """Initialize MLP parameter"""
+        if key is None:
+            self.threadkey, key = random.split(self.threadkey)
+        x_dummy = np.ones(self.d)
+        params = self.ebm.init(key, x_dummy)
+        return params
+
+    def get_params(self):
+        return self.params
+
+    def get_field(self, init_particles, params=None):
+        if params is None:
+            params = self.get_params()
+        #norm = nets.get_norm(init_particles)
+        norm = lambda x: x
+        def ebm(x):
+            """x should have shape (d,)"""
+            return np.squeeze(self.ebm.apply(params, None, norm(x)))
+        return grad(ebm)
 
 
 class TrainingMixin:
@@ -439,7 +495,7 @@ class TrainingMixin:
         for i in tqdm(range(n_steps), disable=not progress_bar):
             key, subkey = random.split(key)
             step(subkey)
-            self.write_to_log({"model_params": self.get_params()})
+            #self.write_to_log({"model_params": self.get_params()})
             if self.patience.out_of_patience():
                 self.patience.reset()
                 break
@@ -502,6 +558,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
             particles, target_logp, f, aux=True)
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
+        #loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
         return loss, aux
 
@@ -531,7 +588,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
 
     def gradient(self, params, particles, aux=False):
         """params is a pytree of neural net parameters"""
-        v = self.get_field(particles, params)
+        v = vmap(self.get_field(particles, params))
         #v = vmap(self._get_grad(particles, params))
         if aux:
             return v(particles), {}

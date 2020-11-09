@@ -116,6 +116,7 @@ def defunnelize(z):
     return np.append(x*np.exp(-y/2), y/3)
 
 def get_funnel_kernel(bandwidth):
+    """Transform input based on `defunnelize` transformation, then apply rbf kernel."""
     rbf = get_rbf_kernel(bandwidth)
     def funnel_kernel(x, y):
         return rbf(defunnelize(x), defunnelize(y))
@@ -163,9 +164,9 @@ def median_heuristic(x):
     IN: np array of shape (n,) or (n,d): set of particles
     OUT: scalar: bandwidth parameter for RBF kernel, based on the
     heuristic from the SVGD paper.
-    Note: assumes k(x, y) = exp(- (x - y)^2 / h / 2)
+    Note: assumes k(x, y) = exp(- (x - y)^2 / h^2 / 2)
     """
-    pairwise_dists = utils.squared_distance_matrix(x)
+    pairwise_dists = utils.squared_distance_matrix(utils.remove_diagonal(x))
     medsq = np.median(pairwise_dists)
     h = np.sqrt(0.5 * medsq / np.log(x.shape[0] + 1))
     return h

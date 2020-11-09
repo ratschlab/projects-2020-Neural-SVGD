@@ -63,7 +63,7 @@ def get_norm(init_x):
     return norm
 
 
-class VectorField(hk.Module):
+class MLP(hk.Module):
     def __init__(self, sizes: list, name: str = None):
         """
         Take care to choose sizes[-1] equal to the particle dimension.
@@ -75,7 +75,6 @@ class VectorField(hk.Module):
     def __call__(self, x):
         """x is a batch of particles of shape (n, d) or a single particle
         of shape (d,)"""
-        assert x.shape[-1] == self.sizes[-1]
         mlp = hk.nets.MLP(output_sizes=self.sizes,
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
                           activation=jax.nn.swish,

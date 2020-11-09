@@ -29,7 +29,7 @@ default_num_steps = 100
 #default_learner_lr = 1e-2
 default_noise_level = 0.
 default_patience = 10
-disable_tqdm = False
+disable_tqdm = True
 
 def neural_score_flow(key,
                       setup,
@@ -73,7 +73,7 @@ def neural_svgd_flow(key,
                      setup,
                      n_particles=default_num_particles,
                      n_steps=default_num_steps,
-                     sizes=[32, 32, 2],
+                     sizes=None,
                      particle_lr=1e-2,
                      learner_lr=1e-2,
                      noise_level=default_noise_level,

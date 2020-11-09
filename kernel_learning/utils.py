@@ -572,6 +572,31 @@ def return_none_if_none(fun, argnum=0):
     return out_fun
 
 
+def init_scale(fun):
+    """fun : R^d --> R^d"""
+    stein_discrepancy = stein.stein_discrepancy(
+        particles, target_logp, fun, aux=False)
+    l2_f_sq = utils.l2_norm_squared(particles, fun)
+    return l2_norm_squared / stein_discrepancy
+
+
+def null_diagonal(matrix):
+    """matrix is an (n,n) array.
+    output: same matrix with zeros along diagonal"""
+    n = matrix.shape[0]
+    trace_indices = [list(range(n))]*2
+    matrix = index_update(matrix, trace_indices, 0)
+    return matrix
+
+def remove_diagonal(matrix):
+    """matrix is an (n,n) array.
+    ouput: (n, n-1) array, matrix without the diagonal"""
+    n = matrix.shape[0]
+    idx = np.ones((n, n))
+    idx = null_diagonal(idx)
+    return matrix[idx.nonzero()].reshape((n, n-1))
+
+
 import optax
 from distributions import funnel, banana_target, ring_target, squiggle_target, mix_of_gauss
 optimizer_mapping = {

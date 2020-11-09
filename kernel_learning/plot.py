@@ -165,7 +165,7 @@ def plot_3d(x, y, z, ax=None, **kwargs):
         fig = plt.figure(figsize=(12, 6))
         ax = fig.gca(projection='3d')
     else:
-        ax = ax(projection='3d')
+        ax = ax#(projection='3d')
     ax.plot_surface(x, y, z,
                     cmap=cm.coolwarm,
                     linewidth=0,
@@ -352,14 +352,19 @@ def animate_array(arr, fig=None, ax=None, interval=100):
     anim = FuncAnimation(fig, animate, interval=interval, frames=t)
     return anim
 
-def plot_gradient_field(v: callable, ax=None, lims=(-5, 5), color="green", **kwargs):
+def plot_gradient_field(v: callable, ax=None, samples=None, lims=(-5, 5), color="green", **kwargs):
     """Plot the gradient field v.
     v is a function that maps a (n, 2) batch of points in 2D
     to an (n, 2) batch of vectors."""
     if ax is None:
         ax = plt.gca()
-    grid = np.linspace(*lims, 25)
-    xx = np.stack(np.meshgrid(grid, grid), axis=-1).reshape(-1, 2)
+
+    if samples is not None:
+        xx = samples
+    else:
+        grid = np.linspace(*lims, 25)
+        xx = np.stack(np.meshgrid(grid, grid), axis=-1).reshape(-1, 2)
+
     scores = v(xx)
     scores_norm = np.linalg.norm(scores, axis=-1, ord=2, keepdims=True)
     scores_log1p = scores / (scores_norm + 1e-9) * np.log1p(scores_norm)
