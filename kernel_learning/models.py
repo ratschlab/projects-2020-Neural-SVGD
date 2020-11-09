@@ -100,6 +100,7 @@ class Particles:
                  init_samples,
                  learning_rate=1e-2,
                  optimizer="sgd",
+                 custom_optimizer = None,
                  num_groups=1,
                  noise_level=0.,
                  n_particles: int = 50):
@@ -119,9 +120,14 @@ class Particles:
         self.particles = self.init_particles(subkey)
 
         # optimizer for particle updates
-        self.optimizer_str = optimizer
-        self.learning_rate = learning_rate
-        self.opt = utils.optimizer_mapping[optimizer](learning_rate)
+        if custom_optimizer:
+            self.optimizer_str = "custom"
+            self.learning_rate = 0 # placeholder value st no error thrown
+            self.opt = custom_optimizer
+        else:
+            self.optimizer_str = optimizer
+            self.learning_rate = learning_rate
+            self.opt = utils.optimizer_mapping[optimizer](learning_rate)
         self.optimizer_state = self.opt.init(self.particles)
         self.step_counter = 0
         self.rundata = {}
@@ -473,7 +479,7 @@ class TrainingMixin:
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, batch = None, next_batch: callable = None, key=None, n_steps=5, progress_bar=False, data = None):
+    def train(self, batch = None, next_batch: callable = None, key=None, n_steps=5, progress_bar=False, data = None, early_stopping = True):
         """
         batch and next_batch cannot both be None.
         batch is an array of particles.
@@ -498,7 +504,7 @@ class TrainingMixin:
             key, subkey = random.split(key)
             step(subkey)
             #self.write_to_log({"model_params": self.get_params()})
-            if self.patience.out_of_patience():
+            if self.patience.out_of_patience() and early_stopping:
                 self.patience.reset()
                 break
         self.write_to_log({"train_steps": i+1})

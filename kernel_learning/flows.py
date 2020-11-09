@@ -29,7 +29,8 @@ default_num_steps = 100
 #default_learner_lr = 1e-2
 default_noise_level = 0.
 default_patience = 10
-disable_tqdm = True
+disable_tqdm = False
+NUM_WARMUP_STEPS = 100
 
 def neural_svgd_flow(key,
                      setup,
@@ -57,6 +58,12 @@ def neural_svgd_flow(key,
                                  noise_level=noise_level,
                                  num_groups=1 if target.d > 2 else 2,
                                  optimizer="sgd")
+
+    # Warmup
+    def next_batch(key):
+        return proposal.sample(2*n_particles, key).split(2)
+    learner.train(
+        next_batch=next_batch, n_steps=NUM_WARMUP_STEPS, early_stopping=False)
 
     n_learner_steps = 50
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
