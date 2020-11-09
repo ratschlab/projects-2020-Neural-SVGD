@@ -133,7 +133,7 @@ class Particles:
         self.step_counter = 0
         self.rundata = {}
         self.noise_level = noise_level
-        self.done = False
+        self.donedone = False
 
     def init_particles(self, key):
         """Returns namedtuple with training and test particles"""
@@ -256,7 +256,7 @@ class Particles:
 
     def done(self):
         """converts rundata into arrays"""
-        if self.done:
+        if self.donedone:
             print("already done.")
             return
         skip = "particles accuracy test_logp".split()
@@ -268,7 +268,7 @@ class Particles:
             d = SplitData(*[np.array(trajectory)
                         for trajectory in zip(*self.rundata["particles"])])
             self.rundata["particles"] = d
-        self.done = True
+        self.donedone = True
 
 
     def plot_mean_and_std(self, target=None, axs=None, **kwargs):

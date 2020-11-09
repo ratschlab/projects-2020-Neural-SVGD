@@ -77,6 +77,7 @@ def neural_svgd_flow(key,
         except Exception as err:
             warnings.warn(f"Caught Exception")
             return learner, particles, err
+    particles.done()
     return learner, particles, None
 
 
@@ -111,6 +112,7 @@ def svgd_flow(key,
         except Exception as err:
             warnings.warn("caught error!")
             return kernel_gradient, svgd_particles, err
+    svgd_particles.done()
     return kernel_gradient, svgd_particles, None
 
 
@@ -139,6 +141,7 @@ def sgld_flow(key,
         except Exception as err:
             warnings.warn("Caught and returned exception")
             return energy_gradient, particles, err
+    particles.done()
     return energy_gradient, particles, None
 
 
