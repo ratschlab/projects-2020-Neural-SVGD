@@ -89,6 +89,7 @@ class SplitData:
         assert all([k1 == k2 for k1, k2 in zip(self.keys(), data.keys())])
         return SplitData(*[a + b for a, b in zip(self, data)])
 
+
 class Particles:
     """
     Container class for particles, particle optimizer,
@@ -132,6 +133,7 @@ class Particles:
         self.step_counter = 0
         self.rundata = {}
         self.noise_level = noise_level
+        self.done = False
 
     def init_particles(self, key):
         """Returns namedtuple with training and test particles"""
@@ -235,7 +237,7 @@ class Particles:
     def _log(self, auxdata, particles, step):
         gradient = auxdata["grads"]
 
-        if self.d < 30:
+        if self.d < 35:
             auxdata.update({
                 "step": step,
                 "particles": particles,
@@ -254,11 +256,20 @@ class Particles:
 
     def done(self):
         """converts rundata into arrays"""
+        if self.done:
+            print("already done.")
+            return
         skip = "particles accuracy test_logp".split()
         self.rundata = {
             k: v if k in skip else np.array(v)
             for k, v in self.rundata.items()
         }
+        if "particles" in self.rundata:
+            d = SplitData(*[np.array(trajectory)
+                        for trajectory in zip(*self.rundata["particles"])])
+            self.rundata["particles"] = d
+        self.done = True
+
 
     def plot_mean_and_std(self, target=None, axs=None, **kwargs):
         """axs: two axes"""
