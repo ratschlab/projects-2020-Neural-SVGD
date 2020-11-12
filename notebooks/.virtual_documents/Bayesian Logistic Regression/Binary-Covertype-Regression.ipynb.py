@@ -252,7 +252,7 @@ def sample(key):
 
 svgd_opt = optax.chain(optax.scale_by_schedule(utils.polynomial_schedule), 
                        optax.scale_by_rms(),
-                       optax.scale(-5e-2))
+                       optax.scale(-1e-2))
 # svgd_opt = optax.rmsprop(1e-3)
 # svgd_opt = optax.sgd(1e-3)
 
@@ -324,6 +324,18 @@ def run_neural_svgd(key, init_batch):
     return batch_unravel(particles.particles.training), particles, neural_grad
 
 
+# def polynomial_sgld(learning_rate: float = 1e-2, random_seed: int = 0):
+#     return optax.chain(
+#         optax.scale(-learning_rate),
+#         optax.add_noise(np.sqrt(2*learning_rate + 1e-8), 0, random_seed),
+#         optax.scale_by_schedule(utils.polynomial_schedule),
+#     )
+schedule = utils.polynomial_schedule
+base_lr = 1e-1
+sgld_opt = utils.scaled_sgld(subkey, base_lr, schedule)
+
+
+
 def run_sgld(key, init_batch):
     """init_batch is a batch of initial samples / particles."""
     init_batch_flat = batch_ravel(init_batch)
@@ -337,8 +349,7 @@ def run_sgld(key, init_batch):
         else:
             return -grads
 
-    particles = models.Particles(key, energy_gradient, init_batch_flat, learning_rate=1e-3,
-                                 noise_level=1.)
+    particles = models.Particles(key, energy_gradient, init_batch_flat, custom_optimizer=sgld_opt) # learning_rate=1e-2
 
     for i, batch_xy in tqdm(enumerate(get_batches(x_train, y_train, NUM_STEPS+1)), total=NUM_STEPS):
         particles.step(batch_xy)
@@ -352,7 +363,6 @@ def run_sgld(key, init_batch):
                 "test_logp": test_logp(particles.particles.training),
             }
         metrics.append_to_log(particles.rundata, stepdata)
-    particles.perturb()
     particles.done()
     return batch_unravel(particles.particles.training), particles
 
@@ -366,10 +376,10 @@ key, subkey = random.split(key)
 
 
 # Run samplers
-# init_batch = dist.sample(100, seed=subkey)[:-1]
+init_batch = dist.sample(100, seed=subkey)[:-1]
 sgld_samples, sgld_p = run_sgld(key, init_batch)
-# svgd_samples, svgd_p = run_svgd(init_batch)
-# neural_samples, neural_p, neural_grad = run_neural_svgd(key, init_batch)
+svgd_samples, svgd_p = run_svgd(init_batch)
+neural_samples, neural_p, neural_grad = run_neural_svgd(key, init_batch)
 
 
 sgld_aux = sgld_p.rundata
@@ -389,13 +399,12 @@ for name, acc in zip(names, accs):
 plt.legend()
 
 
+get_ipython().run_line_magic("matplotlib", " inline")
 plt.subplots(figsize=[15, 8])
-names = ["SGLD", "SVGD", "Neural"]
-accs = [sgld_accs, svgd_accs, neural_accs]
-for name, acc in zip(names, accs):
-    acc = onp.array(acc)
-    plt.plot(acc[np.isfinite(acc.astype(np.double))], "--.", label=name)
-plt.legend()
+plt.plot([base_lr*utils.polynomial_schedule(step) for step in range(NUM_STEPS)])
+plt.plot([np.sqrt(2*base_lr*utils.polynomial_schedule(step)) for step in range(NUM_STEPS)])
+plt.yscale("log")
+# plt.ylim(1e-2, 2e-1)
 
 
 print("SGLD accuracy:", test_accuracy(sgld_samples))
@@ -406,9 +415,14 @@ print("Prior samples accuracy:", test_accuracy(dist.sample(500, seed=subkey)[:-1
 print("Balance:", np.mean(y_test))
 
 
+plt.subplots(figsize=[15, 8])
+plt.plot(sgld_aux["training_mean"]);
+
+
 plt.plot(neural_grad.rundata["train_steps"])
 
 
+get_ipython().run_line_magic("matplotlib", " widget")
 plt.subplots(figsize=[15, 8])
 plt.plot(neural_grad.rundata["training_loss"])
 plt.plot(neural_grad.rundata["validation_loss"])
@@ -416,10 +430,6 @@ plt.plot(neural_grad.rundata["validation_loss"])
 
 plt.subplots(figsize=[15, 8])
 plt.plot(neural_aux["training_mean"]);
-
-
-plt.subplots(figsize=[15, 8])
-plt.plot(sgld_aux["training_mean"]);
 
 
 plt.subplots(figsize=[15, 8])
