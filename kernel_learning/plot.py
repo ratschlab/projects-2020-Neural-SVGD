@@ -346,10 +346,11 @@ def animate_array(arr, fig=None, ax=None, interval=100):
     def animate(i):
         scat.set_offsets(arr[i])
         ax.set_title(title + f": Timestep {i}")
+        return scat, ax
 
     # call animation
     t = len(arr)
-    anim = FuncAnimation(fig, animate, interval=interval, frames=t)
+    anim = FuncAnimation(fig, animate, interval=interval, frames=t, blit=True)
     return anim
 
 def plot_gradient_field(v: callable, ax=None, samples=None, lims=(-5, 5), color="green", **kwargs):

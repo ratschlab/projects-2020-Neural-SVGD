@@ -27,7 +27,6 @@ default_num_particles = 50
 default_num_steps = 100
 #default_particle_lr = 1e-1
 #default_learner_lr = 1e-2
-default_noise_level = 0.
 default_patience = 10
 disable_tqdm = False
 NUM_WARMUP_STEPS = 100
@@ -39,10 +38,10 @@ def neural_svgd_flow(key,
                      sizes=None,
                      particle_lr=1e-2,
                      learner_lr=1e-2,
-                     noise_level=default_noise_level,
+                     noise_level=None,
                      patience=default_patience,
                      aux=True):
-    key, keya, keyb = random.split(key, 3)
+    key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
                                target_logp=target.logpdf,
@@ -57,9 +56,10 @@ def neural_svgd_flow(key,
                                  init_samples=proposal.sample,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
-                                 noise_level=noise_level,
                                  num_groups=1 if target.d > 2 else 2,
-                                 optimizer="sgd")
+                                 optimizer="sgd",
+                                 compute_metrics=metrics.get_mmd_tracer(
+                                     target.sample(500, keyc)))
 
     # Warmup
     def next_batch(key):
@@ -87,11 +87,11 @@ def svgd_flow(key,
               n_steps=default_num_steps,
               particle_lr=1e-1,
               lambda_reg=1/2,
-              noise_level=default_noise_level,
+              noise_level=None,
               particle_optimizer="sgd",
               scaled=True,
               bandwidth=1.):
-    key, keyb = random.split(key)
+    key, keyb, keyc = random.split(key, 3)
     target, proposal = setup.get()
 
     kernel_gradient = models.KernelGradient(target_logp=target.logpdf,
@@ -99,13 +99,15 @@ def svgd_flow(key,
                                             bandwidth=bandwidth,
                                             lambda_reg=lambda_reg,
                                             scaled=scaled)
+
     svgd_particles = models.Particles(key=keyb,
                                       gradient=kernel_gradient.gradient,
                                       init_samples=proposal.sample,
                                       n_particles=n_particles,
                                       learning_rate=particle_lr,
-                                      noise_level=noise_level,
-                                      optimizer=particle_optimizer)
+                                      optimizer=particle_optimizer,
+                                      compute_metrics=metrics.get_mmd_tracer(
+                                          target.sample(500, keyc)))
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             svgd_particles.step(None)
@@ -122,9 +124,9 @@ def sgld_flow(key,
               n_steps=default_num_steps,
               particle_lr=1e-2,
               lambda_reg=1/2,
-              noise_level=1,
-              particle_optimizer="sgd"):
-    keya, keyb = random.split(key)
+              noise_level=None,
+              particle_optimizer="sgld"):
+    keya, keyb, keyc = random.split(key, 3)
     target, proposal = setup.get()
     energy_gradient = models.EnergyGradient(target.logpdf, keya, lambda_reg=lambda_reg)
     particles = models.Particles(key=keyb,
@@ -134,7 +136,8 @@ def sgld_flow(key,
                                  learning_rate=particle_lr,
                                  optimizer=particle_optimizer,
                                  num_groups=1,
-                                 noise_level=noise_level)
+                                 compute_metrics=metrics.get_mmd_tracer(
+                                     target.sample(500, keyc)))
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             particles.step(None)
@@ -152,7 +155,6 @@ def deep_kernel_flow(key,
                      sizes=[32, 32, 2],
                      particle_lr=1e-2,
                      learner_lr=1e-3,
-                     noise_level=default_noise_level,
                      patience=default_patience):
     key, keya, keyb = random.split(key, 3)
     target, proposal = setup.get()
@@ -166,8 +168,7 @@ def deep_kernel_flow(key,
                                  gradient=learner.gradient,
                                  init_samples=proposal.sample,
                                  n_particles=n_particles,
-                                 learning_rate=particle_lr,
-                                 noise_level=noise_level)
+                                 learning_rate=particle_lr)
 
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:

@@ -1,4 +1,5 @@
 import jax.numpy as np
+import jax.numpy as jnp
 import jax
 from jax import jit, vmap, random, grad, jacfwd
 from jax.ops import index_update, index
@@ -561,6 +562,21 @@ def add_gauss(key: np.ndarray, param: np.ndarray, scale: float):
     return param + random.normal(key, param.shape) * scale
 
 
+def add_noise(key, updates, scale):
+    """updates = updates + scale * z,
+    where z is standard normal."""
+    num_vars = len(jax.tree_leaves(updates))
+    treedef = jax.tree_structure(updates)
+    all_keys = jax.random.split(key, num=num_vars + 1)
+    noise = jax.tree_multimap(
+        lambda g, k: jax.random.normal(k, shape=g.shape, dtype=g.dtype),
+        updates, jax.tree_unflatten(treedef, all_keys[1:]))
+    updates = jax.tree_multimap(
+        lambda g, n: g + scale.astype(g.dtype) * n,
+        updates, noise)
+    return updates
+
+
 def return_none_if_none(fun, argnum=0):
     """wrapper to tell function to return none
     when it gets None as argument."""
@@ -600,9 +616,48 @@ def remove_diagonal(matrix):
 import optax
 from distributions import funnel, banana_target, ring_target, squiggle_target, mix_of_gauss
 
+def polynomial_schedule(step):
+    return 1. / (step + 1)**0.55
+
+def sgld(learning_rate: float = 1e-2, random_seed: int = 0):
+    return optax.chain(
+        optax.scale(-learning_rate),
+        optax.add_noise(np.sqrt(2*learning_rate + 1e-8), 0, random_seed),
+    )
+
+def scaled_sgld(key: np.ndarray, learning_rate: float = 1e-2, schedule_fn: callable = optax.constant_schedule(1.)):
+    """
+    Scale SGLD the correct way, using a custom schedule for the stepsize.
+    TODO: consider removing learning rate arg, so that just schedule_fn is needed.
+
+    Returns
+        an (init_fn, update_fn) Tuple"""
+    scaler = optax.scale_by_schedule(schedule_fn)
+
+    def init_fn(params):
+        return [scaler.init(1.), key]
+
+    def update_fn(updates, state, params=None):
+        """
+        returns
+        - stepsize * updates + np.sqrt(2 stepsize) * z,
+        where z is standard normal.
+        """
+        scaler_state, key = state
+        key, subkey = random.split(key)
+        scale, scaler_state = scaler.update(1., scaler_state)
+        stepsize = learning_rate*scale
+        updates = jax.tree_map(lambda g: -stepsize*g, updates)
+        return add_noise(subkey, updates, np.sqrt(2*stepsize)), [scaler_state, key]
+
+    return optax.GradientTransformation(init_fn, update_fn)
+
+
+
 optimizer_mapping = {
     "sgd": optax.sgd,
     "adam": optax.adam,
+    "sgld": sgld,
 }
 
 setup_mapping = {
@@ -613,5 +668,3 @@ setup_mapping = {
     "mix": mix_of_gauss,
 }
 
-def polynomial_schedule(step):
-    return 1. / (step + 1)**0.55

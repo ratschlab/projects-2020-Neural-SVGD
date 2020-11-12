@@ -103,8 +103,8 @@ class Particles:
                  optimizer="sgd",
                  custom_optimizer = None,
                  num_groups=1,
-                 noise_level=0.,
-                 n_particles: int = 50):
+                 n_particles: int = 50,
+                 compute_metrics = None):
         """
         Arguments
         ----------
@@ -112,6 +112,9 @@ class Particles:
             an array of shape (n, d), interpreted as grad(loss)(particles).
         init_samples: either a callable sample(num_samples, key), or an nd.array
         of shape (n, d) containing initial samples.
+        compute_metrics: callable, takes in particles as array of shape (n, d) and
+        outputs a dict shaped {'name': metric for name, metric in zip(names, metrics)}.
+        Evaluated once every 50 steps.
         """
         self.gradient = gradient
         self.n_particles = n_particles
@@ -123,7 +126,7 @@ class Particles:
         # optimizer for particle updates
         if custom_optimizer:
             self.optimizer_str = "custom"
-            self.learning_rate = 0 # placeholder value st no error thrown
+            self.learning_rate = None
             self.opt = custom_optimizer
         else:
             self.optimizer_str = optimizer
@@ -132,8 +135,9 @@ class Particles:
         self.optimizer_state = self.opt.init(self.particles)
         self.step_counter = 0
         self.rundata = {}
-        self.noise_level = noise_level
+#        self.noise_level = noise_level
         self.donedone = False
+        self.compute_metrics = compute_metrics
 
     def init_particles(self, key):
         """Returns namedtuple with training and test particles"""
@@ -153,46 +157,18 @@ class Particles:
     def get_params(self):
         return self.particles
 
-    @partial(jit, static_argnums=0)
-    def _perturb(self, key, particles):
-        """Add Gaussian noise scaled proportionally to the learning rate, that is
-        noise = sqrt(2 * lr) * z, where z is distributed as a standard
-        normal.
-        Returns:
-            pertubed particles"""
-        if self.noise_level > 0:
-            assert self.optimizer_str == "sgd"
-        keys = random.split(key, len(jax.tree_leaves(particles)))
-        key_tree = jax.tree_unflatten(jax.tree_structure(particles), keys)
-        scale = np.sqrt(2*self.learning_rate + 1e-8) * self.noise_level
-        return jax.tree_multimap(partial(utils.add_gauss, scale=scale),
-                                 key_tree,
-                                 particles)
-
-    def perturb(self):
-        self.threadkey, key = random.split(self.threadkey)
-        self.particles = self._perturb(key, self.particles)
-
     def next_batch(self, key, batch_size=None): # TODO make this a generator or something
         """
-        Return next subsampled batch of particles (training and validation) for the
-        training of a gradient field approximator."""
-        assert self.num_groups <= 2 # not strictly necessary anymore, but keep cause I'm not
-        # expecting to use more groups
+        Return next subsampled batch of training particles (split into training
+        and validation) for the training of a gradient field approximator."""
         particles, *_ = self.get_params()
-        #particles, test_particles = self.get_params()
-        # subsample batch
+
         # subsample batch
         if batch_size is None:
             batch_size = self.n_particles//2
 
-        # perturb
-        if self.noise_level > 0:
-            particles = self._perturb(key, particles)
-
         shuffled_batch = random.permutation(key, particles)
         return shuffled_batch[:batch_size], shuffled_batch[batch_size:]
-        #return particles, test_particles # TODO undo this, was just for testing
 
     @partial(jit, static_argnums=0)
     def _step(self, key, particles, optimizer_state, params):
@@ -207,7 +183,6 @@ class Particles:
             optimizer_state (updated)
             grad_aux: dict containing auxdata
         """
-        particles = self._perturb(key, particles)
         out = [self.gradient(params, p, aux=True) for p in particles]
         grads, grad_aux = [SplitData(*o) for o in zip(*out)]
         grad_aux = {grouplabel + "_" + label: v
@@ -224,34 +199,33 @@ class Particles:
             self.threadkey, key = random.split(self.threadkey)
         updated_particles, self.optimizer_state, auxdata = self._step(
             key, self.particles, self.optimizer_state, params)
-        self.write_to_log(self._log(auxdata, self.particles, self.step_counter))
+        self.log()
         self.particles = updated_particles
         self.step_counter += 1
         return None
 
-    def write_to_log(self, step_data: Mapping[str, np.ndarray]):
-        """Append dictionary to log."""
-        metrics.append_to_log(self.rundata, step_data)
+    def log(self):
+        metrics.append_to_log(self.rundata, self._log(self.particles, self.step_counter))
+        if self.step_counter % 10 == 0 and self.compute_metrics:
+            aux_metrics = self.compute_metrics(self.particles.training)
+            metrics.append_to_log(self.rundata,
+                                  {k: (self.step_counter, v) for k, v in aux_metrics.items()})
+
 
     @partial(jit, static_argnums=0)
-    def _log(self, auxdata, particles, step):
-        gradient = auxdata["grads"]
+    def _log(self, particles, step):
 
+        auxdata = {}
         if self.d < 35:
             auxdata.update({
                 "step": step,
                 "particles": particles,
-    #            "gradient_norm": np.linalg.norm(gradient),
-    #            "max_grad": np.max(np.abs(gradient)),
-    #            "mean_grad": np.mean(np.abs(gradient)),
-    #            "median_grad": np.median(np.abs(gradient)),
             })
         for k, v in particles.items():
             auxdata.update({
                 f"{k}_mean": np.mean(v, axis=0),
                 f"{k}_std":  np.std(v, axis=0),
             })
-        del auxdata["grads"]
         return auxdata
 
     def done(self):

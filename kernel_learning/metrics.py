@@ -118,3 +118,24 @@ def kl_diff(logq, logp, x, transform):
     logp_pullback = pushforward_log(logp, transform)
     kl2 = estimate_kl(logq, logp_pullback, x)
     return kl1 - kl2
+
+def get_mmd(kernel=kernels.get_rbf_kernel(1.)):
+    """
+    kernel(x, y) outputs scalar
+    """
+    kernel_matrix = vmap(vmap(kernel, (0, None)), (None, 0))
+
+    def mmd(xs, ys):
+        """Returns approximation of
+        E[k(x, x') + k(y, y') - 2k(x, y)]"""
+        kxx = utils.remove_diagonal(kernel_matrix(xs, xs))
+        kyy = utils.remove_diagonal(kernel_matrix(ys, ys))
+        kxy = kernel_matrix(xs, ys)
+        return np.mean(kxx) + np.mean(kyy) - 2 * np.mean(kxy)
+    return mmd
+
+def get_mmd_tracer(target_samples, kernel=kernels.get_rbf_kernel(1.)):
+    mmd = get_mmd(kernel)
+    def compute_mmd(particles):
+        return {"mmd": mmd(particles, target_samples)}
+    return compute_mmd
