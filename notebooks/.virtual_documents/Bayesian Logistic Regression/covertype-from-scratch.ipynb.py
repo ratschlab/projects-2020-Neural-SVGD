@@ -50,22 +50,6 @@ tfpk = tfp.math.psd_kernels
 import optax
 
 
-# set up exporting
-import matplotlib
-matplotlib.use("pgf")
-matplotlib.rcParams.update({
-    "pgf.texsystem": "pdflatex",
-    'font.family': 'serif',
-    'text.usetex': True,
-    'pgf.rcfonts': False,
-})
-
-# save figures by using plt.savefig('title of figure')
-
-
-get_ipython().run_line_magic("matplotlib", " inline")
-
-
 data = scipy.io.loadmat('/home/lauro/code/msc-thesis/wang_svgd/data/covertype.mat')
 features = data['covtype'][:, 1:]
 features = onp.hstack([features, onp.ones([features.shape[0], 1])]) # add intercept term
@@ -102,6 +86,7 @@ from jax.scipy import stats, special
 
 
 # alternative model
+@partial(jit, static_argnums=1)
 def sample_from_prior(key, num=100):
     keya, keyb = random.split(key)
     alpha = random.gamma(keya, a0, shape=(num,)) / b0
@@ -184,14 +169,11 @@ def compute_train_accuracy(w):
 
 
 def ravel(w, log_alpha):
-    return np.hstack([w, np.expand_dims(log_alpha, -1)])
+    return np.hstack([w, log_alpha[:, None]])
 
 
 def unravel(params):
-    if params.ndim == 1:
-        return params[:-1], params[-1]
-    elif params.ndim == 2:
-        return params[:, :-1], np.squeeze(params[:, -1])
+    return params[:, :-1], np.squeeze(params[:, -1])
 
 
 def get_minibatch_logp(x, y):
@@ -237,96 +219,21 @@ params = ravel(w, log_alpha)
 lp(params)
 
 
+NUM_VALS = 30 # number of test accuracy evaluations per run
 NUM_EPOCHS = 3
-NUM_VALS = 5*NUM_EPOCHS # number of test accuracy evaluations per run
 NUM_STEPS = num_batches*NUM_EPOCHS
 
 
-NUM_STEPS
+# schedule = utils.polynomial_schedule
+schedule = optax.constant_schedule(1.)
 
 
-def sample_tv(key):
-    return ravel(*sample_from_prior(key, num=batch_size)).split(2)
-
-
-def run_svgd(key, lr):
-    key, subkey = random.split(key)
-    init_particles = ravel(*sample_from_prior(subkey, 100))
-#     svgd_opt = optax.chain(optax.scale_by_schedule(utils.polynomial_schedule),
-#                            optax.scale_by_rms(),
-#                            optax.scale(-lr))
-    svgd_opt = optax.sgd(lr)
-
-    svgd_grad = models.KernelGradient(get_target_logp=lambda batch: get_minibatch_logp(*batch), scaled=False)
-    particles = models.Particles(key, svgd_grad.gradient, init_particles, custom_optimizer=svgd_opt)
-
-    test_batches = get_batches(x_test, y_test, 2*NUM_VALS, batch_size=batch_size)
-    train_batches = get_batches(x_train, y_train, NUM_STEPS+1)
-    for i, batch in tqdm(enumerate(train_batches), total=NUM_STEPS):
-        particles.step(batch)
-        if i % (NUM_STEPS//NUM_VALS) == 0:
-            test_logp = get_minibatch_logp(*next(test_batches))
-            stepdata = {
-                "accuracy": compute_test_accuracy(unravel(particles.particles.training)[0]),
-                "test_logp": test_logp(particles.particles.training),
-            }
-            metrics.append_to_log(particles.rundata, stepdata)
-
-    particles.done()
-    return particles
-
-
-def run_neural_svgd(key, lr):
-    """init_batch is a batch of initial samples / particles.
-    Note: there's two types of things I call 'batch': a batch from the dataset
-    and a batch of particles. don't confuse them"""
-    key, subkey = random.split(key)
-    init_particles = ravel(*sample_from_prior(subkey, batch_size))
-    nsvgd_opt = optax.sgd(lr)
-
-    key1, key2 = random.split(key)
-    neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
-                                   get_target_logp=lambda batch: get_minibatch_logp(*batch),
-                                   learning_rate=5e-3,
-                                   key=key1,
-                                   aux=False)
-    particles = models.Particles(key2, neural_grad.gradient, init_particles, custom_optimizer=nsvgd_opt)
-
-    # Warmup on first batch
-    neural_grad.train(next_batch=sample_tv,
-                      n_steps=100,
-                      early_stopping=False,
-                      data=next(get_batches(x_train, y_train, 2)))
-
-    next_particles = partial(particles.next_batch)
-    test_batches = get_batches(x_test, y_test, 2*NUM_VALS, batch_size=batch_size)
-    train_batches = get_batches(x_train, y_train, NUM_STEPS+1)
-    for i, data_batch in tqdm(enumerate(train_batches), total=NUM_STEPS):
-        neural_grad.train(next_batch=next_particles, n_steps=10, data=data_batch)
-        particles.step(neural_grad.get_params())
-        if i % (NUM_STEPS//NUM_VALS)==0:
-            test_logp = get_minibatch_logp(*next(test_batches))
-            train_logp = get_minibatch_logp(*data_batch)
-            stepdata = {
-                "accuracy": compute_test_accuracy(unravel(particles.particles.training)[0]),
-                "test_logp": test_logp(particles.particles.training),
-                "training_logp": train_logp(particles.particles.training),
-            }
-            metrics.append_to_log(particles.rundata, stepdata)
-    neural_grad.done()
-    particles.done()
-    return particles, neural_grad
-
-
-schedule = utils.polynomial_schedule
-
-def run_sgld(key, lr):
-    key, subkey = random.split(key)
-    init_particles = ravel(*sample_from_prior(subkey, 100))
+def run_sgld(key, init_batch, lr):
     """init_batch = (w, log_alpha) is a batch of initial samples / particles."""
     key, subkey = random.split(key)
-#     sgld_opt = utils.scaled_sgld(subkey, lr, schedule)
-    sgld_opt = utils.sgld(lr, 0)
+    sgld_opt = utils.scaled_sgld(subkey, lr, schedule)
+#     sgld_opt = utils.sgld(lr, 0)
+    init_batch_flat = ravel(*init_batch)
 
     def energy_gradient(data, particles, aux=True):
         """data = [batch_x, batch_y]"""
@@ -338,7 +245,7 @@ def run_sgld(key, lr):
         else:
             return -grads
 
-    particles = models.Particles(key, energy_gradient, init_particles, custom_optimizer=sgld_opt)
+    particles = models.Particles(key, energy_gradient, init_batch_flat, custom_optimizer=sgld_opt)
     test_batches = get_batches(x_test, y_test)
     train_batches = get_batches(x_train, y_train, NUM_STEPS+1)
     for i, batch_xy in tqdm(enumerate(train_batches), total=NUM_STEPS):
@@ -357,138 +264,168 @@ def run_sgld(key, lr):
 
 # Run samplers
 key, subkey = random.split(key)
+init_batch = sample_from_prior(subkey, 100)
 
-sgld_p = run_sgld(subkey, 1e-6)
-# svgd_p = run_svgd(subkey, 5e-2)
-# neural_p, neural_grad = run_neural_svgd(subkey, 1e-6)
+key, subkey = random.split(key)
+sgld_p = run_sgld(subkey, init_batch, 1e-6)
 
 
+w_samples, log_alpha_samples = unravel(sgld_p.particles.training)
 sgld_aux = sgld_p.rundata
-svgd_aux = svgd_p.rundata
-neural_aux = neural_p.rundata
 
 
-sgld_accs, svgd_accs, neural_accs = [aux["accuracy"] for aux in (sgld_aux, svgd_aux, neural_aux)]
+plt.subplots(figsize=[10, 5])
+plt.plot(sgld_aux["accuracy"], "--.")
+# plt.plot(sgld_aux["train_accuracy"], "--.")
 
 
-plt.subplots(figsize=[15, 8])
-names = ["SGLD", "SVGD", "Neural"]
-accs = [sgld_accs, svgd_accs, neural_accs]
-for name, acc in zip(names, accs):
-    plt.plot(acc, "--.", label=name)
+spaced_idx = np.arange(0, NUM_STEPS, NUM_STEPS // NUM_VALS)
+
+# Test loglikelihood
+plt.subplots(figsize=[10, 6])
+plt.plot(sgld_aux["training_logp"], "--.", label="Training loglikelihood")
+# plt.plot(spaced_idx, sgld_aux["test_logp"], "--.", label="Test loglikelihood")
 plt.legend()
 
 
-spaced_idx = np.arange(0, NUM_STEPS, NUM_STEPS // NUM_VALS)
-plt.plot(sgld_aux["training_logp"])
-plt.plot(spaced_idx, sgld_aux["test_logp"])
-
-
-spaced_idx = np.arange(0, NUM_STEPS, NUM_STEPS // NUM_VALS)
-plt.plot(neural_aux["training_logp"])
-plt.plot(spaced_idx, neural_aux["test_logp"])
+plt.subplots(figsize=[10, 6])
+plt.plot(sgld_aux["training_mean"]);
+# l = plt.ylim()
 
 
 key, subkey = random.split(key)
 
-key, subkey = random.split(key)
 def sgld_acc(lr):
-    particles = run_sgld(subkey, lr)
-    acc = particles.rundata["accuracy"]
-    return np.mean(np.array(acc[-10:]))
-
-def svgd_acc(lr):
-    particles = run_svgd(subkey, lr)
-    acc = particles.rundata["accuracy"]
-    return np.mean(np.array(acc[-10:]))
-
-def nsvgd_acc(lr):
-    particles, _ = run_neural_svgd(subkey, lr)
+    particles = run_sgld(subkey, init_batch, lr)
     acc = particles.rundata["accuracy"]
     return np.mean(np.array(acc[-10:]))
 
 def print_accs(lrs, accs):
     accs = np.asarray(accs)
-    print(accs)
-    print(np.argmax(accs))
     plt.plot(lrs, accs, "--.")
     plt.xscale("log")
 
 
-accs = []
+accs_sweep = []
 lrs = np.logspace(-9, -4, 15)
 for lr in lrs:
-    accs.append(sgld_acc(lr))
-accs = np.array(accs)
-print_accs(lrs, accs)
+    accs_sweep.append(sgld_acc(lr))
+print_accs(lrs, accs_sweep)
 
 
-accs = []
-lrs = np.logspace(-5, -1, 15)
+accs_sweep = []
+lrs = np.logspace(-6, 1, 15)
 for lr in lrs:
-    accs.append(svgd_acc(lr))
-accs = np.array(accs)
-print_accs(lrs, accs)
+    accs_sweep.append(sgld_acc(lr))
+print_accs(lrs, accs_sweep)
 
 
-accs = []
-lrs = np.logspace(-5, -1, 15)
-for lr in lrs:
-    accs.append(nsvgd_acc(lr))
-    print(accs[-1])
-accs = np.array(accs)
-print_accs(lrs, accs)
-
-
-plt.subplots(figsize=[15, 8])
-plt.plot(sgld_aux["training_mean"], "--o");
-
-
-plt.plot(neural_grad.rundata["train_steps"])
-
-
-# get_ipython().run_line_magic("matplotlib", " widget")
-get_ipython().run_line_magic("matplotlib", " inline")
-plt.subplots(figsize=[15, 8])
-plt.plot(neural_grad.rundata["training_loss"])
-plt.plot(neural_grad.rundata["validation_loss"])
-
-
-plt.subplots(figsize=[15, 8])
-plt.plot(neural_aux["training_mean"]);
-
-
-plt.subplots(figsize=[15, 8])
-plt.plot(svgd_aux["training_mean"]);
+lrs[np.array(accs_sweep).argmax()]
 
 
 @jit
-def batch_probs(params):
+def batch_probs(w):
     """Returns test probabilities P(y=1) for
     all y in the test set, for w a parameter array
     of shape (n, num_features)"""
-    w, _ = unravel(params)
     probs = vmap(lambda wi: compute_probs(y_test, x_test, wi))(w)
     return np.mean(probs, axis=0)
 
 
-probabilities = [batch_probs(p.particles.training) for p in (sgld_p, svgd_p, neural_p)]
+fig, ax = plt.subplots(figsize=[5, 5])
 
-
-fig, axs = plt.subplots(1, 3, figsize=[17, 5])
-
-for ax, probs, name in zip(axs, probabilities, names):
-    true_freqs, bins = calibration_curve(y_test, probs, n_bins=10)
-    ax.plot(true_freqs, bins, "--o")
+probs = batch_probs(w_samples)
+true_freqs, bins = calibration_curve(y_test, probs, n_bins=10)
+ax.plot(true_freqs, bins, "--o")
 #     print(bins)
-    ax.plot(bins, bins)
-    ax.set_ylabel("True frequency")
-    ax.set_xlabel("Predicted probability")
-    ax.set_title(name)
+ax.plot(bins, bins)
+ax.set_ylabel("True frequency")
+ax.set_xlabel("Predicted probability")
+ax.set_title("SGLD Calibration")
 
 
-sdlfk
+from tensorflow_probability.substrates import jax as tfp
+tfd = tfp.distributions
+tfb = tfp.bijectors
+tfpk = tfp.math.psd_kernels
 
 
-certainty = np.max([1 - probs, probs])
+# bs = 10**5
+# nb = num_datapoints // bs # num batches
+# tfp_batches = get_batches(x_train, y_train, n_steps=10, batch_size=bs)
+# nb
+
+
+# xx, yy = next(tfp_batches)
+xx, yy = x_train, y_train
+def target_log_prob(params):
+    return get_minibatch_logp(x_train, y_train)(params)
+
+
+# kernel = tfp.mcmc.MetropolisAdjustedLangevinAlgorithm(target_log_prob_fn=target_log_prob, step_size=1e-2)
+# kernel = tfp.mcmc.NoUTurnSampler(target_log_prob, 1e-3)
+kernel = tfp.mcmc.UncalibratedLangevin(target_log_prob_fn=target_log_prob, step_size=1e-5)
+
+@jit
+def run_chain(key, state):
+    return tfp.mcmc.sample_chain(500,
+      current_state=state,
+      kernel=kernel,
+      trace_fn = None,
+      num_burnin_steps=0,
+      seed=key)
+
+
+m = 100
+key, subkey = random.split(key)
+init_batch = sample_from_prior(subkey, m)
+init_batch = ravel(*init_batch)
+
+
+key, subkey = random.split(key)
+vstates = vmap(run_chain)(random.split(subkey, m), init_batch)
+
+
+tfp_samples = vstates[-1]
+print(np.mean(np.isnan(tfp_samples)))
+compute_test_accuracy(unravel(tfp_samples)[0])
+
+
+tfp_samples.shape
+
+
+unravel(tfp_samples)[0].shape
+
+
+@jit
+def tfp_accuracy(l.ipynb_checkpoints/, key):
+    kernel = tfp.mcmc.UncalibratedLangevin(target_log_prob_fn=target_log_prob, step_size=lr)
+
+    def run_chain(rngkey, state):
+        return tfp.mcmc.sample_chain(500,
+          current_state=state,
+          kernel=kernel,
+          trace_fn = None,
+          num_burnin_steps=0,
+          seed=rngkey)
+
+    key, subkey = random.split(key)
+    m = 100
+    key, subkey = random.split(key)
+    init_batch = sample_from_prior(subkey, m)
+    init_batch = ravel(*init_batch)
+    vstates = vmap(run_chain)(random.split(subkey, m), init_batch)
+    return compute_test_accuracy(unravel(vstates[-1])[0])
+
+
+tfp_accs_sweep = []
+lrs = np.logspace(-8, -2, 10)
+for lr in tqdm(lrs):
+    tfp_accs_sweep.append(tfp_accuracy(lr, subkey))
+print_accs(lrs, tfp_accs_sweep)
+
+
+lrs[np.array(tfp_accs_sweep).argmax()]
+
+
 

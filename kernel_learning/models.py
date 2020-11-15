@@ -135,7 +135,6 @@ class Particles:
         self.optimizer_state = self.opt.init(self.particles)
         self.step_counter = 0
         self.rundata = {}
-#        self.noise_level = noise_level
         self.donedone = False
         self.compute_metrics = compute_metrics
 
@@ -190,7 +189,7 @@ class Particles:
                     for label, v in d.items()}
         updated_grads, optimizer_state = self.opt.update(grads, optimizer_state, particles)
         particles = optax.apply_updates(particles, updated_grads)
-        grad_aux.update({"grads": updated_grads})
+        #grad_aux.update({"grads": updated_grads})
         return particles, optimizer_state, grad_aux
 
     def step(self, params, key=None):
@@ -199,17 +198,19 @@ class Particles:
             self.threadkey, key = random.split(self.threadkey)
         updated_particles, self.optimizer_state, auxdata = self._step(
             key, self.particles, self.optimizer_state, params)
-        self.log()
+        self.log(auxdata)
         self.particles = updated_particles
         self.step_counter += 1
         return None
 
-    def log(self):
+    def log(self, grad_aux=None):
         metrics.append_to_log(self.rundata, self._log(self.particles, self.step_counter))
         if self.step_counter % 10 == 0 and self.compute_metrics:
             aux_metrics = self.compute_metrics(self.particles.training)
             metrics.append_to_log(self.rundata,
                                   {k: (self.step_counter, v) for k, v in aux_metrics.items()})
+        if grad_aux is not None:
+            metrics.append_to_log(self.rundata, grad_aux)
 
 
     @partial(jit, static_argnums=0)

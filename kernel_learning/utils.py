@@ -12,6 +12,7 @@ from collections.abc import Iterable
 import collections
 import warnings
 import numpy as onp
+from typing import NamedTuple
 
 def isiterable(obj):
     return isinstance(obj, Iterable)
@@ -619,11 +620,18 @@ from distributions import funnel, banana_target, ring_target, squiggle_target, m
 def polynomial_schedule(step):
     return 1. / (step + 1)**0.55
 
+#def polynomial_schedule(step):
+#    return 1. / (step + 1)**0.35 # .25
+
 def sgld(learning_rate: float = 1e-2, random_seed: int = 0):
     return optax.chain(
         optax.scale(-learning_rate),
         optax.add_noise(np.sqrt(2*learning_rate + 1e-8), 0, random_seed),
     )
+
+class ScaledSGLDState(NamedTuple):
+    count: int
+    key: np.ndarray
 
 def scaled_sgld(key: np.ndarray, learning_rate: float = 1e-2, schedule_fn: callable = optax.constant_schedule(1.)):
     """
@@ -635,7 +643,7 @@ def scaled_sgld(key: np.ndarray, learning_rate: float = 1e-2, schedule_fn: calla
     scaler = optax.scale_by_schedule(schedule_fn)
 
     def init_fn(params):
-        return [scaler.init(1.), key]
+        return ScaledSGLDState(count=0, key=key)
 
     def update_fn(updates, state, params=None):
         """
@@ -643,12 +651,12 @@ def scaled_sgld(key: np.ndarray, learning_rate: float = 1e-2, schedule_fn: calla
         - stepsize * updates + np.sqrt(2 stepsize) * z,
         where z is standard normal.
         """
-        scaler_state, key = state
-        key, subkey = random.split(key)
-        scale, scaler_state = scaler.update(1., scaler_state)
-        stepsize = learning_rate*scale
+        count, key = state
+        stepsize = schedule_fn(count) * learning_rate
+        count += 1
         updates = jax.tree_map(lambda g: -stepsize*g, updates)
-        return add_noise(subkey, updates, np.sqrt(2*stepsize)), [scaler_state, key]
+        key, subkey = random.split(key)
+        return add_noise(subkey, updates, np.sqrt(2*stepsize)), ScaledSGLDState(count=count, key=key)
 
     return optax.GradientTransformation(init_fn, update_fn)
 
@@ -667,4 +675,3 @@ setup_mapping = {
     "squiggle": squiggle_target,
     "mix": mix_of_gauss,
 }
-

@@ -49,9 +49,6 @@ printsize = [5.4, 4]
 get_ipython().run_line_magic("autoreload", "")
 
 
-get_ipython().run_line_magic("matplotlib", " inline")
-
-
 n_steps = 4000
 particle_lr = 1e-2
 learner_lr = 1e-3
@@ -66,9 +63,6 @@ proposal = distributions.Gaussian(np.zeros(d), np.ones(d))
 funnel_setup = distributions.Setup(target, proposal)
 
 
-get_ipython().run_line_magic("autoreload", "")
-
-
 key, subkey = random.split(key)
 neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=n_steps, particle_lr=particle_lr, patience=PATIENCE, learner_lr=learner_lr, aux=False)
 svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, funnel_setup, n_particles=200, n_steps=n_steps, particle_lr=particle_lr, scaled=True,  bandwidth=None)
@@ -80,17 +74,18 @@ plt.subplots(figsize=[15, 8])
 
 plt.plot(*zip(*neural_particles.rundata["mmd"]), label="Neural")
 plt.plot(*zip(*sgld_particles.rundata["mmd"]), label="SGLD")
-# plt.plot(*zip(*sgld_particles2.rundata["mmd"]), label="Slow SGLD")
+plt.plot(*zip(*sgld_particles2.rundata["mmd"]), label="Slow SGLD")
 plt.plot(*zip(*svgd_particles.rundata["mmd"]), label="SVGD")
 
 plt.legend()
 
 
+get_ipython().run_line_magic("matplotlib", " inline")
 plt.subplots(figsize=printsize)
 
 plt.plot(*zip(*neural_particles.rundata["mmd"]), label="Neural")
 plt.plot(*zip(*sgld_particles.rundata["mmd"]), label="SGLD")
-# plt.plot(*zip(*sgld_particles2.rundata["mmd"]), label="Slow SGLD")
+plt.plot(*zip(*sgld_particles2.rundata["mmd"]), label="Slow SGLD")
 plt.plot(*zip(*svgd_particles.rundata["mmd"]), label="SVGD")
 plt.legend()
 
@@ -128,12 +123,21 @@ plot_projection(idx, figsize=[25, 8])
 
 idx = np.array([0, -1])
 plot_projection(idx, figsize=printsize)
-plt.savefig(figure_path + "funnel_scatter.pgf")
+# plt.savefig(figure_path + "funnel_scatter.pgf")
+
+
+# svgd scatterplot
+fig, ax = plt.subplots(figsize=[5,5])
+plot_true(idx, ax)
+ax.scatter(*np.rollaxis(svgd_particles.particles.training[:, idx], 1), alpha=0.55)
+ax.legend()
+ax.set_title("SVGD")
+ax.set(xlim=lims, ylim=lims)
 
 
 # fig, axs = plt.subplots(1, 2, figsize=[15, 7])
 # for ax in axs:
-#     plot.scatter(vmap(kernels.defunnelize)(true_samples), ax=ax)
+#     plot.scatter(vmap(kernels.desvgd_particlesize)(true_samples), ax=ax)
 #     ax.set(ylim=[-3, 3], xlim=[-3, 3])
 
 # plot.scatter(vmap(kernels.defunnelize)(neural_particles.particles.training), ax = axs[0])
@@ -164,6 +168,9 @@ idx = np.array([0, -1])
 neural_particles.rundata.keys()
 
 
+neural_particles.done()
+
+
 trajectory = neural_particles.rundata["particles"].training
 trajectory_projected = trajectory[:, :, idx]
 
@@ -180,9 +187,12 @@ for ax in axs:
 interval = 10
 a=[]
 a.append(plot.animate_array(trajectory_projected, fig, ax=axs[0], interval=interval))
-a.append(plot.animate_array(sgld_particles.rundata["particles"].training, ax=axs[1], interval=interval))
-a.append(plot.animate_array(sgld_particles2.rundata["particles"].training, ax=axs[2], interval=interval))
+# a.append(plot.animate_array(sgld_particles.rundata["particles"].training, ax=axs[1], interval=interval))
+# a.append(plot.animate_array(sgld_particles2.rundata["particles"].training, ax=axs[2], interval=interval))
 a
+
+
+skdjflsdk
 
 
 key, subkey = random.split(key)
