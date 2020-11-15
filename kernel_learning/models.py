@@ -358,9 +358,9 @@ class VectorFieldMixin:
         particle of shape (d,) or batch shaped (..., d)."""
         if params is None:
             params = self.get_params()
-        norm = nets.get_norm(init_particles)
+        #norm = nets.get_norm(init_particles)
         aux = self.compute_aux(init_particles)
-        #norm = lambda x: x
+        norm = lambda x: x
         def v(x):
             """x should have shape (n, d) or (d,)"""
             return self.field.apply(params, None, norm(x), aux)
@@ -539,14 +539,9 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         else:
             return ValueError(f"One of target_logp and get_target_logp must"
                               f"be given.")
+        self.scale = 1. # scaling of self.field
 
-    def _get_grad(self, particles, params):
-        # TODO this only works when target logp is fixed
-        """Return approximation of KL gradient as callable"""
-        target_logp = self.get_target_logp()
-        return self.get_field(particles, params)
-
-    def loss_fn(self, params, batch, key, particles):
+    def _loss_fn(self, params, batch, key, particles):
         """
         params: neural net paramers
         batch: data used to compute logp. Can be none if logp is known precisely
@@ -562,6 +557,17 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
         #loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
+        return loss, aux
+
+    def loss_fn(self, params, batch, key, particles):
+        target_logp = self.get_target_logp(batch)
+        f = utils.negative(self.get_field(particles, params))
+        stein_discrepancy, stein_aux = stein.stein_discrepancy(
+            particles, target_logp, f, aux=True)
+        l2_f_sq = utils.l2_norm_squared(particles, f)
+        sd = stein_discrepancy**2 / l2_f_sq
+        loss = -sd
+        aux = [loss, sd, l2_f_sq, stein_aux]
         return loss, aux
 
     @partial(jit, static_argnums=0)
