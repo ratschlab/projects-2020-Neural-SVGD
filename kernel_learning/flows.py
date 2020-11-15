@@ -146,36 +146,3 @@ def sgld_flow(key,
             return energy_gradient, particles, err
     particles.done()
     return energy_gradient, particles, None
-
-
-def deep_kernel_flow(key,
-                     setup,
-                     n_particles=default_num_particles,
-                     n_steps=default_num_steps,
-                     sizes=[32, 32, 2],
-                     particle_lr=1e-2,
-                     learner_lr=1e-3,
-                     patience=default_patience):
-    key, keya, keyb = random.split(key, 3)
-    target, proposal = setup.get()
-    learner = models.KernelLearner(target_logp=target.logpdf,
-                                   key=keya,
-                                   sizes=sizes,
-                                   learning_rate=learner_lr,
-                                   patience=patience)
-
-    particles = models.Particles(key=keyb,
-                                 gradient=learner.gradient,
-                                 init_samples=proposal.sample,
-                                 n_particles=n_particles,
-                                 learning_rate=particle_lr)
-
-    for _ in tqdm(range(n_steps), disable=disable_tqdm):
-        try:
-            key, subkey = random.split(key)
-            learner.train(particles.next_batch, key=subkey, n_steps=1)
-            particles.step(learner.get_params())
-        except (FloatingPointError, KeyboardInterrupt) as err:
-            warnings.warn(f"Caught floating point error")
-            return learner, particles, err
-    return learner, particles, None
