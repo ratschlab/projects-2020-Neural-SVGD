@@ -541,7 +541,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                               f"be given.")
         self.scale = 1. # scaling of self.field
 
-    def _loss_fn(self, params, batch, key, particles):
+    def loss_fn(self, params, batch, key, particles):
         """
         params: neural net paramers
         batch: data used to compute logp. Can be none if logp is known precisely
@@ -559,7 +559,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
         return loss, aux
 
-    def loss_fn(self, params, batch, key, particles):
+    def _loss_fn(self, params, batch, key, particles):
         target_logp = self.get_target_logp(batch)
         f = utils.negative(self.get_field(particles, params))
         stein_discrepancy, stein_aux = stein.stein_discrepancy(

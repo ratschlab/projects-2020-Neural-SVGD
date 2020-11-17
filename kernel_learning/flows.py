@@ -40,7 +40,8 @@ def neural_svgd_flow(key,
                      learner_lr=1e-2,
                      noise_level=None,
                      patience=default_patience,
-                     aux=True):
+                     aux=True,
+                     compute_metrics=None):
     key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
@@ -51,6 +52,9 @@ def neural_svgd_flow(key,
                                patience=patience,
                                aux=aux)
 
+    if compute_metrics is None:
+        compute_metrics = metrics.get_mmd_tracer(
+                                     target.sample(500, keyc))
     particles = models.Particles(key=keyb,
                                  gradient=learner.gradient,
                                  init_samples=proposal.sample,
@@ -58,8 +62,7 @@ def neural_svgd_flow(key,
                                  learning_rate=particle_lr,
                                  num_groups=1 if target.d > 2 else 2,
                                  optimizer="sgd",
-                                 compute_metrics=metrics.get_mmd_tracer(
-                                     target.sample(500, keyc)))
+                                 compute_metrics=compute_metrics)
 
     # Warmup
     def next_batch(key):
@@ -71,7 +74,7 @@ def neural_svgd_flow(key,
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            batch = particles.next_batch(subkey, batch_size=2*n_particles//3)
+            batch = particles.next_batch(subkey, batch_size=2*n_particles//3) # TODO set to 99??
             learner.train(batch, n_steps=n_learner_steps)
             particles.step(learner.get_params())
         except Exception as err:
@@ -90,7 +93,8 @@ def svgd_flow(key,
               noise_level=None,
               particle_optimizer="sgd",
               scaled=True,
-              bandwidth=1.):
+              bandwidth=1.,
+              compute_metrics=None):
     key, keyb, keyc = random.split(key, 3)
     target, proposal = setup.get()
 
@@ -100,14 +104,17 @@ def svgd_flow(key,
                                             lambda_reg=lambda_reg,
                                             scaled=scaled)
 
+
+    if compute_metrics is None:
+        compute_metrics = metrics.get_mmd_tracer(
+                                     target.sample(500, keyc))
     svgd_particles = models.Particles(key=keyb,
                                       gradient=kernel_gradient.gradient,
                                       init_samples=proposal.sample,
                                       n_particles=n_particles,
                                       learning_rate=particle_lr,
                                       optimizer=particle_optimizer,
-                                      compute_metrics=metrics.get_mmd_tracer(
-                                          target.sample(500, keyc)))
+                                      compute_metrics=compute_metrics)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             svgd_particles.step(None)
@@ -125,10 +132,15 @@ def sgld_flow(key,
               particle_lr=1e-2,
               lambda_reg=1/2,
               noise_level=None,
-              particle_optimizer="sgld"):
+              particle_optimizer="sgld",
+              compute_metrics=None):
     keya, keyb, keyc = random.split(key, 3)
     target, proposal = setup.get()
     energy_gradient = models.EnergyGradient(target.logpdf, keya, lambda_reg=lambda_reg)
+
+    if compute_metrics is None:
+        compute_metrics = metrics.get_mmd_tracer(
+                                     target.sample(500, keyc))
     particles = models.Particles(key=keyb,
                                  gradient=energy_gradient.gradient,
                                  init_samples=proposal.sample,
@@ -136,8 +148,7 @@ def sgld_flow(key,
                                  learning_rate=particle_lr,
                                  optimizer=particle_optimizer,
                                  num_groups=1,
-                                 compute_metrics=metrics.get_mmd_tracer(
-                                     target.sample(500, keyc)))
+                                 compute_metrics=compute_metrics)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             particles.step(None)

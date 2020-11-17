@@ -139,3 +139,12 @@ def get_mmd_tracer(target_samples, kernel=kernels.get_rbf_kernel(1.)):
     def compute_mmd(particles):
         return {"mmd": mmd(particles, target_samples)}
     return compute_mmd
+
+
+def get_funnel_tracer(target_samples):
+    rbf_mmd = get_mmd(kernels.get_rbf_kernel(1.))
+    funnel_mmd = get_mmd(kernels.get_funnel_kernel(1.))
+    def compute_mmd(particles):
+        return {"rbf_mmd": rbf_mmd(particles, target_samples),
+                "funnel_mmd": funnel_mmd(particles, target_samples)}
+    return compute_mmd
