@@ -29,7 +29,7 @@ default_num_steps = 100
 #default_learner_lr = 1e-2
 default_patience = 10
 disable_tqdm = False
-NUM_WARMUP_STEPS = 100
+NUM_WARMUP_STEPS = 500
 
 def neural_svgd_flow(key,
                      setup,
@@ -41,7 +41,8 @@ def neural_svgd_flow(key,
                      noise_level=None,
                      patience=default_patience,
                      aux=True,
-                     compute_metrics=None):
+                     compute_metrics=None,
+                     n_learner_steps=50):
     key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
@@ -70,7 +71,6 @@ def neural_svgd_flow(key,
     learner.train(
         next_batch=next_batch, n_steps=NUM_WARMUP_STEPS, early_stopping=False)
 
-    n_learner_steps = 50
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)

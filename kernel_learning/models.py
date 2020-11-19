@@ -164,10 +164,11 @@ class Particles:
 
         # subsample batch
         if batch_size is None:
-            batch_size = self.n_particles//2
+            batch_size = 3*self.n_particles//4
 
         shuffled_batch = random.permutation(key, particles)
         return shuffled_batch[:batch_size], shuffled_batch[batch_size:]
+
 
     @partial(jit, static_argnums=0)
     def _step(self, key, particles, optimizer_state, params):
@@ -358,9 +359,9 @@ class VectorFieldMixin:
         particle of shape (d,) or batch shaped (..., d)."""
         if params is None:
             params = self.get_params()
-        #norm = nets.get_norm(init_particles)
+        norm = nets.get_norm(init_particles)
         aux = self.compute_aux(init_particles)
-        norm = lambda x: x
+        #norm = lambda x: x
         def v(x):
             """x should have shape (n, d) or (d,)"""
             return self.field.apply(params, None, norm(x), aux)
@@ -525,12 +526,13 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                  sizes: list = None,
                  learning_rate: float = 5e-3,
                  patience: int = 0,
-                 aux=True):
+                 aux=True,
+                 lambda_reg=1/2):
         """aux: bool, whether to concatenate particle dist info onto
         mlp input"""
         super().__init__(target_dim, target_logp, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience, aux=aux)
-        self.lambda_reg = 1/2
+        self.lambda_reg = lambda_reg
         if target_logp:
             assert not get_target_logp
             self.get_target_logp = lambda *args: target_logp

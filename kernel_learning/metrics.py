@@ -148,3 +148,22 @@ def get_funnel_tracer(target_samples):
         return {"rbf_mmd": rbf_mmd(particles, target_samples),
                 "funnel_mmd": funnel_mmd(particles, target_samples)}
     return compute_mmd
+
+def get_squared_error_tracer(target_statistic: np.ndarray, statistic: callable, name: str):
+    """statistic is a callable that takes in particles and returns
+    a value. If the value is not scalar, then the final squared
+    error is summed across components. value must be of same shape
+    as target_statistic."""
+    def compute_summed_error(particles: np.ndarray):
+        """compute squared error for each component, then
+        sum across components."""
+        return {name: np.sum((statistic(particles) - target_statistic)**2)}
+    return compute_summed_error
+
+def get_2nd_moment_tracer(target_2nd_moment):
+    return get_squared_error_tracer(
+        target_2nd_moment,
+        lambda particles: np.mean(particles**2, axis=0),
+        "second_error"
+    )
+
