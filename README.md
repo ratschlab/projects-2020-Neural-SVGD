@@ -1,6 +1,6 @@
 # Setup
 
-The main framework used in this project is [JAX](https://github.com/google/jax). The `requirements.txt` file includes the CPU-only version of JAX, which can be installed via pip. To use JAX efficiently on GPU, it needs to be installed separately; see the [installation instructions](https://github.com/google/jax).
+The main framework used in this project is [JAX](https://github.com/google/jax). The `requirements.txt` file includes the CPU-only version of JAX, which can be installed via pip. To use JAX efficiently on GPU, it needs to be installed separately; see the [installation instructions](https://github.com/google/jax/installation).
 
 To install the CPU-only version (and other dependencies), run
 
@@ -37,7 +37,7 @@ A drawback of SVGD is that it is dependent on the choice of a kernel function. I
 
 <img src="./illustrations/ngf-vs-svgd.gif"/>
 
-Here are the results (on the same task as in the gif) in a more interpretable form, plus a comparison with Langevin dynamics. In this task and in others, our method outperforms or matches SVGD (smaller MMD is better).
+Here are the results (on the same task as in the gif) in a more interpretable form, plus a comparison with Langevin dynamics (smaller MMD is better). In this task and in others, our method outperforms or matches SVGD.
 
 ![img](./illustrations/funnel_mmd.png)
 
