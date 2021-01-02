@@ -609,9 +609,9 @@ def remove_diagonal(matrix):
     """matrix is an (n,n) array.
     ouput: (n, n-1) array, matrix without the diagonal"""
     n = matrix.shape[0]
-    idx = np.ones((n, n))
-    idx = null_diagonal(idx)
-    return matrix[idx.nonzero()].reshape((n, n-1))
+    offdiag_idx = onp.nonzero(~onp.eye(n, dtype=bool))
+    return matrix[offdiag_idx].reshape((n, n-1))
+
 
 
 import optax

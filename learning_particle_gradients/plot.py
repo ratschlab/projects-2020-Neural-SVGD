@@ -329,7 +329,7 @@ def quiverplot(f, samples=None, num_gridpoints=50, ax=None, lims=[-10, 10], xlim
         ax.scatter(x, y, color="black")
         ax.quiver(x, y, u, v, angles=angles, scale=scale, **kwargs)
 
-def animate_array(arr, fig=None, ax=None, interval=100):
+def animate_array(arr, fig=None, ax=None, interval=100, color=None):
     """Animate array of shape (n_timesteps, n_points, 2)
     as moving scatterplot. Needs `%matplotlib widget` to work in Jupyter lab.
     interval = ms between frames."""
@@ -339,7 +339,7 @@ def animate_array(arr, fig=None, ax=None, interval=100):
         fig = plt.gcf()
 
     # plot the first frame
-    scat = ax.scatter(arr[0, :, 0], arr[0, :, 1])
+    scat = ax.scatter(arr[0, :, 0], arr[0, :, 1], color=color)
 
     title = ax.get_title()
     # animation fn
