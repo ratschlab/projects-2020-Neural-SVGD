@@ -2,7 +2,7 @@
 
 Many standard MCMC methods such as Hamiltonian Monte Carlo don't work well in settings with large data-sets and high-dimensional target posteriors with complicated dependencies. This is why usually simpler methods such as variational inference (VI) or stochastic gradient Langevin dynamics (SGLD) are applied to this type of problem (e.g. training a Bayesian neural network).
 
-In 2016, Quang Liu and Dilin Wang proposed Stein variational gradient descent (SVGD) [[1]](#1), a new kind of inference method that rapidly became popular. SVGD transports a set of particles $x_1, \dots, x_n$ along a trajectory that (approximately) minimizes the KL divergence to the target. In contrast to most Markov chain Monte Carlo (MCMC) methods, it does so by leveraging interactions between the $n$ particles. Here's an animation of the process (the blue samples represent the target density):
+In 2016, Quang Liu and Dilin Wang proposed Stein variational gradient descent (SVGD), a new kind of inference method that rapidly became popular. SVGD transports a set of $n$ samples (called 'particles') along a trajectory that (approximately) minimizes the KL divergence to the target. In contrast to most Markov chain Monte Carlo (MCMC) methods, it does so by leveraging interactions ('repulsive forces') between the particles. Here's an animation of the process (the blue samples represent the target density):
 
 ![](./illustrations/svgd.gif)
 
@@ -10,7 +10,7 @@ A drawback of SVGD is that it is dependent on the choice of a kernel function. I
 
 <img src="./illustrations/ngf-vs-svgd.gif"/>
 
-Here are the results (on the same task as in the gif) in a more interpretable form, plus a comparison with Langevin dynamics. In this task and in others, our method outperforms or matches SVGD.
+Here are the results (on the same task as in the gif) in a more interpretable form, plus a comparison with Langevin dynamics. In this task and in others, our method outperforms or matches SVGD (smaller MMD is better).
 
 ![img](./illustrations/funnel_mmd.png)
 
@@ -32,3 +32,6 @@ All code is contained in the `learning_particle_gradients` folder. The files are
 
 # Dependencies
 
+* Python >= 3.6
+* JAX >= 0.2.7
+* jaxlib >= 0.1.57
