@@ -1,3 +1,30 @@
+# Setup
+
+The main framework used in this project is [JAX](https://github.com/google/jax). The `requirements.txt` file includes the CPU-only version of JAX, which can be installed via pip. To use JAX efficiently on GPU, it needs to be installed separately; see the [installation instructions](https://github.com/google/jax).
+
+To install the CPU-only version (and other dependencies), run
+
+```
+git clone git@github.com:ratschlab/projects-2020-SVGD-kernel-learning.git
+cd projects-2020-SVGD-kernel-learning
+pip install -r requirements.txt
+```
+
+# Structure
+
+All code is contained in the `learning_particle_gradients` folder. The files are structured as follows:
+
+* `distributions.py`: a set of classes that bundle together all attributes and methods associated with a probability distribution (e.g. mean, variance, sampling, computing the likelihood and loglikelihood).
+* `flows.py`: implements functions to simulate the particle dynamics, using the models in `models.py`
+* `kernels.py`: a set of positive definite kernel functions.
+* `metrics.py`: utilities for computing metrics to track convergence to the target (e.g. MMD distance or mean squared error).
+* `models.py`: this is the heart of the project. Contains different models that each compute a single iteration of their respective particle dynamics.
+* `nets.py`: neural network architectures.
+* `plot.py`: utility functions for plotting.
+* `stein.py`: implementations of the Stein operator, (kernelized) Stein discrepancy, and associated methods.
+* `utils.py`: miscellaneous utility functions.
+
+
 # Overview
 
 Many standard MCMC methods such as Hamiltonian Monte Carlo don't work well in settings with large data-sets and high-dimensional target posteriors with complicated dependencies. This is why usually simpler methods such as variational inference (VI) or stochastic gradient Langevin dynamics (SGLD) are applied to this type of problem (e.g. training a Bayesian neural network).
@@ -16,22 +43,3 @@ Here are the results (on the same task as in the gif) in a more interpretable fo
 
 
 
-# Organization
-
-All code is contained in the `learning_particle_gradients` folder. The files are structured as follows:
-
-* `distributions.py`: a set of classes that bundle together all attributes and methods associated with a probability distribution (e.g. mean, variance, sampling, computing the likelihood and loglikelihood).
-* `flows.py`: implements functions to simulate the particle dynamics, using the models in `models.py`
-* `kernels.py`: a set of positive definite kernel functions.
-* `metrics.py`: utilities for computing metrics to track convergence to the target (e.g. MMD distance or mean squared error).
-* `models.py`: this is the heart of the project. Contains different models that each compute a single iteration of their respective particle dynamics.
-* `nets.py`: neural network architectures.
-* `plot.py`: utility functions for plotting.
-* `stein.py`: implementations of the Stein operator, (kernelized) Stein discrepancy, and associated methods.
-* `utils.py`: miscellaneous utility functions.
-
-# Dependencies
-
-* Python >= 3.6
-* JAX >= 0.2.7
-* jaxlib >= 0.1.57
