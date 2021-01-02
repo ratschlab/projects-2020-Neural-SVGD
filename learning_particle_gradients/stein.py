@@ -4,7 +4,6 @@ import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jit
 from jax.ops import index_update, index
 
-import variance
 import distributions
 import kernels
 
@@ -223,7 +222,7 @@ def ksd_squared(xs, ys, logp, k):
 
 
 #@partial(jit, static_argnums=(1, 2, 3))
-def ksd_squared_u(xs, logp, k, include_stddev=False):
+def ksd_squared_u(xs, logp, k):
     """
     U-statistic for KSD^2. Computation in O(n^2)
     Arguments:
@@ -248,11 +247,7 @@ def ksd_squared_u(xs, logp, k, include_stddev=False):
     diagonal_indices = [list(range(n))]*2
     ksd_matrix = index_update(ksd_matrix, diagonal_indices, 0)
     ksd_squared = np.sum(ksd_matrix) / (n * (n-1))
-    if include_stddev:
-        stddev = np.sqrt(np.clip(variance.var_ksd(ksd_matrix), a_min=1e-4)) # or clip at variance=1?
-        return ksd_squared, stddev
-    else:
-        return ksd_squared
+    return ksd_squared
 
 
 #@partial(jit, static_argnums=(1,2))
