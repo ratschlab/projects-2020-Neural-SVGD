@@ -1,8 +1,3 @@
-runs
-test-runs
-notebooks/.ipynb_checkpoints
 __pycache__
-notebooks/evaluating_experiments/.ipynb_checkpoints/
-notebooks/testing-parts/.ipynb_checkpoints/
-old-runs/
-leonhard-runs/
+**.virtual_documents
+**.ipynb_checkpoints
