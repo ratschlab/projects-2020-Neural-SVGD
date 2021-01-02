@@ -4,7 +4,7 @@ Many standard MCMC methods such as Hamiltonian Monte Carlo don't work well in se
 
 In 2016, Quang Liu and Dilin Wang proposed Stein variational gradient descent (SVGD), a new kind of inference method that rapidly became popular. SVGD transports a set of particles $x_1, \dots, x_n$ along a trajectory that (approximately) minimizes the KL divergence to the target. In contrast to most Markov chain Monte Carlo (MCMC) methods, it does so by leveraging interactions between the $n$ particles. Here's an animation of the process (the blue samples represent the target density):
 
-![](/home/lauro/code/msc-thesis/main/illustrations/svgd.gif)
+![](./illustrations/svgd.gif)
 
 A drawback of SVGD is that it is dependent on the choice of a kernel function. If this kernel is not chosen well, the method may converge badly or not at all. This is reflected in the observation that SVGD is not robust in high dimensions (cite). 
 
