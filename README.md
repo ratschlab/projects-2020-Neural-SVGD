@@ -5,7 +5,7 @@ The main framework used in this project is [JAX](https://github.com/google/jax).
 To clone this project and install the CPU-only version (and other dependencies), run
 
 ```
-git clone git@github.com:ratschlab/projects-2020-SVGD-kernel-learning.git
+git clone git@github.com:ratschlab/projects-2020-Neural-SVGD.git
 cd projects-2020-SVGD-kernel-learning
 pip install -r requirements.txt
 ```
