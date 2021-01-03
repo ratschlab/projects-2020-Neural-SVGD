@@ -1,8 +1,8 @@
 # Setup
 
-The main framework used in this project is [JAX](https://github.com/google/jax). The `requirements.txt` file includes the CPU-only version of JAX, which can be installed via pip. To use JAX efficiently on GPU, it needs to be installed separately; see the [installation instructions](https://github.com/google/jax/installation).
+The main framework used in this project is [JAX](https://github.com/google/jax). The `requirements.txt` file includes the CPU-only version of JAX, which can be installed via pip. To use JAX on GPU or TPU, it needs to be installed separately; see the [installation instructions](https://github.com/google/jax#installation).
 
-To install the CPU-only version (and other dependencies), run
+To clone this project and install the CPU-only version (and other dependencies), run
 
 ```
 git clone git@github.com:ratschlab/projects-2020-SVGD-kernel-learning.git
@@ -26,6 +26,8 @@ All code is contained in the `learning_particle_gradients` folder. The files are
 
 
 # Overview
+
+(Work in progress. Will put arxiv link here once it's out.)
 
 Many standard MCMC methods such as Hamiltonian Monte Carlo don't work well in settings with large data-sets and high-dimensional target posteriors with complicated dependencies. This is why usually simpler methods such as variational inference (VI) or stochastic gradient Langevin dynamics (SGLD) are applied to this type of problem (e.g. training a Bayesian neural network).
 

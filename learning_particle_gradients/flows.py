@@ -12,7 +12,6 @@ import time
 import warnings
 from tqdm import tqdm
 from functools import partial
-import json_tricks as json
 
 import utils
 import metrics

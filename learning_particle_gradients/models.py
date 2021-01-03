@@ -11,7 +11,6 @@ import traceback
 import time
 from tqdm import tqdm
 from functools import partial
-import json_tricks as json
 import warnings
 
 import utils
