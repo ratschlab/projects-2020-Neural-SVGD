@@ -25,21 +25,20 @@ from typing import Mapping
 import os
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 disable_tqdm = on_cluster
-eps = 1e-4
 
+"""
+This file implements methods that simulate different kinds of particle dynamics.
+It is structured as follows:
 
-class Logger:
-    def __init__(self):
-        self.data = {}
+The class `Particles` acts as container for the particle positions and associated data.
+Any update rule can be 'plugged in' by supplying the `gradient` argument. The following
+update rules are implemented here:
+- `SDLearner`: the method developed in this project, which dynamically learns a trajectory using a neural network.
+- `KernelGradient`: simulates SVGD dynamics
+- `EnergyGradient`: simulates Langevin dynamics
 
-    def write(data: Mapping[str, np.ndarray], reducer: callable=None):
-        if reducer is not None:
-            data = {k: reducer(v) for k, v in data.items()}
-        metrics.append_to_log(self.data, data)
-        return
-
-    def reset(self):
-        self.data = {}
+Finally, the mixin classes `VectorFieldMixin` and `EBMMixin` define different constraints on the neural update rule.
+"""
 
 
 class Patience:
@@ -71,7 +70,7 @@ class Patience:
 
 @chex.dataclass
 class SplitData:
-    """Train-test split"""
+    """Train-test split for particles"""
     training: np.ndarray
     test: np.ndarray = None
 
@@ -155,7 +154,7 @@ class Particles:
     def get_params(self):
         return self.particles
 
-    def next_batch(self, key, batch_size=None): # TODO make this a generator or something
+    def next_batch(self, key, batch_size=None):
         """
         Return next subsampled batch of training particles (split into training
         and validation) for the training of a gradient field approximator."""
@@ -172,7 +171,8 @@ class Particles:
     @partial(jit, static_argnums=0)
     def _step(self, key, particles, optimizer_state, params):
         """
-        Updates particles in direction of the gradient.
+        Updates particles in the direction given by self.gradient
+
         Arguments:
             params: can be anything. e.g. inducing particles in the case of SVGD,
         deep NN params for learned f, or None.
@@ -245,7 +245,7 @@ class Particles:
             self.rundata["particles"] = d
         self.donedone = True
 
-
+    ## Plotting methods for convenience
     def plot_mean_and_std(self, target=None, axs=None, **kwargs):
         """axs: two axes"""
         if axs is None:
@@ -302,7 +302,7 @@ class Particles:
 
 
 class VectorFieldMixin:
-    """Methods for init of Vector field MLP"""
+    """Methods for init of vector field MLP"""
     def __init__(self,
                  target_dim: int,
                  target_logp: callable = None,
