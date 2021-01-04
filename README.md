@@ -10,6 +10,8 @@ cd projects-2020-SVGD-kernel-learning
 pip install -r requirements.txt
 ```
 
+This is a work in progress; when finished, I'll add code to reproduce all experiments and link to the preprint.
+
 # Structure
 
 All code is contained in the `learning_particle_gradients` folder. The files are structured as follows:
