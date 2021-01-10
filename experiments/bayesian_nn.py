@@ -21,6 +21,7 @@ import nets
 import utils
 
 key = random.PRNGKey(0)
+NUM_CLASSES = 10
 
 @jit
 def accuracy(logits, labels):
@@ -73,7 +74,7 @@ def model_fn(image):
         hk.MaxPool(window_shape=(2,2), strides=2, padding="VALID"),
 
         hk.Flatten(),
-        hk.Linear(num_classes, w_init=initializer, b_init=initializer),
+        hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),
     ])
     return convnet(image)
 
