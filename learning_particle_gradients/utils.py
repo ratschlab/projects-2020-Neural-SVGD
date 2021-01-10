@@ -626,17 +626,16 @@ def polynomial_schedule(step):
 def sgld(learning_rate: float = 1e-2, random_seed: int = 0):
     return optax.chain(
         optax.scale(-learning_rate),
-        optax.add_noise(np.sqrt(2*learning_rate + 1e-8), 0, random_seed),
+        optax.add_noise(np.sqrt(2*np.abs(learning_rate)), 0, random_seed),
     )
 
 class ScaledSGLDState(NamedTuple):
     count: int
     key: np.ndarray
 
-def scaled_sgld(key: np.ndarray, learning_rate: float = 1e-2, schedule_fn: callable = optax.constant_schedule(1.)):
+def scaled_sgld(key: np.ndarray, schedule_fn: callable = optax.constant_schedule(1.)):
     """
     Scale SGLD the correct way, using a custom schedule for the stepsize.
-    TODO: consider removing learning rate arg, so that just schedule_fn is needed.
 
     Returns
         an (init_fn, update_fn) Tuple"""
@@ -652,10 +651,12 @@ def scaled_sgld(key: np.ndarray, learning_rate: float = 1e-2, schedule_fn: calla
         where z is standard normal.
         """
         count, key = state
-        stepsize = schedule_fn(count) * learning_rate
+        stepsize = schedule_fn(count)
         count += 1
         updates = jax.tree_map(lambda g: -stepsize*g, updates)
         key, subkey = random.split(key)
+        # TODO: either throw error when stepsize < 0 or put np.abs(stepsize)
+        # under the square root.
         return add_noise(subkey, updates, np.sqrt(2*stepsize)), ScaledSGLDState(count=count, key=key)
 
     return optax.GradientTransformation(init_fn, update_fn)
