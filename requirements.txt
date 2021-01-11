@@ -86,6 +86,7 @@ scipy==1.4.1
 seaborn==0.11.0
 Send2Trash==1.5.0
 six==1.14.0
+tensorflow_datasets
 terminado==0.9.1
 testpath==0.4.4
 tfp-nightly==0.13.0.dev20210102
@@ -98,3 +99,4 @@ urllib3==1.25.8
 wcwidth==0.2.5
 webencodings==0.5.1
 widgetsnbextension==3.5.1
+
