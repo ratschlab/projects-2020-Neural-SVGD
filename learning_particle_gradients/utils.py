@@ -615,7 +615,6 @@ def remove_diagonal(matrix):
 
 
 import optax
-from distributions import funnel, banana_target, ring_target, squiggle_target, mix_of_gauss
 
 def polynomial_schedule(step):
     return 1. / (step + 1)**0.55
@@ -669,10 +668,3 @@ optimizer_mapping = {
     "sgld": sgld,
 }
 
-setup_mapping = {
-    "funnel": funnel,
-    "banana": banana_target,
-    "ring": ring_target,
-    "squiggle": squiggle_target,
-    "mix": mix_of_gauss,
-}

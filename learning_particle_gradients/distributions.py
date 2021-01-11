@@ -639,3 +639,12 @@ cov = Q.T @ np.diag(variances) @ Q
 proposal = Gaussian(np.zeros(d), np.ones(d))
 target = Gaussian(np.zeros(d), cov)
 rotated_gaussian = Setup(target, proposal)
+
+
+setup_mapping = {
+    "funnel": funnel,
+    "banana": banana_target,
+    "ring": ring_target,
+    "squiggle": squiggle_target,
+    "mix": mix_of_gauss,
+}
