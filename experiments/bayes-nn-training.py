@@ -4,6 +4,7 @@
 # If using pmap, set the environment variable
 # `export XLA_FLAGS="--xla_force_host_platform_device_count=8"`
 # before running on CPU (this enables pmap to "see" multiple cores).
+import os
 import sys
 sys.path.append("../learning_particle_gradients/")
 from functools import partial
@@ -28,13 +29,15 @@ import nets
 import utils
 from convnet import model, accuracy, crossentropy_loss, log_prior
 
+on_cluster = not os.getenv("HOME") == "/home/lauro"
+
 # Config
 key = random.PRNGKey(0)
 EPOCHS = 1
 BATCH_SIZE = 128
 LEARNING_RATE = 1e-7
 NUM_SAMPLES = 8
-DISABLE_PROGRESS_BAR = False
+DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
 
 if USE_PMAP:

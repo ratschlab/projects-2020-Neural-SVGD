@@ -86,7 +86,8 @@ scipy==1.4.1
 seaborn==0.11.0
 Send2Trash==1.5.0
 six==1.14.0
-tensorflow_datasets
+tensorflow==2.4.0
+tensorflow_datasets==4.2.0
 terminado==0.9.1
 testpath==0.4.4
 tfp-nightly==0.13.0.dev20210102
