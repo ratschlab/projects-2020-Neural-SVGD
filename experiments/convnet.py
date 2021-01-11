@@ -1,26 +1,8 @@
-import sys
-sys.path.append("../learning_particle_gradients/")
-from functools import partial
-from itertools import cycle
-
-import numpy as onp
 import jax
 from jax import numpy as jnp
-from jax import jit, grad, value_and_grad, vmap, config, random
-config.update("jax_debug_nans", False)
-from jax.ops import index_update, index
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-from sklearn.model_selection import train_test_split
-from sklearn.calibration import calibration_curve
-
+from jax import jit
 import haiku as hk
-import optax
 
-import nets
-import utils
-
-key = random.PRNGKey(0)
 NUM_CLASSES = 10
 
 @jit

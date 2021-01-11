@@ -26,7 +26,7 @@ import optax
 
 import nets
 import utils
-from bayesian_nn import model, accuracy, crossentropy_loss, log_prior
+from convnet import model, accuracy, crossentropy_loss, log_prior
 
 # Config
 key = random.PRNGKey(0)

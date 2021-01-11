@@ -104,13 +104,12 @@ class Particles:
                  n_particles: int = 50,
                  compute_metrics = None):
         """
-        Arguments
-        ----------
-        gradient: takes in args (params, key, particles) and returns
-            an array of shape (n, d), interpreted as grad(loss)(particles).
-        init_samples: either a callable sample(num_samples, key), or an nd.array
+        Args:
+            gradient: takes in args (params, key, particles) and returns
+        an array of shape (n, d), interpreted as grad(loss)(particles).
+            init_samples: either a callable sample(num_samples, key), or an nd.array
         of shape (n, d) containing initial samples.
-        compute_metrics: callable, takes in particles as array of shape (n, d) and
+            compute_metrics: callable, takes in particles as array of shape (n, d) and
         outputs a dict shaped {'name': metric for name, metric in zip(names, metrics)}.
         Evaluated once every 50 steps.
         """
@@ -477,9 +476,9 @@ class TrainingMixin:
         data_batch is data used to compute logp (passed through self.loss_fn)
 
         Arguments:
-        * batch: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
-        * next_batch: callable, outputs next training batch. Signature:
-            next_batch(key)
+            batch: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
+            next_batch: callable, outputs next training batch. Signature:
+        next_batch(key)
         """
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
