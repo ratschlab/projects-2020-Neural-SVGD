@@ -7,8 +7,6 @@ import optax
 import chex
 from dataclasses import astuple, asdict
 
-import traceback
-import time
 from tqdm import tqdm
 from functools import partial
 import warnings
@@ -18,7 +16,6 @@ import metrics
 import stein
 import kernels
 import nets
-import distributions
 import plot
 
 from typing import Mapping
@@ -243,61 +240,6 @@ class Particles:
                         for trajectory in zip(*self.rundata["particles"])])
             self.rundata["particles"] = d
         self.donedone = True
-
-    ## Plotting methods for convenience
-    def plot_mean_and_std(self, target=None, axs=None, **kwargs):
-        """axs: two axes"""
-        if axs is None:
-            fig, axs = plt.subplots(1, 2, figsize=[18,5])
-
-        axs = axs.flatten()
-        for ax, target_stat, stat_key in zip(axs, [target.mean, np.sqrt(np.diag(target.cov))], "mean std".split()):
-            if target.d == 1:
-                ax.axhline(y=target_stat, linestyle="--", color="green", label=f"Target {stat_key}")
-            else:
-                for y in target_stat:
-                    ax.axhline(y=y, linestyle="--", color="green", label=f"Target {stat_key}")
-                ax.plot(self.rundata[f"test_{stat_key}"], label=f"{stat_key}")
-        return
-
-    def plot_trajectories(self, ax=None, idx=None, **kwargs):
-        if idx is None:
-            idx = np.arange(self.n_particles*self.num_groups)
-        if ax is None:
-            ax = plt.gca()
-        p_over_time = np.array(self.rundata["particles"])
-        ax.plot(p_over_time[:, idx, 0], **kwargs)
-        return ax
-
-    def plot_final(self, target, ax=None, xlim=None, idx=None, **kwargs):
-        if idx is None:
-            idx = np.arange(self.n_particles*self.num_groups)
-        if ax is None:
-            ax = plt.gca()
-        p = self.get_params()[idx]
-        if target.d == 1:
-            ax.hist(p[:, 0], density=True, alpha=0.5, label="Samples",   bins=25)
-            plot.plot_fun(target.pdf, lims=ax.get_xlim(), ax=ax, label="Target density")
-        elif target.d == 2:
-            plot.scatter(p, ax=ax)
-            plot.plot_fun_2d(target.pdf, xlims=ax.get_xlim(), ylims=ax.get_ylim(), ax=ax, **kwargs)
-            plot.scatter(p, ax=ax)
-        else:
-            return NotImplementedError()
-        if xlim is not None:
-            ax.set_xlim(xlim)
-        ax.legend()
-        return ax
-
-    def animate_trajectory(self, target=None, fig=None, ax=None, interval=100, idx=None, **kwargs):
-        """Create animated scatterplot of particle trajectory"""
-        if idx is None:
-            idx = np.arange(self.n_particles*self.num_groups)
-        trajectory = np.asarray(self.rundata["particles"])[:, idx, :]
-        if target is not None:
-            plot.plot_fun_2d(target.pdf, lims=(-20, 20), ax=ax)
-        anim = plot.animate_array(trajectory, fig, ax, interval=interval)
-        return anim
 
 
 class VectorFieldMixin:
