@@ -119,14 +119,19 @@ def kl_diff(logq, logp, x, transform):
     kl2 = estimate_kl(logq, logp_pullback, x)
     return kl1 - kl2
 
+
 def get_mmd(kernel=kernels.get_rbf_kernel(1.)):
     """
-    kernel(x, y) outputs scalar
+    args:
+        kernel: callable, computes a scalar kernel function.
+    returns:
+        mmd: callable, takes two sets of samples of shape (n, d)
+    as input and returns the MMD distance between them (scalar).
     """
     kernel_matrix = vmap(vmap(kernel, (0, None)), (None, 0))
 
     def mmd(xs, ys):
-        """Returns approximation of
+        """Returns unbiased approximation of
         E[k(x, x') + k(y, y') - 2k(x, y)]"""
         kxx = utils.remove_diagonal(kernel_matrix(xs, xs))
         kyy = utils.remove_diagonal(kernel_matrix(ys, ys))
@@ -134,6 +139,10 @@ def get_mmd(kernel=kernels.get_rbf_kernel(1.)):
         return np.mean(kxx) + np.mean(kyy) - 2 * np.mean(kxy)
     return mmd
 
+# tracers can be plugged into models.Particles to compute metrics
+# dependent on particle position at regular intervals during the sampling run.
+# A tracer takes as input the current particles (an array of shape (n, d)) and
+# outputs a disctionary with scalar values.
 def get_mmd_tracer(target_samples, kernel=kernels.get_rbf_kernel(1.)):
     mmd = get_mmd(kernel)
     def compute_mmd(particles):
@@ -149,6 +158,7 @@ def get_funnel_tracer(target_samples):
                 "funnel_mmd": funnel_mmd(particles, target_samples)}
     return compute_mmd
 
+
 def get_squared_error_tracer(target_statistic: np.ndarray, statistic: callable, name: str):
     """statistic is a callable that takes in particles and returns
     a value. If the value is not scalar, then the final squared
@@ -160,6 +170,7 @@ def get_squared_error_tracer(target_statistic: np.ndarray, statistic: callable, 
         return {name: np.sum((statistic(particles) - target_statistic)**2)}
     return compute_summed_error
 
+
 def get_2nd_moment_tracer(target_2nd_moment):
     return get_squared_error_tracer(
         target_2nd_moment,
@@ -167,3 +178,13 @@ def get_2nd_moment_tracer(target_2nd_moment):
         "second_error"
     )
 
+
+def combine_tracers(*tracers):
+    """
+    All arguments must be callables returning a dictionary.
+    Returns a callable that computes the union of all dicts.
+    """
+    def combined_tracer(particles: np.ndarray):
+        dicts = [tracer(particles) for tracer in tracers]
+        return dict(item for d in dicts for item in d.items())
+    return combined_tracer
