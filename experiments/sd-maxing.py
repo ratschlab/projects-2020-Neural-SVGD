@@ -1,13 +1,12 @@
 # Maximize the stein discrepancy, keeping distributions p and q fixed. Compare
 # neural stein discrepancy, kernelized SD, and theoretical optimum.
-import os
 from functools import partial
 from jax import grad, jit, random
-from jax.experimental import optimizers
 import jax.numpy as jnp
 import numpy as onp
 import matplotlib.pyplot as plt
 import json_tricks as json
+import matplotlib
 
 import utils
 import stein
@@ -16,13 +15,10 @@ import distributions
 import models
 import config as cfg
 
-from jax.experimental import optimizers
-
 key = random.PRNGKey(0)
 
 # Config
 # set up exporting
-import matplotlib
 matplotlib.use("pgf")
 matplotlib.rcParams.update({
     "pgf.texsystem": "pdflatex",
@@ -92,7 +88,6 @@ learner.done()
 print("Saving results...")
 # Plotting config
 plt.rc('font', size=7)
-plt.legend(fontsize='small')
 printsize_singlecolumn = [3.6, 3] # adapted for ICML submission (single-column)
 
 fig, axs = plt.subplots(figsize=printsize_singlecolumn)
@@ -104,18 +99,8 @@ plt.axhline(y=onp.mean(ksds), linestyle="--", label="Kernelized Stein discrepanc
 plt.ylabel("Stein discrepancy")
 plt.xlabel("Iteration")
 
+plt.legend(fontsize='small')
 plt.savefig(cfg.figure_path + "sd_maxing.pgf")
-
-
-# save json results
-results = {
-    "KSD": onp.mean(ksds).tolist(),
-    "Optimal_SD": onp.mean(sds).tolist(),
-    "Neural_SD": learner.rundata["training_sd"].tolist(),
-}
-
-with open(results_path + "sd_maxing.json", "w") as f:
-    json.dump(results, f, indent=4, sort_keys=True)
 
 
 # save json results

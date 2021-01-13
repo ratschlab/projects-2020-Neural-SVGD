@@ -1,7 +1,9 @@
 import json_tricks as json
 import jax.numpy as jnp
 from jax import random
-import distributions, flows, metrics
+import distributions
+import flows
+import metrics
 import config as cfg
 
 key = random.PRNGKey(0)
