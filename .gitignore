@@ -2,3 +2,4 @@ __pycache__
 **.virtual_documents
 **.ipynb_checkpoints
 notebooks/illustrations/*.mp4
+.vscode
