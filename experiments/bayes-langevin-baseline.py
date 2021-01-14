@@ -7,27 +7,19 @@
 import os
 import sys
 sys.path.append("../learning_particle_gradients/")
-from functools import partial
 from itertools import cycle
 
 import numpy as onp
 import jax
 from jax import numpy as jnp
-from jax import jit, grad, value_and_grad, vmap, pmap, config, random
+from jax import jit, value_and_grad, vmap, pmap, config, random
 config.update("jax_debug_nans", False)
-from jax.ops import index_update, index
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
-from sklearn.calibration import calibration_curve
 import tensorflow_datasets as tfds
-
-import haiku as hk
 import optax
-
-import nets
 import utils
-from convnet import model, accuracy, crossentropy_loss, log_prior
+from convnet import model, crossentropy_loss, log_prior
 
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
@@ -75,9 +67,11 @@ def loss(params, images, labels):
     negative log-posterior evaluated at `params`. That is,
     -log model_likelihood(data_batch | params) * batch_rescaling_constant - log prior(params))"""
     logits = model.apply(params, images)
-    return data_size/BATCH_SIZE * crossentropy_loss(logits, labels) -  log_prior(params) 
+    return data_size/BATCH_SIZE * crossentropy_loss(logits, labels) - log_prior(params) 
+
 
 opt = utils.sgld(LEARNING_RATE)
+
 
 @jit
 def step(param_set, opt_state, images, labels):
