@@ -6,31 +6,36 @@
 # before running on CPU (this enables pmap to "see" multiple cores).
 import os
 import sys
-sys.path.append("../learning_particle_gradients/")
+import argparse
 from itertools import cycle
 
 import numpy as onp
 import jax
 from jax import numpy as jnp
-from jax import jit, value_and_grad, vmap, pmap, config, random
-config.update("jax_debug_nans", False)
+from jax import jit, value_and_grad, vmap, pmap, random
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 import tensorflow_datasets as tfds
 import optax
 import utils
 from convnet import model, crossentropy_loss, log_prior
+import config as cfg
 
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
+# cli args
+parser = argparse.ArgumentParser()
+parser.add_argument("num_samples", type=int, default=10, help="Number of parallel chains")
+parser.add_argument("num_epochs", type=int, default=1)
+args = parser.parse_args()
+
 # Config
 key = random.PRNGKey(0)
-EPOCHS = 1
 BATCH_SIZE = 128
 LEARNING_RATE = 1e-7
-NUM_SAMPLES = 8
 DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
+NUM_EVALS_PER_EPOCH = 30  # nr accuracy evaluations
 
 if USE_PMAP:
     vpmap = pmap
@@ -92,23 +97,31 @@ def ensemble_accuracy(param_set):
 
 # initialize set of parameters
 key, subkey = random.split(key)
-param_set = vmap(model.init, (0, None))(random.split(subkey, NUM_SAMPLES), train_images[:5])
+param_set = vmap(model.init, (0, None))(random.split(subkey, args.num_samples), train_images[:5])
 opt_state = opt.init(param_set)
 
+# save accuracy to file
+with open(cfg.results_path + "bnn-langevin.csv", "w") as file:
+    file.write("step,accuracy")
 
 # training loop
 losses = []
 accuracies = []
 batches = make_batches(train_images, train_labels, BATCH_SIZE)
-n_train_steps = EPOCHS * data_size // BATCH_SIZE
+n_train_steps = args.num_epochs * data_size // BATCH_SIZE
 for step_counter in tqdm(range(n_train_steps), disable=DISABLE_PROGRESS_BAR):
     images, labels = next(batches)
     param_set, opt_state, step_losses = step(param_set, opt_state, images, labels)
     losses.append(step_losses)
 
-    if step_counter % 200 == 0:
-        accuracies.append(ensemble_accuracy(param_set))
-        print(f"Step {step_counter}, Accuracy:", accuracies[-1])
+    if step_counter % (data_size // NUM_EVALS_PER_EPOCH) == 0:
+        acc = ensemble_accuracy(param_set)
+        accuracies.append(acc)
+        print(f"Step {step_counter}, Accuracy:", acc)
+        with open(cfg.results_path + "bnn-langevin.csv", "a") as file:
+            file.write(f"{step_counter},{acc}")
 
 final_acc = ensemble_accuracy(param_set)
 print(f"Final accuracy: {final_acc}")
+with open(cfg.results_path + "bnn-langevin.csv", "a") as file:
+    file.write(f"{step_counter},{final_acc}")
