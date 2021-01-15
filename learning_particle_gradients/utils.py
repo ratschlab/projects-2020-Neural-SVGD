@@ -1,11 +1,12 @@
+from contextlib import contextmanager
+import sys, os
 import jax.numpy as np
-import jax.numpy as jnp
 import jax
 from jax import jit, vmap, random, grad, jacfwd
 from jax.ops import index_update, index
 from jax import lax
 import time
-from functools import wraps, partial
+from functools import wraps
 import itertools
 
 from collections.abc import Iterable
@@ -14,13 +15,13 @@ import warnings
 import numpy as onp
 from typing import NamedTuple
 
+
 def isiterable(obj):
     return isinstance(obj, Iterable)
 
+
 ##############################
 ### KL divergence utilities
-
-
 def smooth_and_normalize(vec, normalize=True):
     """
     Parameters:
@@ -605,6 +606,7 @@ def null_diagonal(matrix):
     matrix = index_update(matrix, trace_indices, 0)
     return matrix
 
+
 def remove_diagonal(matrix):
     """matrix is an (n,n) array.
     ouput: (n, n-1) array, matrix without the diagonal"""
@@ -668,3 +670,15 @@ optimizer_mapping = {
     "sgld": sgld,
 }
 
+
+# easy way to supress annoying output, from
+# https://stackoverflow.com/questions/2125702/how-to-suppress-console-output-in-python
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout

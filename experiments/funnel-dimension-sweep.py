@@ -1,7 +1,7 @@
 import json_tricks as json
 from tqdm import tqdm
 import jax.numpy as jnp
-from jax import jit, random 
+from jax import jit, random
 import numpy as onp
 
 import distributions
@@ -13,21 +13,23 @@ import config as cfg
 key = random.PRNGKey(0)
 
 # Config
-NUM_STEPS = 500 # 500
-PARTICLE_STEP_SIZE = 1e-2 # for particle update
-LEARNING_RATE = 1e-4 # for neural network
-NUM_PARTICLES = 100 # 200
-MAX_DIM = 45 # sweep from 2 to MAX_DIM
+NUM_STEPS = 500  # 500
+PARTICLE_STEP_SIZE = 1e-2  # for particle update
+LEARNING_RATE = 1e-4  # for neural network
+NUM_PARTICLES = 200  # 200
+MAX_DIM = 45  # sweep from 2 to MAX_DIM
 
 
 mmd_kernel = kernels.get_rbf_kernel(1.)
 mmd = jit(metrics.get_mmd(mmd_kernel))
+
 
 def get_mmds(particle_list, ys):
     mmds = []
     for xs in [p.particles.training for p in particle_list]:
         mmds.append(mmd(xs, ys))
     return mmds
+
 
 def sample(d, key, n_particles):
     target = distributions.Funnel(d)
@@ -43,7 +45,7 @@ def sample(d, key, n_particles):
 
 
 mmd_sweep = []
-for d in tqdm(range(25, 40), disable=True):
+for d in tqdm(range(2, 40), disable=True):
     print(d)
     key, subkey = random.split(key)
     particles, gradients = sample(d, subkey, NUM_PARTICLES)
@@ -60,9 +62,9 @@ mmd_sweep = onp.array(mmd_sweep)
 
 # save json results
 results = {
-        "NSVGD": mmd_sweep[:, 0].tolist(),
-        "SVGD":  mmd_sweep[:, 1].tolist(),
-        "SGLD":  mmd_sweep[:, 2].tolist(),
+    "NSVGD": mmd_sweep[:, 0].tolist(),
+    "SVGD":  mmd_sweep[:, 1].tolist(),
+    "SGLD":  mmd_sweep[:, 2].tolist(),
 }
 
 with open(cfg.results_path + "funnel-dimension-sweep.json", "w") as f:

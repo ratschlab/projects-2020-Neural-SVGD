@@ -1,6 +1,6 @@
 import jax
 from jax import numpy as jnp
-from jax import jit
+from jax import jit, vmap
 import haiku as hk
 
 NUM_CLASSES = 10
@@ -13,7 +13,22 @@ def accuracy(logits, labels):
         labels: categorical labels [batch,] int array (not one-hot).
     """
     preds = jnp.argmax(logits, axis=1)
-    return jnp.mean(preds==labels)
+    return jnp.mean(preds == labels)
+
+
+@jit
+def ensemble_accuracy(param_set, images, labels):
+    """use ensemble predictions to compute validation accuracy
+    args:
+        param_set: pytree w/ same structure as params, but all leaves
+    have an extra 'batch' dimension. Set of parameters across which we
+    compute the average.
+        images: batch of input images, shape (batch, 28, 28, 1)
+        labels: batch of corresponding labels, shape (batch,)"""
+    vapply = vmap(model.apply, (0, None))
+    logits = vapply(param_set, images)
+    preds = jnp.mean(vmap(jax.nn.softmax)(logits), axis=0)  # mean prediction
+    return jnp.mean(preds.argmax(axis=1) == labels)
 
 
 def crossentropy_loss(logits, labels, label_smoothing=0.):
@@ -40,8 +55,10 @@ def log_prior(params):
 #         params) # removed so that loss is > 0.
     return jax.tree_util.tree_reduce(lambda x, y: jnp.sum(x)+jnp.sum(y), logp_tree)
 
+
 # Initialize all weights and biases the same way
 initializer = hk.initializers.RandomNormal(stddev=1 / 100)
+
 
 def model_fn(image):
     """returns logits"""
@@ -51,7 +68,7 @@ def model_fn(image):
         jax.nn.relu,
         hk.MaxPool(window_shape=(2,2), strides=2, padding="VALID"),
 
-        hk.Conv2D(64, kernel_shape=(3,3), w_init=initializer, b_init=initializer),
+        hk.Conv2D(32, kernel_shape=(3,3), w_init=initializer, b_init=initializer),
         jax.nn.relu,
         hk.MaxPool(window_shape=(2,2), strides=2, padding="VALID"),
 

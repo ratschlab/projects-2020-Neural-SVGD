@@ -1,6 +1,5 @@
 import jax.numpy as np
-from jax import jit, vmap, random, value_and_grad, tree_util, jacfwd, grad
-from jax.experimental import optimizers
+from jax import jit, vmap, random, value_and_grad, jacfwd, grad
 import haiku as hk
 import jax
 import optax
@@ -16,7 +15,6 @@ import metrics
 import stein
 import kernels
 import nets
-import plot
 
 from typing import Mapping
 import os
@@ -96,10 +94,10 @@ class Particles:
                  init_samples,
                  learning_rate=1e-2,
                  optimizer="sgd",
-                 custom_optimizer = None,
+                 custom_optimizer=None,
                  num_groups=1,
                  n_particles: int = 50,
-                 compute_metrics = None):
+                 compute_metrics=None):
         """
         Args:
             gradient: takes in args (params, key, particles) and returns
@@ -134,7 +132,7 @@ class Particles:
 
     def init_particles(self, key):
         """Returns namedtuple with training and test particles"""
-        assert self.num_groups <= 2 # SplitData only supports two groups
+        assert self.num_groups <= 2  # SplitData only supports two groups
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         keys = random.split(key, self.num_groups)
@@ -155,14 +153,12 @@ class Particles:
         Return next subsampled batch of training particles (split into training
         and validation) for the training of a gradient field approximator."""
         particles, *_ = self.get_params()
+        shuffled_batch = random.permutation(key, np.array(particles))
 
         # subsample batch
         if batch_size is None:
             batch_size = 3*self.n_particles//4
-
-        shuffled_batch = random.permutation(key, particles)
         return shuffled_batch[:batch_size], shuffled_batch[batch_size:]
-
 
     @partial(jit, static_argnums=0)
     def _step(self, key, particles, optimizer_state, params):
@@ -185,7 +181,7 @@ class Particles:
                     for label, v in d.items()}
         updated_grads, optimizer_state = self.opt.update(grads, optimizer_state, particles)
         particles = optax.apply_updates(particles, updated_grads)
-        #grad_aux.update({"grads": updated_grads})
+        # grad_aux.update({"grads": updated_grads})
         return particles, optimizer_state, grad_aux
 
     def step(self, params, key=None):
@@ -208,21 +204,19 @@ class Particles:
         if grad_aux is not None:
             metrics.append_to_log(self.rundata, grad_aux)
 
-
     @partial(jit, static_argnums=0)
     def _log(self, particles, step):
-
         auxdata = {}
         if self.d < 35:
             auxdata.update({
                 "step": step,
                 "particles": particles,
             })
-        for k, v in particles.items():
-            auxdata.update({
-                f"{k}_mean": np.mean(v, axis=0),
-                f"{k}_std":  np.std(v, axis=0),
-            })
+            for k, v in particles.items():
+                auxdata.update({
+                    f"{k}_mean": np.mean(v, axis=0),
+                    f"{k}_std": np.std(v, axis=0),
+                })
         return auxdata
 
     def done(self):
@@ -236,8 +230,8 @@ class Particles:
             for k, v in self.rundata.items()
         }
         if "particles" in self.rundata:
-            d = SplitData(*[np.array(trajectory)
-                        for trajectory in zip(*self.rundata["particles"])])
+            d = SplitData(*[np.array(trajectory) 
+                            for trajectory in zip(*self.rundata["particles"])])
             self.rundata["particles"] = d
         self.donedone = True
 
@@ -249,7 +243,7 @@ class VectorFieldMixin:
                  target_logp: callable = None,
                  key=random.PRNGKey(42),
                  sizes: list = None,
-                 aux = True,
+                 aux=True,
                  **kwargs):
         """if aux, then add mean and variance as auxiliary input to MLP."""
         self.aux = aux
@@ -301,7 +295,8 @@ class VectorFieldMixin:
             params = self.get_params()
         norm = nets.get_norm(init_particles)
         aux = self.compute_aux(init_particles)
-        #norm = lambda x: x
+        # norm = lambda x: x
+
         def v(x):
             """x should have shape (n, d) or (d,)"""
             return self.field.apply(params, None, norm(x), aux)
@@ -342,8 +337,9 @@ class EBMMixin():
     def get_field(self, init_particles, params=None):
         if params is None:
             params = self.get_params()
-        #norm = nets.get_norm(init_particles)
+        # norm = nets.get_norm(init_particles)
         norm = lambda x: x
+
         def ebm(x):
             """x should have shape (d,)"""
             return np.squeeze(self.ebm.apply(params, None, norm(x)))
@@ -401,7 +397,7 @@ class TrainingMixin:
         self.step_counter += 1
         return None
 
-    def _log(self, particles, val_particles, auxdata, step_counter): # depends on loss_fn aux
+    def _log(self, particles, val_particles, auxdata, step_counter):  # depends on loss_fn aux
         """
         Arguments
         * aux: list (train_aux, val_aux, grads, params)
@@ -411,7 +407,8 @@ class TrainingMixin:
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, batch = None, next_batch: callable = None, key=None, n_steps=5, progress_bar=False, data = None, early_stopping = True):
+    def train(self, batch=None, next_batch: callable = None, key=None,
+              n_steps=5, progress_bar=False, data=None, early_stopping=True):
         """
         batch and next_batch cannot both be None.
         batch is an array of particles.

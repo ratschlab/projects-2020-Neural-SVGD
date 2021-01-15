@@ -18,15 +18,15 @@ from sklearn.model_selection import train_test_split
 import tensorflow_datasets as tfds
 import optax
 import utils
-from convnet import model, crossentropy_loss, log_prior
+from convnet import model, crossentropy_loss, log_prior, ensemble_accuracy
 import config as cfg
 
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # cli args
 parser = argparse.ArgumentParser()
-parser.add_argument("num_samples", type=int, default=10, help="Number of parallel chains")
-parser.add_argument("num_epochs", type=int, default=1)
+parser.add_argument("--num_samples", type=int, default=10, help="Number of parallel chains")
+parser.add_argument("--num_epochs", type=int, default=1)
 args = parser.parse_args()
 
 # Config
@@ -35,15 +35,16 @@ BATCH_SIZE = 128
 LEARNING_RATE = 1e-7
 DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
-NUM_EVALS_PER_EPOCH = 30  # nr accuracy evaluations
+NUM_EVALS = 30  # nr accuracy evaluations
 
 if USE_PMAP:
     vpmap = pmap
 else:
     vpmap = vmap
 
+print("Loading data...")
 # Load MNIST
-data_dir = '/tmp/tfds'
+data_dir = './data' if on_cluster else '/tmp/tfds'
 mnist_data, info = tfds.load(name="mnist", batch_size=-1, data_dir=data_dir, with_info=True)
 mnist_data = tfds.as_numpy(mnist_data)
 train_data, test_data = mnist_data['train'], mnist_data['test']
@@ -86,15 +87,7 @@ def step(param_set, opt_state, images, labels):
     return optax.apply_updates(param_set, g), opt_state, step_losses
 
 
-@jit
-def ensemble_accuracy(param_set):
-    """use ensemble predictions to compute validation accuracy"""
-    vapply = vpmap(model.apply, (0, None))
-    logits = vapply(param_set, val_images[:BATCH_SIZE])
-    preds = jnp.mean(vmap(jax.nn.softmax)(logits), axis=0) # mean prediction
-    return jnp.mean(preds.argmax(axis=1) == val_labels[:BATCH_SIZE])
-
-
+print("Initializing parameters...")
 # initialize set of parameters
 key, subkey = random.split(key)
 param_set = vmap(model.init, (0, None))(random.split(subkey, args.num_samples), train_images[:5])
@@ -102,8 +95,9 @@ opt_state = opt.init(param_set)
 
 # save accuracy to file
 with open(cfg.results_path + "bnn-langevin.csv", "w") as file:
-    file.write("step,accuracy")
+    file.write("step,accuracy\n")
 
+print("Training...")
 # training loop
 losses = []
 accuracies = []
@@ -114,14 +108,15 @@ for step_counter in tqdm(range(n_train_steps), disable=DISABLE_PROGRESS_BAR):
     param_set, opt_state, step_losses = step(param_set, opt_state, images, labels)
     losses.append(step_losses)
 
-    if step_counter % (data_size // NUM_EVALS_PER_EPOCH) == 0:
-        acc = ensemble_accuracy(param_set)
+    if step_counter % (n_train_steps // NUM_EVALS) == 0:
+        acc = ensemble_accuracy(param_set, val_images[:BATCH_SIZE], val_labels[:BATCH_SIZE])
         accuracies.append(acc)
         print(f"Step {step_counter}, Accuracy:", acc)
         with open(cfg.results_path + "bnn-langevin.csv", "a") as file:
-            file.write(f"{step_counter},{acc}")
+            file.write(f"{step_counter},{acc}\n")
 
-final_acc = ensemble_accuracy(param_set)
+final_acc = ensemble_accuracy(param_set, val_images[:BATCH_SIZE], val_labels[:BATCH_SIZE])
 print(f"Final accuracy: {final_acc}")
 with open(cfg.results_path + "bnn-langevin.csv", "a") as file:
-    file.write(f"{step_counter},{final_acc}")
+    file.write(f"{step_counter},{final_acc}\n")
+
