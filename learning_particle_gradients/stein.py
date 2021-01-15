@@ -24,7 +24,7 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
     repulsion term) of shape((G, R)) = (2, d)
     """
     x = np.array(x, dtype=np.float32)
-    #if x.ndim < 1: # assume d = 1
+    # if x.ndim < 1: # assume d = 1
     #    x = np.expand_dims(x, 0) # x now has correct shape (d,) = (1,)
     if x.ndim != 1:
         raise ValueError(f"x needs to be an np.array of shape (d,). Instead, "
@@ -36,7 +36,7 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
                              f"function {fun.__name__} returns a scalar. This "
                              "doesn't make sense: the transposed Stein operator "
                              "acts only on vector-valued functions.")
-        elif fx.ndim == 1: # f: R^d --> R^d
+        elif fx.ndim == 1:  # f: R^d --> R^d
             drift_term = np.inner(grad(logp)(x), fx)
             repulsive_term = np.trace(jacfwd(fun)(x).transpose())
             auxdata = np.asarray([drift_term, repulsive_term])
@@ -51,12 +51,12 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
             repulsive_term = grad(fun)(x)
             auxdata = np.asarray([drift_term, repulsive_term])
             out = drift_term + repulsive_term
-        elif fx.ndim == 1: # f: R^d --> R^d
+        elif fx.ndim == 1:  # f: R^d --> R^d
             drift_term = np.einsum("i,j->ij", grad(logp)(x), fun(x))
             repulsive_term = jacfwd(fun)(x).transpose()
             auxdata = np.asarray([drift_term, repulsive_term])
             out = drift_term + repulsive_term
-        elif fx.ndim == 2 and fx.shape[0] == fx.shape[1]: # f: R^d --> R^{dxd}
+        elif fx.ndim == 2 and fx.shape[0] == fx.shape[1]:  # f: R^d --> R^{dxd}
             raise NotImplementedError("Not implemented for matrix-valued f.")
         else:
             raise ValueError(f"Output of input function {fun.__name__} needs "
@@ -67,6 +67,7 @@ def stein_operator(fun, x, logp, transposed=False, aux=False):
     else:
         return out
 
+
 def stein_expectation(fun, xs, logp, transposed=False, aux=False):
     """
     Arguments:
@@ -76,7 +77,8 @@ def stein_expectation(fun, xs, logp, transposed=False, aux=False):
 
     Returns:
 
-    * the expectation of the Stein operator $\mathcal A [\text{fun}]$ wrt the empirical distribution of the particles xs:
+    * the expectation of the Stein operator $\mathcal A [\text{fun}]$ wrt 
+    the empirical distribution of the particles xs:
     \[1/n \sum_i \mathcal A_p [\text{fun}](x_i) \]
     np.array of shape (d,) if transposed else shape (d, d)
     * if aux: per-particle drift and repulsion terms
@@ -88,10 +90,11 @@ def stein_expectation(fun, xs, logp, transposed=False, aux=False):
 
     if aux:
         steins, auxdata = out
-        return np.mean(steins, axis=0), np.mean(auxdata, axis=0) # per-particle drift and repulsion, shape (2, d)
+        return np.mean(steins, axis=0), np.mean(auxdata, axis=0)  # per-particle drift and repulsion, shape (2, d)
     else:
         steins = out
         return np.mean(steins, axis=0)
+
 
 def phistar_i(xi, x, logp, kernel, aux=True):
     """
@@ -107,26 +110,16 @@ def phistar_i(xi, x, logp, kernel, aux=True):
     """
     if xi.ndim > 1:
         raise ValueError(f"Shape of xi must be (d,). Instead, received shape {xi.shape}")
-    kx = lambda y: kernel(y, xi)
+
+    def kx(y):
+        return kernel(y, xi)
     return stein_expectation(kx, x, logp, aux=aux)
+
 
 def get_phistar(kernel, logp, samples):
     def phistar(x):
         return phistar_i(x, samples, logp, kernel, aux=False)
     return phistar
-
-
-def get_phistar_batched(h, logp, samples): # numpy from SVGD paper code????
-    pairwise_dists = utils.squared_distance_matrix(samples)
-    Kxy = np.exp( -pairwise_dists / h**2 / 2)
-
-    dxkxy = -np.matmul(Kxy, theta)
-    sumkxy = np.sum(Kxy, axis=1)
-    for i in range(theta.shape[1]):
-        dxkxy[:, i] = dxkxy[:,i] + np.multiply(theta[:,i],sumkxy)
-    dxkxy = dxkxy / (h**2)
-    lnpgrad = vmap(grad(logp))(samples)
-    return np.matmul(kxy, lnpgrad) + dxkxy
 
 
 def phistar(particles, leaders, logp, kernel):
@@ -147,12 +140,14 @@ def phistar(particles, leaders, logp, kernel):
     return vmap(phistar_i, (0, None, None, None, None))(
         particles, leaders, logp, kernel, True)
 
+
 def phistar_u(followers, leaders, logp, kernel):
     """
     O(l(l+m)) where m=#followers, l=#leaders
     Differences to phistar:
-       follower updates are identical. Leader updates are computed in a 'leave-one-out'
-    manner---that is, terms of the form k(x_i, x_i) are left out of the sum.
+       follower updates are identical. Leader updates are computed as a
+       U-statistic, that is, 'diagonal' terms of the form k(x_i, x_i)
+       are left out of the sum.
 
     Returns an np.array of shape (l+m, d) containing values of phi^*(x_i)
     for i in {1, ..., n}.
@@ -175,25 +170,26 @@ def phistar_u(followers, leaders, logp, kernel):
         """A^y_p k(x, y), evaluated inside the expectation wrt y
         x, y are both np.arrays of shape (d,), even when d=1.
         """
-        kx = lambda y: kernel(x, y)
+        def kx(y):
+            return kernel(x, y)
         return stein_operator(kx, y, logp, transposed=False, aux=True)
-    fv  = vmap(f,  (None, 0))
+    fv  = vmap(f, (None, 0))
     fvv = vmap(fv, (0, None))
 
     particles = np.concatenate([leaders, followers], axis=0)
-    phi_matrix, auxdata = fvv(particles, leaders) # auxdata has shape (m+l, l, 2, d)
-                                                  # phi_matrix shaped (m+l, l, d)
+    phi_matrix, auxdata = fvv(particles, leaders)  # auxdata has shape (m+l, l, 2, d)
+                                                   # phi_matrix shaped (m+l, l, d)
     l = leaders.shape[0]
     m = followers.shape[0]
-    d = leaders.shape[1]
     trace_indices = [list(range(l))]*2
     phi_matrix = index_update(phi_matrix, trace_indices, 0)
     divisors = np.repeat(np.array([l-1, l]), np.array([l, m]))
     phi     = np.sum(phi_matrix, axis=1) / divisors.reshape((l+m, 1))
-    auxdata = np.sum(auxdata,    axis=1) / divisors.reshape((l+m, 1, 1))
+    auxdata = np.sum(auxdata, axis=1) / divisors.reshape((l+m, 1, 1))
     return phi, auxdata
 
-@partial(jit, static_argnums=(2,3))
+
+@partial(jit, static_argnums=(2, 3))
 def ksd_squared(xs, ys, logp, k):
     """
     O(n*m)
@@ -210,8 +206,7 @@ def ksd_squared(xs, ys, logp, k):
     def g(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):
-            kx = lambda y_: k(x, y_)
-            return stein_operator(kx, y, logp)
+            return stein_operator(lambda y_: k(x, y_), y, logp)
         return stein_operator(inner, x, logp, transposed=True)
     gv  = vmap(g,  (0, None))
     gvv = vmap(gv, (None, 0))
@@ -219,7 +214,7 @@ def ksd_squared(xs, ys, logp, k):
     return np.mean(ksd_matrix)
 
 
-#@partial(jit, static_argnums=(1, 2, 3))
+# @partial(jit, static_argnums=(1, 2, 3))
 def ksd_squared_u(xs, logp, k):
     """
     U-statistic for KSD^2. Computation in O(n^2)
@@ -235,8 +230,7 @@ def ksd_squared_u(xs, logp, k):
     def h(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):
-            kx = lambda y_: k(x, y_)
-            return stein_operator(kx, y, logp)
+            return stein_operator(lambda y_: k(x, y_), y, logp)
         return stein_operator(inner, x, logp, transposed=True)
     hv  = vmap(h,  (0, None))
     hvv = vmap(hv, (None, 0))
@@ -248,7 +242,7 @@ def ksd_squared_u(xs, logp, k):
     return ksd_squared
 
 
-#@partial(jit, static_argnums=(1,2))
+# @partial(jit, static_argnums=(1,2))
 def ksd_squared_v(xs, logp, k, dummy_arg1, dummy_arg2):
     """
     V-statistic for KSD^2. Computation in O(n^2)
@@ -264,8 +258,7 @@ def ksd_squared_v(xs, logp, k, dummy_arg1, dummy_arg2):
     def g(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):
-            kx = lambda y_: k(x, y_)
-            return stein_operator(kx, y, logp)
+            return stein_operator(lambda y_: k(x, y_), y, logp)
         return stein_operator(inner, x, logp, transposed=True)
     gv  = vmap(g,  (0, None))
     gvv = vmap(gv, (None, 0))
@@ -274,7 +267,8 @@ def ksd_squared_v(xs, logp, k, dummy_arg1, dummy_arg2):
 
     return np.sum(ksd_matrix) / n**2
 
-#@partial(jit, static_argnums=(1,2,3))
+
+# @partial(jit, static_argnums=(1,2,3))
 def ksd_squared_l(samples, logp, k, return_stddev=False):
     """
     O(n) time estimator for the KSD.
@@ -290,14 +284,13 @@ def ksd_squared_l(samples, logp, k, return_stddev=False):
     """
     try:
         xs, ys = samples.split(2)
-    except ValueError: # uneven split
+    except ValueError:  # uneven split
         xs, ys = samples[:-1].split(2)
 
     def h(x, y):
         """x, y: np.arrays of shape (d,)"""
         def inner(x):
-            kx = lambda y_: k(x, y_)
-            return stein_operator(kx, y, logp)
+            return stein_operator(lambda y_: k(x, y_), y, logp)
         return stein_operator(inner, x, logp, transposed=True)
     outs = vmap(h)(xs, ys)
     if return_stddev:
@@ -311,14 +304,16 @@ def stein_discrepancy(xs, logp, f, aux=False):
     witness function f"""
     return stein_expectation(f, xs, logp, transposed=True, aux=aux)
 
+
 def h(x, y, kernel, logp):
-    k=kernel
+    k = kernel
     def h2(x_, y_): return np.inner(grad(logp)(y_), grad(k, argnums=0)(x_, y_))
     def d_xk(x_, y_): return grad(k, argnums=0)(x_, y_)
     out = np.inner(grad(logp)(x), grad(logp)(y)) * k(x,y) +\
             h2(x, y) + h2(y, x) +\
             np.trace(jacfwd(d_xk, argnums=1)(x, y))
     return out
+
 
 def g(x, y, kernel, logp):
     """x, y: np.arrays of shape (d,)"""
@@ -327,6 +322,7 @@ def g(x, y, kernel, logp):
         kx = lambda y_: k(x, y_)
         return stein_operator(kx, y, logp)
     return stein_operator(inner, x, logp, transposed=True)
+
 
 def globally_maximal_stein_discrepancy(proposal, target, lambda_reg=1):
     """Returns Stein discrepancy E_{x \sim q}[\mathcal A_p f(x)] using
