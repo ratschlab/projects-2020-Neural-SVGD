@@ -1,5 +1,5 @@
 import jax.numpy as np
-from jax import jit, vmap, random, value_and_grad, jacfwd, grad
+from jax import jit, vmap, random, value_and_grad, grad
 import haiku as hk
 import jax
 import optax
@@ -101,12 +101,13 @@ class Particles:
         """
         Args:
             gradient: takes in args (params, key, particles) and returns
-        an array of shape (n, d), interpreted as grad(loss)(particles).
-            init_samples: either a callable sample(num_samples, key), or an nd.array
+        an array of shape (n, d). Used to compute particle update x = x + eps * gradient(*args)
+            init_samples: either a callable sample(num_samples, key), or an array
         of shape (n, d) containing initial samples.
+            learning_rate: scalar step-size for particle updates
             compute_metrics: callable, takes in particles as array of shape (n, d) and
-        outputs a dict shaped {'name': metric for name, metric in zip(names, metrics)}.
-        Evaluated once every 50 steps.
+        outputs a dict shaped {'name': metric for name, metric in
+        zip(names, metrics)}. Evaluated once every 50 steps.
         """
         self.gradient = gradient
         self.n_particles = n_particles
@@ -230,7 +231,7 @@ class Particles:
             for k, v in self.rundata.items()
         }
         if "particles" in self.rundata:
-            d = SplitData(*[np.array(trajectory) 
+            d = SplitData(*[np.array(trajectory)
                             for trajectory in zip(*self.rundata["particles"])])
             self.rundata["particles"] = d
         self.donedone = True
@@ -337,12 +338,12 @@ class EBMMixin():
     def get_field(self, init_particles, params=None):
         if params is None:
             params = self.get_params()
-        # norm = nets.get_norm(init_particles)
-        norm = lambda x: x
 
         def ebm(x):
             """x should have shape (d,)"""
-            return np.squeeze(self.ebm.apply(params, None, norm(x)))
+            # norm = nets.get_norm(init_particles)
+            # x = norm(x)
+            return np.squeeze(self.ebm.apply(params, None, x))
         return grad(ebm)
 
 
@@ -359,12 +360,6 @@ class TrainingMixin:
                  patience: int = 10,
                  **kwargs):
         self.opt = optax.adam(learning_rate)
-#        schedule = optax.polynomial_schedule(init_value=-learning_rate,
-#                                             end_value=-learning_rate/100,
-#                                             power=0.2,
-#                                             transition_steps=200)
-#        self.opt = optax.chain(optax.scale_by_adam(),
-#                               optax.scale_by_schedule(schedule))
         self.optimizer_state = self.opt.init(self.params)
 
         # state and logging
@@ -432,7 +427,7 @@ class TrainingMixin:
         for i in tqdm(range(n_steps), disable=not progress_bar):
             key, subkey = random.split(key)
             step(subkey)
-            #self.write_to_log({"model_params": self.get_params()})
+            # self.write_to_log({"model_params": self.get_params()})
             if self.patience.out_of_patience() and early_stopping:
                 self.patience.reset()
                 break
@@ -476,9 +471,9 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         elif get_target_logp:
             self.get_target_logp = get_target_logp
         else:
-            return ValueError(f"One of target_logp and get_target_logp must"
-                              f"be given.")
-        self.scale = 1. # scaling of self.field
+            return ValueError("One of target_logp and get_target_logp must"
+                              "be given.")
+        self.scale = 1.  # scaling of self.field
 
     def loss_fn(self, params, batch, key, particles):
         """
@@ -489,12 +484,12 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         """
         target_logp = self.get_target_logp(batch)
         f = utils.negative(self.get_field(particles, params))
-        #f = utils.negative(self._get_grad(particles, params)) # = - grad(KL)
+        # f = utils.negative(self._get_grad(particles, params)) # = - grad(KL)
         stein_discrepancy, stein_aux = stein.stein_discrepancy(
             particles, target_logp, f, aux=True)
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
-        #loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
+        # loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
         return loss, aux
 
@@ -517,7 +512,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         """
         train_aux, val_aux, g, params = aux
         loss, sd, l2v, stein_aux = train_aux
-        drift, repulsion = stein_aux # shape (2, d)
+        drift, repulsion = stein_aux  # shape (2, d)
         val_loss, val_sd, *_ = val_aux
         gradient_norms = [np.linalg.norm(v) for v in jax.tree_leaves(g)]
         step_log = {
@@ -536,7 +531,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
     def gradient(self, params, particles, aux=False):
         """params is a pytree of neural net parameters"""
         v = vmap(self.get_field(particles, params))
-        #v = vmap(self._get_grad(particles, params))
+        # v = vmap(self._get_grad(particles, params))
         if aux:
             return v(particles), {}
         else:
@@ -560,10 +555,10 @@ class KernelGradient():
     def __init__(self,
                  target_logp: callable = None,
                  get_target_logp: callable = None,
-                 kernel = kernels.get_rbf_kernel,
+                 kernel=kernels.get_rbf_kernel,
                  bandwidth=None,
                  scaled=False,
-                 lambda_reg = 1/2):
+                 lambda_reg=1/2):
         """get_target_log is a callable that takes in a batch of data
         (can be any pytree of jnp.ndarrays) and returns a callable logp
         that computes the target log prob (up to an additive constant).
@@ -576,8 +571,8 @@ class KernelGradient():
         elif get_target_logp:
             self.get_target_logp = get_target_logp
         else:
-            return ValueError(f"One of target_logp and get_target_logp must"
-                              f"be given.")
+            return ValueError("One of target_logp and get_target_logp must"
+                              "be given.")
         self.bandwidth = bandwidth
         self.kernel = kernel
         self.lambda_reg = lambda_reg
@@ -585,7 +580,7 @@ class KernelGradient():
         self.scaled = scaled
 
     def get_field(self, inducing_particles, batch=None):
-        """return -phistar(\cdot)"""
+        """return -phistar"""
         target_logp = self.get_target_logp(batch)
         bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
         kernel = self.kernel(bandwidth)
@@ -616,11 +611,11 @@ class KernelGradient():
 
 
 class EnergyGradient():
-    """Compute pure SGLD gradient $\nabla \log p(x)$ (without noise)"""
+    """Compute pure SGLD gradient grad(log p)(x) (without noise)"""
     def __init__(self,
-                target_logp,
-                key=random.PRNGKey(42),
-                lambda_reg=1/2):
+                 target_logp,
+                 key=random.PRNGKey(42),
+                 lambda_reg=1/2):
         self.target_logp = target_logp
         self.threadkey, subkey = random.split(key)
         self.lambda_reg = lambda_reg
@@ -630,7 +625,7 @@ class EnergyGradient():
         return grad(self.target_logp)(x) / (2*self.lambda_reg)
 
     def get_field(self, inducing_particles):
-        """Return vector field used for updating, $\nabla \log p(x)$
+        """Return vector field used for updating, grad(log p)(x)$
         (without noise)."""
         return utils.negative(self.target_score)
 

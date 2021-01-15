@@ -1,16 +1,12 @@
-from functools import partial
-
 import jax.numpy as np
-from jax import grad, vmap, random, jacfwd, jacrev
-from jax.scipy import stats, special
-from jax.ops import index_update, index
+from jax import vmap, jacfwd
 from scipy.spatial.distance import cdist
 import ot
-import numpy as onp
 
 import utils
 import stein
 import kernels
+
 
 def append_to_log(dct, update_dict):
     """appends update_dict to dict, entry-wise. Creates list entry
@@ -22,8 +18,6 @@ def append_to_log(dct, update_dict):
 
 ###############
 # Metrics
-from scipy.spatial.distance import cdist
-import ot
 def compute_final_metrics(particles, target):
     """
     Compute the ARD KSD between particles and target.

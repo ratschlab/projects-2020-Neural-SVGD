@@ -1,5 +1,6 @@
 from contextlib import contextmanager
-import sys, os
+import sys
+import os
 import jax.numpy as np
 import jax
 from jax import jit, vmap, random, grad, jacfwd

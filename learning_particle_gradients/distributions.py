@@ -1,20 +1,10 @@
-from functools import partial
-
 import jax.numpy as np
-from jax import grad, vmap, random, jacfwd, jacrev
-from jax.scipy import stats, special
-from jax.ops import index_update, index
-from scipy.spatial.distance import cdist
-
-import ot
-
-import numpy as onp
-import matplotlib.pyplot as plt
-
+from jax import random, vmap, jacfwd, grad
+from jax.scipy import stats
 import utils
-import kernels
 import plot
 import stein
+import warnings
 
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
@@ -23,6 +13,8 @@ tfd = tfp.distributions
 # https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Higher_moments
 # also recall form of characteristic function
 # https://en.wikipedia.org/wiki/Characteristic_function_(probability_theory)#Examples
+
+
 class Distribution():
     """Base class for package logpdf + metrics + sampling"""
     def __init__(self):
@@ -39,7 +31,8 @@ class Distribution():
 
     def compute_metrics(self, x, normalize=False):
         """Compute metrics given samples x.
-        If normalize = True, then all values are divided by the corresponding expected value for a true random sample of the same size."""
+        If normalize = True, then all values are divided by the corresponding
+        expected value for a true random sample of the same size."""
         if x.shape[-1] != self.d:
             raise ValueError(f"Particles x need to have shape (n, d), where d = {self.d} is the particle dimension.")
         if normalize:
@@ -84,7 +77,8 @@ class Distribution():
         return None
 
     def compute_metrics_for_sample(self, sample_size):
-        """For benchmarking. Returns metrics computed for a true random sample of size sample_size, averaged over 100 random seeds."""
+        """For benchmarking. Returns metrics computed for a true random
+        sample of size sample_size, averaged over 100 random seeds."""
         if sample_size not in self.sample_metrics:
             def compute():
                 sample = self.sample(shape=(sample_size,))
@@ -92,6 +86,7 @@ class Distribution():
                 return self.compute_metrics(sample)
             self.sample_metrics[sample_size] = utils.dict_mean([compute() for _ in range(100)])
         return self.sample_metrics[sample_size]
+
 
 class Gaussian(Distribution):
     def __init__(self, mean, cov):
@@ -117,7 +112,7 @@ class Gaussian(Distribution):
             mean = np.reshape(mean, newshape=(1,))
         elif mean.ndim > 1:
             raise ValueError(f"Recieved inappropriate shape {mean.shape} for"
-            "mean. (Wrong nr of dimensions).")
+                             "mean. (Wrong nr of dimensions).")
         d = mean.shape[0]
 
         if cov.ndim == 0:
@@ -174,9 +169,9 @@ class GaussianMixture(Distribution):
         self.mean = self.expectations[0]
         # recall Cov(X) = E[XX^T] - mu mu^T =
         # sum_over_components(Cov(Xi) + mui mui^T) - mu mu^T
-        mumut = np.einsum("ki,kj->kij", means, means) # shape (k, d, d)
+        mumut = np.einsum("ki,kj->kij", means, means)  # shape (k, d, d)
         self.cov = np.average(covs + mumut, weights=weights, axis=0) \
-                 - np.outer(self.mean, self.mean)
+            - np.outer(self.mean, self.mean)
         self.threadkey = random.PRNGKey(0)
         self.means = means
         self.covs = covs
@@ -201,25 +196,25 @@ class GaussianMixture(Distribution):
         means = np.asarray(means, np.float32)
         covs = np.asarray(covs, np.float32)
         weights = np.asarray(weights, np.float32)
-        weights = weights / weights.sum() # normalize
-        k = len(means) # must equal the number of mixture components
+        weights = weights / weights.sum()  # normalize
+        k = len(means)  # must equal the number of mixture components
         if means.ndim == 0:
             raise ValueError
         elif means.ndim == 1:
-            means = means[:, np.newaxis] # d = 1
+            means = means[:, np.newaxis]  # d = 1
         d = means.shape[1]
         if covs.ndim == 0:
             covs = np.asarray([np.identity(d)*covs]*k)
-        elif covs.ndim == 1: # assume dimension is components
+        elif covs.ndim == 1:  # assume dimension is components
             if len(covs) == k:
                 covs = np.asarray([np.identity(d) * cov for cov in covs])
             elif len(covs) == d:
-                warnings.warn(f"Using the same covariance for all"
+                warnings.warn("Using the same covariance for all"
                               " mixture components")
                 covs = np.asarray([np.diag(covs)]*d)
             else:
-                raise ValueError(f"Length of covariance vector must equal the"
-                                 f"number of mixture components.")
+                raise ValueError("Length of covariance vector must equal the"
+                                 "number of mixture components.")
         elif covs.ndim == 2:
             covs = np.asarray([covs]*k)
 
@@ -240,7 +235,7 @@ class GaussianMixture(Distribution):
         """
         # characteristic function at [1, ..., 1]:
         t = np.ones(self.d)
-        chars = np.array([np.exp(np.vdot(t, (1j * mean - np.dot(cov, t) / 2))) for mean, cov in zip(means, covs)]) # shape (k,d)
+        chars = np.array([np.exp(np.vdot(t, (1j * mean - np.dot(cov, t) / 2))) for mean, cov in zip(means, covs)])  # shape (k,d)
         char = np.vdot(weights, chars)
         mean = np.einsum("i,id->d", weights, means)
         xsquares = [np.diagonal(cov) + mean**2 for mean, cov in zip(means, covs)]
@@ -253,6 +248,7 @@ class GaussianMixture(Distribution):
         """mutates self.rkey"""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
+
         def sample_from_component(rkey, component):
             return random.multivariate_normal(
                 rkey, self.means[component], self.covs[component])
@@ -276,6 +272,7 @@ class GaussianMixture(Distribution):
                              f"{self.d} and dimension one.")
         pdfs = vmap(stats.multivariate_normal.pdf, (None, 0, 0))(x, self.means, self.covs)
         return np.vdot(pdfs, self.weights)
+
 
 class Funnel(Distribution):
     def __init__(self, d):
@@ -309,7 +306,7 @@ class Funnel(Distribution):
 
         xmean = np.zeros(self.d-1)
         xcov  = np.eye(self.d-1)*np.exp(y)
-        py = stats.norm.pdf(y, loc=0, scale=3) # scale=stddev
+        py = stats.norm.pdf(y, loc=0, scale=3)  # scale=stddev
         px = stats.multivariate_normal.pdf(x, mean=xmean, cov=xcov)
         return np.squeeze(py*px)
 
@@ -318,7 +315,7 @@ class Funnel(Distribution):
         *x, y = x
         x, y = np.asarray(x), np.asarray(y)
         xmean = np.zeros(self.d-1)
-        xcov  = np.eye(self.d-1)*np.exp(y) # Cov(X \given Y=y)
+        xcov  = np.eye(self.d-1)*np.exp(y)  # Cov(X \given Y=y)
         logpy = stats.norm.logpdf(y, loc=0, scale=3)
         logpx = stats.multivariate_normal.logpdf(x, mean=xmean, cov=xcov)
         return np.squeeze(logpy + logpx)
@@ -333,7 +330,7 @@ class FunnelizedGaussian(Gaussian):
     def _check_and_reshape_args(self, mean, cov):
         if len(mean) < 2:
             raise ValueError("Funnel exists only in dimensions > 2."
-            f"Received dimension len(mean) = {len(mean)}")
+                             f"Received dimension len(mean) = {len(mean)}")
         return super()._check_and_reshape_args(mean, cov)
 
     def funnelize(self, v):
@@ -362,6 +359,7 @@ class FunnelizedGaussian(Gaussian):
     def sample(self, n_samples, key=None):
         return vmap(self.funnelize)(super().sample(n_samples, key=key))
 
+
 class Uniform(Distribution):
     def __init__(self, lims):
         """
@@ -369,7 +367,7 @@ class Uniform(Distribution):
         """
         lims = np.asarray(lims)
         if lims.ndim < 2:
-            lims = lims[None, :] # d=1
+            lims = lims[None, :]  # d=1
         elif lims.ndim < 1:
             raise
         self.lims = lims
@@ -397,20 +395,21 @@ class Uniform(Distribution):
                                     loc=self.lims[:, 0],
                                     scale=self.lims[:, 1] - self.lims[:, 0])
 
+
 class Banana(Gaussian):
     def __init__(self, mean, cov):
         self.gauss_mean, self.gauss_cov = self._check_and_reshape_args(mean, cov)
-        self.mean = np.array([0, self.gauss_cov[0,0]])
+        self.mean = np.array([0, self.gauss_cov[0, 0]])
         self.cov = np.array([
-            [self.gauss_cov[0,0], 0                                                    ],
-            [0, 3*self.gauss_cov[0,0]**2 + self.gauss_cov[1,1] - self.gauss_cov[0,0]**2]])
+            [self.gauss_cov[0, 0], 0                                                      ],
+            [0, 3*self.gauss_cov[0, 0]**2 + self.gauss_cov[1, 1] - self.gauss_cov[0, 0]**2]])
         self.d = len(self.mean)
         self.threadkey = random.PRNGKey(0)
 
     def _check_and_reshape_args(self, mean, cov):
         if len(mean) != 2:
             raise ValueError("Banana exists only in 2 dim."
-            f"Received dimension len(mean) = {len(mean)}")
+                             f"Received dimension len(mean) = {len(mean)}")
         return super()._check_and_reshape_args(mean, cov)
 
     def bananify(self, v):
@@ -442,6 +441,7 @@ class Banana(Gaussian):
         out = random.multivariate_normal(key, self.gauss_mean, self.gauss_cov, shape=(n_samples,))
         return vmap(self.bananify)(out.reshape((n_samples, self.d)))
 
+
 class Ring(Distribution):
     def __init__(self, radius, var):
         """Both args are scalar.
@@ -451,12 +451,12 @@ class Ring(Distribution):
         self.d = 2
         self.mean = np.array([0, 0])
         self.cov = np.cov(self.sample(10_000), rowvar=False)
-        self.cov = np.diag(np.diag(self.cov)) # remove off-diagonal elements
+        self.cov = np.diag(np.diag(self.cov))  # remove off-diagonal elements
 
     def _check_and_reshape_args(self, r, v):
         r, v = [np.array(a) for a in (r, v)]
         if r.ndim > 0 or v.ndim > 0:
-            raise ValueError(f"Both radius and error variance must be scalar.")
+            raise ValueError("Both radius and error variance must be scalar.")
         return r, v
 
     def to_cartesian(self, polar_coords):

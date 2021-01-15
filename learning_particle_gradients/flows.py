@@ -1,34 +1,18 @@
-import jax.numpy as np
-from jax import jit, vmap, random, value_and_grad, tree_util, jacfwd, grad
-from jax.experimental import optimizers
-from jax.ops import index_update, index
-import haiku as hk
-import jax
-import numpy as onp
-import matplotlib.pyplot as plt
-
-import traceback
-import time
+from jax import random
 import warnings
 from tqdm import tqdm
-from functools import partial
-
-import utils
 import metrics
-import stein
 import kernels
-import nets
-import distributions
-import plot
 import models
 
 default_num_particles = 50
 default_num_steps = 100
-#default_particle_lr = 1e-1
-#default_learner_lr = 1e-2
+# default_particle_lr = 1e-1
+# default_learner_lr = 1e-2
 default_patience = 10
 disable_tqdm = False
 NUM_WARMUP_STEPS = 500
+
 
 def neural_svgd_flow(key,
                      setup,
@@ -53,8 +37,7 @@ def neural_svgd_flow(key,
                                aux=aux)
 
     if compute_metrics is None:
-        compute_metrics = metrics.get_mmd_tracer(
-                                     target.sample(500, keyc))
+        compute_metrics = metrics.get_mmd_tracer(target.sample(500, keyc))
     particles = models.Particles(key=keyb,
                                  gradient=learner.gradient,
                                  init_samples=proposal.sample,
@@ -73,11 +56,11 @@ def neural_svgd_flow(key,
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            batch = particles.next_batch(subkey, batch_size=2*n_particles//3) # TODO set to 99??
+            batch = particles.next_batch(subkey, batch_size=2*n_particles//3)  # TODO set to 99??
             learner.train(batch, n_steps=n_learner_steps)
             particles.step(learner.get_params())
         except Exception as err:
-            warnings.warn(f"Caught Exception")
+            warnings.warn("Caught Exception")
             return learner, particles, err
     particles.done()
     return learner, particles, None
@@ -103,10 +86,8 @@ def svgd_flow(key,
                                             lambda_reg=lambda_reg,
                                             scaled=scaled)
 
-
     if compute_metrics is None:
-        compute_metrics = metrics.get_mmd_tracer(
-                                     target.sample(500, keyc))
+        compute_metrics = metrics.get_mmd_tracer(target.sample(500, keyc))
     svgd_particles = models.Particles(key=keyb,
                                       gradient=kernel_gradient.gradient,
                                       init_samples=proposal.sample,
@@ -138,8 +119,7 @@ def sgld_flow(key,
     energy_gradient = models.EnergyGradient(target.logpdf, keya, lambda_reg=lambda_reg)
 
     if compute_metrics is None:
-        compute_metrics = metrics.get_mmd_tracer(
-                                     target.sample(500, keyc))
+        compute_metrics = metrics.get_mmd_tracer(target.sample(500, keyc))
     particles = models.Particles(key=keyb,
                                  gradient=energy_gradient.gradient,
                                  init_samples=proposal.sample,

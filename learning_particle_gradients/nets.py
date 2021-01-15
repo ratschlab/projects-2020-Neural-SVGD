@@ -3,15 +3,14 @@ from jax import vmap, grad
 import jax
 import haiku as hk
 
-import warnings
-import utils
 import kernels
-from typing import Any, Callable, Iterable, Optional, Type
+
 
 def bandwidth_init(shape, dtype=np.float32):
     """Init for bandwith matrix"""
     d = shape[0]
     return np.identity(d, dtype)
+
 
 class RBFKernel(hk.Module):
     def __init__(self, scale_param=False, parametrization="diagonal", name=None):
@@ -40,6 +39,7 @@ class RBFKernel(hk.Module):
             sigma = hk.get_parameter("sigma", shape=(d, d), init=bandwidth_init)
             return scale * kernels.get_multivariate_gaussian_kernel(sigma)(*xy)
 
+
 class DeepKernel(hk.Module):
     def __init__(self, sizes, name=None):
         super().__init__(name=name)
@@ -58,6 +58,7 @@ class DeepKernel(hk.Module):
 def get_norm(init_x):
     mean = np.mean(init_x, axis=0)
     std = np.std(init_x, axis=0)
+
     def norm(x):
         return (x - mean) / (std + 1e-5)
     return norm
@@ -109,14 +110,6 @@ class KLGrad(hk.Module):
             raise ValueError("Input needs to have rank 1 or 2.")
 
 
-
-def build_rbf():
-    def vanilla_rbf(x, y):
-        rbf = RBF()
-        return(rbf(x, y))
-    return hk.transform(vanilla_rbf)
-
-
 def build_mlp(sizes, name=None, skip_connection=False,
               with_bias=True, activate_final=False):
     """
@@ -135,5 +128,5 @@ def build_mlp(sizes, name=None, skip_connection=False,
         if skip_connection is False:
             return lin(x)
         else:
-            return lin(x) + x # make sure sizes fit (ie sizes[-1] == input dimension)
+            return lin(x) + x  # make sure sizes fit (ie sizes[-1] == input dimension)
     return hk.transform(mlp)
