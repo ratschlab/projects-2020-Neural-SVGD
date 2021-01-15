@@ -68,4 +68,4 @@ results = {
 }
 
 with open(cfg.results_path + "funnel-dimension-sweep.json", "w") as f:
-    json.dump(results, f, indent=4, sort_keys=True)
+    json.dump(results, f, indent=4, sort_keys=True, allow_nan=True)
