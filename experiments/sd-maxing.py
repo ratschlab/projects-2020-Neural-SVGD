@@ -23,10 +23,10 @@ matplotlib.use("pgf")
 matplotlib.rcParams.update({
     "pgf.texsystem": "pdflatex",
     'pgf.rcfonts': False,
-    'axes.unicode_minus': False, # avoid unicode error on saving plots with negative numbers (??)
+    'axes.unicode_minus': False,  # avoid unicode error on saving plots with negative numbers (??)
 })
 
-#figure_path = "/home/lauro/documents/msc-thesis/paper/latex/figures/"
+# figure_path = "/home/lauro/documents/msc-thesis/paper/latex/figures/"
 
 
 # Poorly conditioned Gaussian
@@ -36,15 +36,18 @@ target = distributions.Gaussian(jnp.zeros(d), variances)
 proposal = distributions.Gaussian(jnp.zeros(d), jnp.ones(d))
 
 
-print("Computing theoretically optimal Stein discrepancy...")
 @partial(jit, static_argnums=1)
 def get_sd(samples, fun):
     """Compute SD(samples, p) given witness function fun"""
     return stein.stein_discrepancy(samples, target.logpdf, fun)
 
+
 def kl_gradient(x):
     """Optimal witness function."""
     return grad(lambda x: target.logpdf(x) - proposal.logpdf(x))(x) / 2
+
+
+print("Computing theoretically optimal Stein discrepancy...")
 sds = []
 for _ in range(100):
     samples = proposal.sample(100)
@@ -52,13 +55,15 @@ for _ in range(100):
 
 
 # Kernelized SD (using Gaussian kernel w/ median heuristic)
-print("Computing kernelized Stein discrepancy...")
 @jit
 def compute_scaled_ksd(samples):
     kernel = kernels.get_rbf_kernel(kernels.median_heuristic(samples))
     phi = stein.get_phistar(kernel, target.logpdf, samples)
     ksd = stein.stein_discrepancy(samples, target.logpdf, phi)
     return ksd**2 / utils.l2_norm_squared(samples, phi)
+
+
+print("Computing kernelized Stein discrepancy...")
 ksds = []
 for _ in range(100):
     samples = proposal.sample(400)
@@ -73,22 +78,22 @@ learner = models.SDLearner(target_dim=d,
                            key=subkey,
                            learning_rate=1e-2,
                            patience=-1)
-BATCH_SIZE=1000
+BATCH_SIZE = 1000
+
+
 def sample(key):
     return proposal.sample(BATCH_SIZE*2, key).split(2)
+
 
 key, subkey = random.split(key)
 learner.train(next_batch=sample, key=subkey, n_steps=800, progress_bar=True)
 learner.done()
 
 
-
-
-
 print("Saving results...")
 # Plotting config
 plt.rc('font', size=7)
-printsize_singlecolumn = [3.6, 3] # adapted for ICML submission (single-column)
+printsize_singlecolumn = [3.6, 3]  # adapted for ICML submission (single-column)
 
 fig, axs = plt.subplots(figsize=printsize_singlecolumn)
 

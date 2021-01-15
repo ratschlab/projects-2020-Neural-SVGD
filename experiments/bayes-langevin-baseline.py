@@ -5,13 +5,10 @@
 # `export XLA_FLAGS="--xla_force_host_platform_device_count=8"`
 # before running on CPU (this enables pmap to "see" multiple cores).
 import os
-import sys
 import argparse
 from itertools import cycle
 
 import numpy as onp
-import jax
-from jax import numpy as jnp
 from jax import jit, value_and_grad, vmap, pmap, random
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
@@ -60,7 +57,7 @@ data_size = len(train_images)
 
 
 def make_batches(images, labels, batch_size):
-    """Returns an iterator that cycles through 
+    """Returns an iterator that cycles through
     tuples (image_batch, label_batch)."""
     num_batches = len(images) // batch_size
     split_idx = onp.arange(1, num_batches+1)*batch_size
@@ -73,7 +70,7 @@ def loss(params, images, labels):
     negative log-posterior evaluated at `params`. That is,
     -log model_likelihood(data_batch | params) * batch_rescaling_constant - log prior(params))"""
     logits = model.apply(params, images)
-    return data_size/BATCH_SIZE * crossentropy_loss(logits, labels) - log_prior(params) 
+    return data_size/BATCH_SIZE * crossentropy_loss(logits, labels) - log_prior(params)
 
 
 opt = utils.sgld(LEARNING_RATE)
@@ -119,4 +116,3 @@ final_acc = ensemble_accuracy(param_set, val_images[:BATCH_SIZE], val_labels[:BA
 print(f"Final accuracy: {final_acc}")
 with open(cfg.results_path + "bnn-langevin.csv", "a") as file:
     file.write(f"{step_counter},{final_acc}\n")
-
