@@ -91,7 +91,8 @@ param_set = vmap(model.init, (0, None))(random.split(subkey, args.num_samples), 
 opt_state = opt.init(param_set)
 
 # save accuracy to file
-with open(cfg.results_path + "bnn-langevin.csv", "w") as file:
+results_file = cfg.results_path + "bnn-langevin.csv"
+with open(results_file, "w") as file:
     file.write("step,accuracy\n")
 
 print("Training...")
@@ -109,10 +110,10 @@ for step_counter in tqdm(range(n_train_steps), disable=DISABLE_PROGRESS_BAR):
         acc = ensemble_accuracy(param_set, val_images[:BATCH_SIZE], val_labels[:BATCH_SIZE])
         accuracies.append(acc)
         print(f"Step {step_counter}, Accuracy:", acc)
-        with open(cfg.results_path + "bnn-langevin.csv", "a") as file:
+        with open(results_file, "a") as file:
             file.write(f"{step_counter},{acc}\n")
 
 final_acc = ensemble_accuracy(param_set, val_images[:BATCH_SIZE], val_labels[:BATCH_SIZE])
 print(f"Final accuracy: {final_acc}")
-with open(cfg.results_path + "bnn-langevin.csv", "a") as file:
+with open(results_file, "a") as file:
     file.write(f"{step_counter},{final_acc}\n")

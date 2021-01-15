@@ -23,6 +23,7 @@ args = parser.parse_args()
 
 # Config
 key = random.PRNGKey(0)
+results_file = cfg.results_path + "bnn-nsvgd.csv"
 BATCH_SIZE = 128
 LEARNING_RATE = 1e-7
 META_LEARNING_RATE = 1e-4
@@ -126,7 +127,7 @@ neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
                                get_target_logp=get_minibatch_loss,
                                learning_rate=META_LEARNING_RATE,
                                key=subkey1,
-                               sizes=[10, 10, init_particles.shape[1]],
+                               sizes=[1024, 1024, init_particles.shape[1]],
                                aux=False)
 particles = models.Particles(subkey2, neural_grad.gradient, init_particles, custom_optimizer=opt)
 
@@ -155,12 +156,12 @@ def step(train_batch):
 
 def evaluate():
     acc = compute_acc(particles.particles.training),
-    with open(cfg.results_path + "bnn-nsvgd.csv", "a") as file:
+    with open(results_file, "a") as file:
         file.write(f"{step_counter},{acc}\n")
     return
 
 
-with open(cfg.results_path + "bnn-nsvgd.csv", "w") as file:
+with open(results_file, "w") as file:
     file.write("step,accuracy\n")
 
 print("Training...")

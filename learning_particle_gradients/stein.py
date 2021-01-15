@@ -2,10 +2,8 @@ from functools import partial
 import numpy as onp
 import jax.numpy as np
 from jax import grad, vmap, random, jacfwd, jit
-from jax.ops import index_update, index
+from jax.ops import index_update
 
-import distributions
-import kernels
 
 def stein_operator(fun, x, logp, transposed=False, aux=False):
     """
@@ -347,17 +345,6 @@ def globally_maximal_stein_discrepancy(proposal, target, lambda_reg=1):
         return np.mean(vmap(stein_op_true)(samples))
     return stein_discrepancy(proposal.sample(1000))
 
-
-# tests
-def test_h_successful():
-    target = distributions.Gaussian(0, 5)
-    source = distributions.Gaussian(3, 1)
-    k = kernels.get_rbf_kernel_logscaled(logh=0)
-    logp = target.logpdf
-    x, y = source.sample(2)
-    return g(x, y, k, logp) == h(x, y, k, logp)
-
-#assert test_h_successful()
 
 def get_optimal_sd(key, lambda_reg, target, proposal, batch_size=400):
     """Compute mean and stddev of optimal SD under proposal."""

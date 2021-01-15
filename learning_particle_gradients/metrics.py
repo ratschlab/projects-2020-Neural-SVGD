@@ -18,23 +18,6 @@ def append_to_log(dct, update_dict):
 
 ###############
 # Metrics
-def compute_final_metrics(particles, target):
-    """
-    Compute the ARD KSD between particles and target.
-    particles: np.array of shape (n, d)
-    """
-    n = len(particles)
-    particles = np.asarray(particles)
-
-    target_sample = target.sample(n)
-    emd = wasserstein_distance(particles, target_sample)
-#    sinkhorn_divergence = ot.bregman.empirical_sinkhorn_divergence(particles, target_sample, 1, metric="sqeuclidean")
-#    sinkhorn_divergence = onp.squeeze(sinkhorn_divergence)
-    ksd = stein.ksd_squared_u(particles, target.logpdf, kernels.get_rbf_kernel_logscaled(0), False)
-    se_mean = np.mean((np.mean(particles, axis=0) - target.mean)**2)
-    se_std = np.mean((np.std(particles, axis=0) - np.sqrt(np.diag(target.cov)))**2)
-    return dict(emd=emd, ksd=ksd, se_mean=se_mean, se_std=se_std)
-
 def wasserstein_distance(s1, s2):
     """
     Arguments: samples from two distributions, shape (n, d) (not (n,)).
