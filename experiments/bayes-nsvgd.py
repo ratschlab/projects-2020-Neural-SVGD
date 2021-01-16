@@ -143,7 +143,7 @@ neural_grad.train(next_batch=sample_tv,
                   n_steps=100,  # 100
                   early_stopping=False,
                   data=next(train_batches),
-                  progress_bar=True)
+                  progress_bar=not on_cluster)
 
 
 # training loop
@@ -154,8 +154,9 @@ def step(train_batch):
     return
 
 
-def evaluate():
-    acc = compute_acc(particles.particles.training),
+def evaluate(step_counter):
+    acc = compute_acc(particles.particles.training).tolist(),
+    print(f"Step {step_counter}, accuracy: {acc}")
     with open(results_file, "a") as file:
         file.write(f"{step_counter},{acc}\n")
     return
@@ -166,7 +167,7 @@ with open(results_file, "w") as file:
 
 print("Training...")
 num_steps = args.num_epochs * data_size // BATCH_SIZE
-for step_counter in tqdm(range(num_steps)):
+for step_counter in tqdm(range(num_steps), disable=on_cluster):
     train_batch = next(train_batches)
     step(train_batch)
     if step_counter % (num_steps//NUM_EVALS) == 0:

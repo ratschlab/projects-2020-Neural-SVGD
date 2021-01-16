@@ -1,3 +1,4 @@
+import os
 import json_tricks as json
 from tqdm import tqdm
 import jax.numpy as jnp
@@ -11,13 +12,14 @@ import metrics
 import config as cfg
 
 key = random.PRNGKey(0)
+on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # Config
 NUM_STEPS = 500  # 500
 PARTICLE_STEP_SIZE = 1e-2  # for particle update
 LEARNING_RATE = 1e-4  # for neural network
 NUM_PARTICLES = 200  # 200
-MAX_DIM = 45  # sweep from 2 to MAX_DIM
+MAX_DIM = 50  # sweep from 2 to MAX_DIM
 
 
 mmd_kernel = kernels.get_rbf_kernel(1.)
@@ -40,12 +42,11 @@ def sample(d, key, n_particles):
     neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, noise_level=0., patience=0, learner_lr=LEARNING_RATE)
     svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, noise_level=0., scaled=True,  bandwidth=None)
     sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, noise_level=1.)
-    
     return (neural_particles, svgd_particles, sgld_particles), (neural_learner, svgd_gradient, sgld_gradient)
 
 
 mmd_sweep = []
-for d in tqdm(range(2, 40), disable=True):
+for d in tqdm(range(2, 40), disable=on_cluster):
     print(d)
     key, subkey = random.split(key)
     particles, gradients = sample(d, subkey, NUM_PARTICLES)
