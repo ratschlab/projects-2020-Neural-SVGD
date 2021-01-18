@@ -5,6 +5,7 @@ import haiku as hk
 
 NUM_CLASSES = 10
 
+
 @jit
 def accuracy(logits, labels):
     """
@@ -43,8 +44,8 @@ def crossentropy_loss(logits, labels, label_smoothing=0.):
     if label_smoothing > 0:
         labels = labels * (1 - label_smoothing) + label_smoothing / num_classes
     logp = jax.nn.log_softmax(logits)
-    return -jnp.sum(logp * labels) # summed loss over batch 
-                                   # equal to model_loglikelihood(data | params)
+    return -jnp.sum(logp * labels)  # summed loss over batch
+                                    # equal to model_loglikelihood(data | params)
 
 
 def log_prior(params):
@@ -64,17 +65,18 @@ def model_fn(image):
     """returns logits"""
     image = image.astype(jnp.float32)
     convnet = hk.Sequential([
-        hk.Conv2D(32, kernel_shape=(3,3), w_init=initializer, b_init=initializer),
+        hk.Conv2D(8, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
         jax.nn.relu,
-        hk.MaxPool(window_shape=(2,2), strides=2, padding="VALID"),
+        hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
-        hk.Conv2D(32, kernel_shape=(3,3), w_init=initializer, b_init=initializer),
+        hk.Conv2D(2, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
         jax.nn.relu,
-        hk.MaxPool(window_shape=(2,2), strides=2, padding="VALID"),
+        hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
         hk.Flatten(),
         hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),
     ])
     return convnet(image)
+
 
 model = hk.without_apply_rng(hk.transform(model_fn))

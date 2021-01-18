@@ -1,7 +1,7 @@
 from functools import partial
 import numpy as onp
 import jax.numpy as np
-from jax import grad, vmap, random, jacfwd, jit
+from jax import grad, vmap, random, jacfwd, jit, jvp
 from jax.ops import index_update
 
 
@@ -94,6 +94,37 @@ def stein_expectation(fun, xs, logp, transposed=False, aux=False):
     else:
         steins = out
         return np.mean(steins, axis=0)
+
+
+def stein_discrepancy(xs: np.ndarray, logp, f, aux=False):
+    """Return estimated stein discrepancy using
+    witness function f
+    args:
+        xs: array of shape (n, d)
+        logp: callable
+        f: callable (witness function)"""
+    return stein_expectation(f, xs, logp, transposed=True, aux=aux)
+
+
+def stein_discrepancy_hutchinson(key, xs, logp, f):
+    """
+    Return random estimate of the stein discrepancy given
+    witness function f. Div(f) is approximated using a one-sample
+    MC estimate (Hutchinsons estimator).
+    args:
+        key: jax PRNGkey
+        xs: array of shape (n, d)
+        logp: callable
+        f: callable (witness function), computes a differentiable map
+    from R^d to R^d, d > 1.
+    """
+    def h(x, z):
+        dlogp = grad(logp)(x)
+        zdf = grad(lambda _x: np.vdot(z, f(_x)))
+        div_f = np.vdot(zdf(x), z)
+        return dlogp + div_f
+    zs = random.normal(key, xs.shape)
+    return vmap(h)(xs, zs).mean()
 
 
 def phistar_i(xi, x, logp, kernel, aux=True):
@@ -299,19 +330,23 @@ def ksd_squared_l(samples, logp, k, return_stddev=False):
         return np.mean(outs)
 
 
-def stein_discrepancy(xs, logp, f, aux=False):
-    """Return estimated stein discrepancy using
-    witness function f"""
-    return stein_expectation(f, xs, logp, transposed=True, aux=aux)
+    
+
+
 
 
 def h(x, y, kernel, logp):
     k = kernel
-    def h2(x_, y_): return np.inner(grad(logp)(y_), grad(k, argnums=0)(x_, y_))
-    def d_xk(x_, y_): return grad(k, argnums=0)(x_, y_)
-    out = np.inner(grad(logp)(x), grad(logp)(y)) * k(x,y) +\
-            h2(x, y) + h2(y, x) +\
-            np.trace(jacfwd(d_xk, argnums=1)(x, y))
+
+    def h2(x_, y_):
+        return np.inner(grad(logp)(y_), grad(k, argnums=0)(x_, y_))
+
+    def d_xk(x_, y_):
+        return grad(k, argnums=0)(x_, y_)
+
+    out = np.inner(grad(logp)(x), grad(logp)(y)) * k(x, y) +\
+        h2(x, y) + h2(y, x) +\
+        np.trace(jacfwd(d_xk, argnums=1)(x, y))
     return out
 
 

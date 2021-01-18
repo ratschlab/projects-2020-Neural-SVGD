@@ -260,7 +260,7 @@ class VectorFieldMixin:
         # net and optimizer
         def field(x, aux):
             mlp = nets.MLP(self.sizes)
-            scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args))
+            scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args)*1e3)
             mlp_input = np.concatenate([x, aux]) if self.aux else x
             return scale * mlp(mlp_input)
         self.field = hk.transform(field)
@@ -459,9 +459,15 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                  learning_rate: float = 5e-3,
                  patience: int = 0,
                  aux=True,
-                 lambda_reg=1/2):
-        """aux: bool, whether to concatenate particle dist info onto
-        mlp input"""
+                 lambda_reg=1/2,
+                 use_hutchinson: bool = False):
+        """
+        args:
+            aux: bool, whether to concatenate particle dist info onto
+        mlp input
+            use_hutchinson: when True, use Hutchinson's estimator to
+        compute the stein discrepancy.
+        """
         super().__init__(target_dim, target_logp, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience, aux=aux)
         self.lambda_reg = lambda_reg
@@ -474,41 +480,36 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
             return ValueError("One of target_logp and get_target_logp must"
                               "be given.")
         self.scale = 1.  # scaling of self.field
+        self.use_hutchinson = use_hutchinson
 
     def loss_fn(self, params, batch, key, particles):
         """
-        params: neural net paramers
-        batch: data used to compute logp. Can be none if logp is known precisely
-        key: random PRNGKey
-        particles: array of shape (n, d)
+        Arguments:
+            params: neural net paramers
+            batch: data used to compute logp. Can be none if logp is known precisely
+            key: random PRNGKey
+            particles: array of shape (n, d)
         """
         target_logp = self.get_target_logp(batch)
         f = utils.negative(self.get_field(particles, params))
-        # f = utils.negative(self._get_grad(particles, params)) # = - grad(KL)
-        stein_discrepancy, stein_aux = stein.stein_discrepancy(
-            particles, target_logp, f, aux=True)
+        if self.use_hutchinson:
+            stein_discrepancy = stein.stein_discrepancy_hutchinson(
+                key, particles, target_logp, f)
+            stein_aux = np.array([np.nan, np.nan])
+        else:
+            stein_discrepancy, stein_aux = stein.stein_discrepancy(
+                particles, target_logp, f, aux=True)
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
         # loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
         return loss, aux
 
-    def _loss_fn(self, params, batch, key, particles):
-        target_logp = self.get_target_logp(batch)
-        f = utils.negative(self.get_field(particles, params))
-        stein_discrepancy, stein_aux = stein.stein_discrepancy(
-            particles, target_logp, f, aux=True)
-        l2_f_sq = utils.l2_norm_squared(particles, f)
-        sd = stein_discrepancy**2 / l2_f_sq
-        loss = -sd
-        aux = [loss, sd, l2_f_sq, stein_aux]
-        return loss, aux
-
     @partial(jit, static_argnums=0)
     def _log(self, particles, validation_particles, aux, step_counter):
         """
-        Arguments
-        * aux: list (train_aux, val_aux, grads, params)
+        Arguments:
+            aux: list (train_aux, val_aux, grads, params)
         """
         train_aux, val_aux, g, params = aux
         loss, sd, l2v, stein_aux = train_aux
@@ -529,7 +530,12 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         return step_log
 
     def gradient(self, params, particles, aux=False):
-        """params is a pytree of neural net parameters"""
+        """
+        args:
+            params: pytree of neural net parameters
+            particles: array of shape (n, d)
+            aux: bool
+        """
         v = vmap(self.get_field(particles, params))
         # v = vmap(self._get_grad(particles, params))
         if aux:
