@@ -260,7 +260,7 @@ class VectorFieldMixin:
         # net and optimizer
         def field(x, aux):
             mlp = nets.MLP(self.sizes)
-            scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args)*1e3)
+            scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args)*5e2)
             mlp_input = np.concatenate([x, aux]) if self.aux else x
             return scale * mlp(mlp_input)
         self.field = hk.transform(field)
