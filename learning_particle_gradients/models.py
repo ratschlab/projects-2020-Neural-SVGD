@@ -336,6 +336,7 @@ class EBMMixin():
         return self.params
 
     def get_field(self, init_particles, params=None):
+        del init_particles
         if params is None:
             params = self.get_params()
 

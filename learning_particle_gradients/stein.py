@@ -1,7 +1,7 @@
 from functools import partial
 import numpy as onp
 import jax.numpy as np
-from jax import grad, vmap, random, jacfwd, jit, jvp
+from jax import grad, vmap, random, jacfwd, jit
 from jax.ops import index_update
 
 
@@ -119,10 +119,9 @@ def stein_discrepancy_hutchinson(key, xs, logp, f):
     from R^d to R^d, d > 1.
     """
     def h(x, z):
-        dlogp = np.inner(f(x), grad(logp)(x))
         zdf = grad(lambda _x: np.vdot(z, f(_x)))
         div_f = np.vdot(zdf(x), z)
-        return dlogp + div_f
+        return np.inner(f(x), grad(logp)(x)) + div_f
     zs = random.normal(key, xs.shape)
     return vmap(h)(xs, zs).mean()
 
