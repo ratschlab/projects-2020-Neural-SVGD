@@ -26,10 +26,11 @@ key = random.PRNGKey(0)
 results_file = cfg.results_path + "bnn-nsvgd.csv"
 BATCH_SIZE = 128
 LEARNING_RATE = 1e-7
-META_LEARNING_RATE = 1e-4
+META_LEARNING_RATE = 1e-3
 DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
 NUM_EVALS = 30  # nr accuracy evaluations
+LAMBDA_REG = 10**5
 
 if USE_PMAP:
     vpmap = pmap
@@ -127,8 +128,10 @@ neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
                                get_target_logp=get_minibatch_loss,
                                learning_rate=META_LEARNING_RATE,
                                key=subkey1,
-                               sizes=[1024, 1024, init_particles.shape[1]],
-                               aux=False)
+                               sizes=[128, 128, init_particles.shape[1]],
+                               aux=False,
+                               use_hutchinson=True,
+                               lambda_reg=LAMBDA_REG)
 particles = models.Particles(subkey2, neural_grad.gradient, init_particles, custom_optimizer=opt)
 
 
