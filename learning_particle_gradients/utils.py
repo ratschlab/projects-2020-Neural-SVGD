@@ -438,17 +438,20 @@ def kl_of_gaussian(p, q):
     out =  np.log(sigma2 / sigma1) + (var1 + (mu1 - mu2)**2) / (2 * var2) - 1/2
     return np.squeeze(out)
 
+
 def vmv_dot(vec_a, matrix, vec_b):
     """
     Returns x^T A x, the vector-matrix-vector dot product
     """
     return np.einsum("i,ij,j->", vec_a, matrix, vec_b)
 
+
 def l2_norm_squared(samples, fun):
     """Returns mean of fun^T fun evaluated
     over samples"""
     def fun_norm(x): return np.inner(fun(x), fun(x))
     return np.mean(vmap(fun_norm)(samples))
+
 
 def l2_normalize(fun: callable, samples, target_norm=1):
     """Rescale function fun so it has L2(q) norm equal to 1 (or target_norm, if supplied).
@@ -458,11 +461,13 @@ def l2_normalize(fun: callable, samples, target_norm=1):
         return fun(x) * target_norm / l2_fun
     return fun_normed
 
+
 def squeeze_output(fun):
     """fun(...) --> np.squeeze(fun(...))"""
     def fun_with_squeezed_output(*args, **kwargs):
         return np.squeeze(fun(*args, **kwargs))
     return fun_with_squeezed_output
+
 
 def reshape_input(fun, reshape_input_to=(1,)):
     """fun(a) --> fun(np.reshape(a, newshape=(1,))). Also squeezes output.
@@ -471,6 +476,7 @@ def reshape_input(fun, reshape_input_to=(1,)):
         x = np.reshape(x, newshape=reshape_input_to)
         return np.squeeze(fun(x))
     return fun_accepts_scalar_input
+
 
 def negative(fun):
     """f --> -f"""
@@ -488,6 +494,7 @@ def div(fun):
             return grad(fun)(x)
     return divergence
 
+
 def div_sq(fun):
     def divergence_sq(x):
         if x.ndim > 0:
@@ -496,6 +503,7 @@ def div_sq(fun):
         else:
             return grad(fun)(x)**2
     return divergence_sq
+
 
 def mul(fun, factor):
     """f --> factor * fun"""
@@ -616,8 +624,8 @@ def remove_diagonal(matrix):
     return matrix[offdiag_idx].reshape((n, n-1))
 
 
-
 import optax
+
 
 def polynomial_schedule(step):
     return 1. / (step + 1)**0.55

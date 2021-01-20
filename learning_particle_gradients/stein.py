@@ -119,7 +119,7 @@ def stein_discrepancy_hutchinson(key, xs, logp, f):
     from R^d to R^d, d > 1.
     """
     def h(x, z):
-        dlogp = grad(logp)(x)
+        dlogp = np.inner(f(x), grad(logp)(x))
         zdf = grad(lambda _x: np.vdot(z, f(_x)))
         div_f = np.vdot(zdf(x), z)
         return dlogp + div_f

@@ -51,10 +51,10 @@ def crossentropy_loss(logits, labels, label_smoothing=0.):
 def log_prior(params):
     """Gaussian prior used to regularize weights (same as initialization).
     unscaled."""
-    logp_tree = jax.tree_map(lambda param: - param**2 / 100**2 / 2, params)
 #         lambda param: jax.scipy.stats.norm.logpdf(param, loc=0, scale=1/100),
 #         params) # removed so that loss is > 0.
-    return jax.tree_util.tree_reduce(lambda x, y: jnp.sum(x)+jnp.sum(y), logp_tree)
+    params_flat, _ = jax.flatten_util.ravel_pytree(params)
+    return - jnp.sum(params_flat**2) * 100**2 / 2
 
 
 # Initialize all weights and biases the same way
@@ -65,15 +65,16 @@ def model_fn(image):
     """returns logits"""
     image = image.astype(jnp.float32)
     convnet = hk.Sequential([
-        hk.Conv2D(8, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
+        hk.Conv2D(4, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
         jax.nn.relu,
         hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
-        hk.Conv2D(2, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
+        hk.Conv2D(4, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
         jax.nn.relu,
         hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
         hk.Flatten(),
+        hk.AvgPool(window_shape=(10,), strides=(10,), padding="VALID"),
         hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),
     ])
     return convnet(image)
