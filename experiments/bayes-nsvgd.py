@@ -17,7 +17,7 @@ on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # cli args
 parser = argparse.ArgumentParser()
-parser.add_argument("--num_samples", type=int, default=10, help="Number of parallel chains")
+parser.add_argument("--num_samples", type=int, default=20, help="Number of parallel chains")
 parser.add_argument("--num_epochs", type=int, default=1)
 args = parser.parse_args()
 
@@ -25,12 +25,15 @@ args = parser.parse_args()
 key = random.PRNGKey(0)
 results_file = cfg.results_path + "bnn-nsvgd.csv"
 BATCH_SIZE = 128
-LEARNING_RATE = 1e-7
 META_LEARNING_RATE = 1e-3
 DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
 NUM_EVALS = 30  # nr accuracy evaluations
-LAMBDA_REG = 10**5
+LAMBDA_REG = 10**2
+LEARNING_RATE = 1e-4 * LAMBDA_REG * 2
+
+LAYER_SIZE = 128 if on_cluster else 32
+NUM_WARMUP_STEPS = 300 if on_cluster else 100
 
 if USE_PMAP:
     vpmap = pmap
@@ -128,7 +131,7 @@ neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
                                get_target_logp=get_minibatch_loss,
                                learning_rate=META_LEARNING_RATE,
                                key=subkey1,
-                               sizes=[128, 128, init_particles.shape[1]],
+                               sizes=[LAYER_SIZE, LAYER_SIZE, init_particles.shape[1]],
                                aux=False,
                                use_hutchinson=True,
                                lambda_reg=LAMBDA_REG)
@@ -143,7 +146,7 @@ test_batches  = make_batches(test_images, test_labels, BATCH_SIZE)
 # Warmup on first batch
 print("Warmup...")
 neural_grad.train(next_batch=sample_tv,
-                  n_steps=100,  # 100
+                  n_steps=NUM_WARMUP_STEPS,  # 100
                   early_stopping=False,
                   data=next(train_batches),
                   progress_bar=not on_cluster)
@@ -158,8 +161,9 @@ def step(train_batch):
 
 
 def evaluate(step_counter):
-    acc = compute_acc(particles.particles.training).tolist(),
+    acc = compute_acc(particles.particles.training).tolist()
     print(f"Step {step_counter}, accuracy: {acc}")
+    print(f"particle mean: ", onp.mean(particles.particles.training))
     with open(results_file, "a") as file:
         file.write(f"{step_counter},{acc}\n")
     return
@@ -174,7 +178,7 @@ for step_counter in tqdm(range(num_steps), disable=on_cluster):
     train_batch = next(train_batches)
     step(train_batch)
     if step_counter % (num_steps//NUM_EVALS) == 0:
-        evaluate()
+        evaluate(step_counter)
 
 neural_grad.done()
 particles.done()
