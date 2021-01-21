@@ -209,8 +209,8 @@ def run_svgd(key, lr, full_data=False, progress_bar=False):
         if i % (NUM_STEPS//NUM_VALS) == 0:
             test_logp = get_minibatch_logp(*next(test_batches))
             stepdata = {
-                "accuracy": compute_test_accuracy(unravel(particles.particles.training)[0]),
-                "test_logp": test_logp(particles.particles.training),
+                "accuracy": compute_test_accuracy(unravel(particles.particles)[0]),
+                "test_logp": test_logp(particles.particles),
             }
             metrics.append_to_log(particles.rundata, stepdata)
 
@@ -253,9 +253,9 @@ def run_neural_svgd(key, plr, full_data=False, progress_bar=False):
             test_logp = get_minibatch_logp(*next(test_batches))
             train_logp = get_minibatch_logp(*data_batch)
             stepdata = {
-                "accuracy": compute_test_accuracy(unravel(particles.particles.training)[0]),
-                "test_logp": test_logp(particles.particles.training),
-                "training_logp": train_logp(particles.particles.training),
+                "accuracy": compute_test_accuracy(unravel(particles.particles)[0]),
+                "test_logp": test_logp(particles.particles),
+                "training_logp": train_logp(particles.particles),
             }
             metrics.append_to_log(particles.rundata, stepdata)
     neural_grad.done()
@@ -288,9 +288,9 @@ def run_sgld(key, lr, full_data=False, progress_bar=False):
         if i % (NUM_STEPS//NUM_VALS) == 0:
             test_logp = get_minibatch_logp(*next(test_batches))
             stepdata = {
-                "accuracy": compute_test_accuracy(unravel(particles.particles.training)[0]),
-                "train_accuracy": compute_train_accuracy(unravel(particles.particles.training)[0]),
-                "test_logp": np.mean(test_logp(particles.particles.training))
+                "accuracy": compute_test_accuracy(unravel(particles.particles)[0]),
+                "train_accuracy": compute_train_accuracy(unravel(particles.particles)[0]),
+                "test_logp": np.mean(test_logp(particles.particles))
             }
             metrics.append_to_log(particles.rundata, stepdata)
     particles.done()

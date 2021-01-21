@@ -161,9 +161,9 @@ def step(train_batch):
 
 
 def evaluate(step_counter):
-    acc = compute_acc(particles.particles.training).tolist()
+    acc = compute_acc(particles.particles).tolist()
     print(f"Step {step_counter}, accuracy: {acc}")
-    print(f"particle mean: ", onp.mean(particles.particles.training))
+    print("particle mean: ", onp.mean(particles.particles))
     with open(results_file, "a") as file:
         file.write(f"{step_counter},{acc}\n")
     return

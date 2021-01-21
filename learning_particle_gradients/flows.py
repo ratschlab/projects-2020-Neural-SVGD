@@ -43,7 +43,6 @@ def neural_svgd_flow(key,
                                  init_samples=proposal.sample,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
-                                 num_groups=1 if target.d > 2 else 2,
                                  optimizer="sgd",
                                  compute_metrics=compute_metrics)
 
@@ -126,7 +125,6 @@ def sgld_flow(key,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
                                  optimizer=particle_optimizer,
-                                 num_groups=1,
                                  compute_metrics=compute_metrics)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:

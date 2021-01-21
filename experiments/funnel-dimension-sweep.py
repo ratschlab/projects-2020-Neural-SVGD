@@ -28,7 +28,7 @@ mmd = jit(metrics.get_mmd(mmd_kernel))
 
 def get_mmds(particle_list, ys):
     mmds = []
-    for xs in [p.particles.training for p in particle_list]:
+    for xs in [p.particles for p in particle_list]:
         mmds.append(mmd(xs, ys))
     return mmds
 

@@ -3,8 +3,6 @@ from jax import jit, vmap, random, value_and_grad, grad
 import haiku as hk
 import jax
 import optax
-import chex
-from dataclasses import astuple, asdict
 
 from tqdm import tqdm
 from functools import partial
@@ -63,21 +61,6 @@ class Patience:
             self.patience = patience
 
 
-@chex.dataclass
-class SplitData:
-    """Train-test split for particles"""
-    training: np.ndarray
-    test: np.ndarray = None
-
-#    def __iter__(self):
-#        return iter([p for p in astuple(self) if p is not None])
-
-    def __add__(self, data):
-        assert all([k1 == k2 for k1, k2 in zip(self.keys(), data.keys())])
-        return SplitData(**{k: a + b 
-            for (k, a), (k, b) in zip(self.items(), data.items())})
-
-
 class Particles:
     """
     Container class for particles, particle optimizer,
@@ -90,7 +73,6 @@ class Particles:
                  learning_rate=1e-2,
                  optimizer="sgd",
                  custom_optimizer=None,
-                 num_groups=1,
                  n_particles: int = 50,
                  compute_metrics=None):
         """
@@ -106,7 +88,6 @@ class Particles:
         """
         self.gradient = gradient
         self.n_particles = n_particles
-        self.num_groups = num_groups
         self.threadkey, subkey = random.split(key)
         self.init_samples = init_samples
         self.particles = self.init_particles(subkey)
@@ -127,22 +108,15 @@ class Particles:
         self.compute_metrics = compute_metrics
 
     def init_particles(self, key):
-        """Returns namedtuple with training and test particles"""
-        assert self.num_groups <= 2  # SplitData only supports two groups
+        """Returns an jnp.ndarray of shape (n, d) containing particles."""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
-        keys = random.split(key, self.num_groups)
-        groups = ('training', 'test')
         if callable(self.init_samples):
-            particles = SplitData(**{
-                g: self.init_samples(self.n_particles, key)
-                    for g, key in zip(groups, keys)
-                })
+            particles = self.init_particles(self.n_particles, key)
         else:
-            #particles = SplitData(*(self.init_samples,) * self.num_groups)
-            particles = SplitData(training=self.init_samples)
-            self.n_particles = len(self.init_samples)
-        self.d = particles.training.shape[1]
+            particles = self.init_samples
+            self.n_particles = len(particles)
+        self.d = particles.shape[1]
         return particles
 
     def get_params(self):
@@ -152,8 +126,8 @@ class Particles:
         """
         Return next subsampled batch of training particles (split into training
         and validation) for the training of a gradient field approximator."""
-        particles, *_ = self.get_params().values()
-        shuffled_batch = random.permutation(key, np.array(particles))
+        particles = self.get_params()
+        shuffled_batch = random.permutation(key, particles)
 
         # subsample batch
         if batch_size is None:
@@ -166,7 +140,7 @@ class Particles:
         Updates particles in the direction given by self.gradient
 
         Arguments:
-            particles: SplitData instance
+            particles: jnp.ndarray of shape (n, d)
             params: can be anything. e.g. inducing particles in the case of SVGD,
         deep NN params for learned f, or None.
 
@@ -175,12 +149,7 @@ class Particles:
             optimizer_state (updated)
             grad_aux: dict containing auxdata
         """
-        out = {g: self.gradient(params, p, aux=True) 
-                for g, p in zip(('training', 'test'), particles.values())}
-        grads, grad_aux = [SplitData(**o) for o in zip(*out)]
-        grad_aux = {grouplabel + "_" + label: v
-                    for grouplabel, d in grad_aux.items()
-                    for label, v in d.items()}
+        grads, grad_aux = self.gradient(params, particles, aux=True)
         updated_grads, optimizer_state = self.opt.update(grads, optimizer_state, particles)
         particles = optax.apply_updates(particles, updated_grads)
         # grad_aux.update({"grads": updated_grads})
@@ -200,7 +169,7 @@ class Particles:
     def log(self, grad_aux=None):
         metrics.append_to_log(self.rundata, self._log(self.particles, self.step_counter))
         if self.step_counter % 10 == 0 and self.compute_metrics:
-            aux_metrics = self.compute_metrics(self.particles.training)
+            aux_metrics = self.compute_metrics(self.particles)
             metrics.append_to_log(self.rundata,
                                   {k: (self.step_counter, v) for k, v in aux_metrics.items()})
         if grad_aux is not None:
@@ -213,12 +182,9 @@ class Particles:
             auxdata.update({
                 "step": step,
                 "particles": particles,
+                "mean": np.mean(particles, axis=0),
+                "std": np.std(particles, axis=0),
             })
-            for k, v in particles.items():
-                auxdata.update({
-                    f"{k}_mean": np.mean(v, axis=0),
-                    f"{k}_std": np.std(v, axis=0),
-                })
         return auxdata
 
     def done(self):
@@ -226,16 +192,13 @@ class Particles:
         if self.donedone:
             print("already done.")
             return
-        skip = "particles accuracy test_logp".split()
+        skip = "particles accuracy".split()
         self.rundata = {
             k: v if k in skip else np.array(v)
             for k, v in self.rundata.items()
         }
         if "particles" in self.rundata:
-            groups = ('training', 'test')
-            d = SplitData(**{g: np.array(trajectory)
-                for g, trajectory in zip(groups, zip(*self.rundata['particles']))})
-            self.rundata["particles"] = d
+            self.rundata["particles"] = np.array(self.rundata['particles'])
         self.donedone = True
 
 
