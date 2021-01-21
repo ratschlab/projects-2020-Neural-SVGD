@@ -43,7 +43,8 @@ class Patience:
         self.disable = patience == -1
 
     def update(self, validation_loss):
-        """Returns True when early stopping criterion is met"""
+        """Returns True when early stopping criterion (validation loss
+        failed to decrease for `self.patience` steps) is met"""
         if self.min_validation_loss is None or self.min_validation_loss > validation_loss:
             self.min_validation_loss = validation_loss
             self.time_waiting = 0
@@ -326,6 +327,11 @@ class TrainingMixin:
                  patience: int = 10,
                  **kwargs):
         self.opt = optax.adam(learning_rate)
+#        schedule_fn = optax.piecewise_constant_schedule(
+#                -learning_rate, {50: 1/5, 100: 1/2})
+#        self.opt = optax.chain(
+#                optax.scale_by_adam(),
+#                optax.scale_by_schedule(schedule_fn))
         self.optimizer_state = self.opt.init(self.params)
 
         # state and logging
@@ -372,13 +378,15 @@ class TrainingMixin:
               n_steps=5, progress_bar=False, data=None, early_stopping=True):
         """
         batch and next_batch cannot both be None.
-        batch is an array of particles.
-        data_batch is data used to compute logp (passed through self.loss_fn)
 
         Arguments:
             batch: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
             next_batch: callable, outputs next training batch. Signature:
-        next_batch(key)
+                next_batch(key)
+            key: random.PRGNKey
+            n_steps: int, nr of steps to train
+            data: pytree (optional). Used to compute logp (passed through
+                to self.loss_fn).
         """
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
@@ -390,12 +398,12 @@ class TrainingMixin:
             self.patience.update(val_loss)
             return
 
+        self.patience.reset()
         for i in tqdm(range(n_steps), disable=not progress_bar):
             key, subkey = random.split(key)
             step(subkey)
             # self.write_to_log({"model_params": self.get_params()})
             if self.patience.out_of_patience() and early_stopping:
-                self.patience.reset()
                 break
         self.write_to_log({"train_steps": i+1})
         return

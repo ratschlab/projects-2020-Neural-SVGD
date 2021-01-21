@@ -30,10 +30,11 @@ DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
 NUM_EVALS = 30  # nr accuracy evaluations
 LAMBDA_REG = 10**2
-LEARNING_RATE = 1e-4 * LAMBDA_REG * 2
+STEP_SIZE = 1e-7 * LAMBDA_REG * 2 * 50
 
 LAYER_SIZE = 128 if on_cluster else 32
 NUM_WARMUP_STEPS = 300 if on_cluster else 100
+PATIENCE = 5
 
 if USE_PMAP:
     vpmap = pmap
@@ -124,7 +125,7 @@ def vmean(fun):
 key, subkey = random.split(key)
 init_particles = vmap(init_flat_params)(random.split(subkey, args.num_samples))
 
-opt = optax.sgd(LEARNING_RATE)
+opt = optax.sgd(STEP_SIZE)
 
 key, subkey1, subkey2 = random.split(key, 3)
 neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
@@ -134,7 +135,8 @@ neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
                                sizes=[LAYER_SIZE, LAYER_SIZE, init_particles.shape[1]],
                                aux=False,
                                use_hutchinson=True,
-                               lambda_reg=LAMBDA_REG)
+                               lambda_reg=LAMBDA_REG,
+                               patience=PATIENCE)
 particles = models.Particles(subkey2, neural_grad.gradient, init_particles, custom_optimizer=opt)
 
 
@@ -155,7 +157,7 @@ neural_grad.train(next_batch=sample_tv,
 # training loop
 def step(train_batch):
     """one iteration of the particle trajectory simulation"""
-    neural_grad.train(next_batch=particles.next_batch, n_steps=10, data=train_batch)
+    neural_grad.train(next_batch=particles.next_batch, n_steps=50, data=train_batch)
     particles.step(neural_grad.get_params())
     return
 
