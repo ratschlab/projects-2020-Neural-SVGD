@@ -3,4 +3,4 @@ __pycache__
 **.ipynb_checkpoints
 notebooks/illustrations/*.mp4
 .vscode
-experiments/results/figures
+experiments/results/figures/
