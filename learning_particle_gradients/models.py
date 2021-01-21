@@ -69,18 +69,13 @@ class SplitData:
     training: np.ndarray
     test: np.ndarray = None
 
-    def __iter__(self):
-        return iter([p for p in astuple(self) if p is not None])
-
-    def items(self):
-        return ((k, v) for k, v in asdict(self).items() if v is not None)
-
-    def keys(self):
-        return (k for k, _ in self.items())
+#    def __iter__(self):
+#        return iter([p for p in astuple(self) if p is not None])
 
     def __add__(self, data):
         assert all([k1 == k2 for k1, k2 in zip(self.keys(), data.keys())])
-        return SplitData(*[a + b for a, b in zip(self, data)])
+        return SplitData(**{k: a + b 
+            for (k, a), (k, b) in zip(self.items(), data.items())})
 
 
 class Particles:
@@ -137,11 +132,15 @@ class Particles:
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         keys = random.split(key, self.num_groups)
-        try:
-            particles = SplitData(*(self.init_samples(self.n_particles, key)
-                                    for key in keys))
-        except TypeError:
-            particles = SplitData(*(self.init_samples,)*self.num_groups)
+        groups = ('training', 'test')
+        if callable(self.init_samples):
+            particles = SplitData(**{
+                g: self.init_samples(self.n_particles, key)
+                    for g, key in zip(groups, keys)
+                })
+        else:
+            #particles = SplitData(*(self.init_samples,) * self.num_groups)
+            particles = SplitData(training=self.init_samples)
             self.n_particles = len(self.init_samples)
         self.d = particles.training.shape[1]
         return particles
@@ -153,7 +152,7 @@ class Particles:
         """
         Return next subsampled batch of training particles (split into training
         and validation) for the training of a gradient field approximator."""
-        particles, *_ = self.get_params()
+        particles, *_ = self.get_params().values()
         shuffled_batch = random.permutation(key, np.array(particles))
 
         # subsample batch
@@ -167,6 +166,7 @@ class Particles:
         Updates particles in the direction given by self.gradient
 
         Arguments:
+            particles: SplitData instance
             params: can be anything. e.g. inducing particles in the case of SVGD,
         deep NN params for learned f, or None.
 
@@ -175,8 +175,9 @@ class Particles:
             optimizer_state (updated)
             grad_aux: dict containing auxdata
         """
-        out = [self.gradient(params, p, aux=True) for p in particles]
-        grads, grad_aux = [SplitData(*o) for o in zip(*out)]
+        out = {g: self.gradient(params, p, aux=True) 
+                for g, p in zip(('training', 'test'), particles.values())}
+        grads, grad_aux = [SplitData(**o) for o in zip(*out)]
         grad_aux = {grouplabel + "_" + label: v
                     for grouplabel, d in grad_aux.items()
                     for label, v in d.items()}
@@ -231,8 +232,9 @@ class Particles:
             for k, v in self.rundata.items()
         }
         if "particles" in self.rundata:
-            d = SplitData(*[np.array(trajectory)
-                            for trajectory in zip(*self.rundata["particles"])])
+            groups = ('training', 'test')
+            d = SplitData(**{g: np.array(trajectory)
+                for g, trajectory in zip(groups, zip(*self.rundata['particles']))})
             self.rundata["particles"] = d
         self.donedone = True
 
