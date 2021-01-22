@@ -342,22 +342,26 @@ class TrainingMixin:
         super().__init__(**kwargs)
 
     @partial(jit, static_argnums=0)
-    def _step(self, key, params, batch, optimizer_state, particles, validation_particles):
-        """update parameters and compute validation loss
-        batch: batch of data used to approximate logp"""
-        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, batch, key, particles)
+    def _step(self, key, params, optimizer_state, dlogp, val_dlogp, particles, validation_particles):
+        """
+        update parameters and compute validation loss
+        args:
+            dlogp: array of shape (n_train, d)
+            val_dlogp: array of shape (n_validation, d)
+        """
+        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, dlogp, key, particles)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
 
-        _, val_loss_aux = self.loss_fn(params, batch, key, validation_particles)
+        _, val_loss_aux = self.loss_fn(params, val_dlogp, key, validation_particles)
         auxdata = (loss_aux, val_loss_aux, grads, params)
         return params, optimizer_state, auxdata
 
-    def step(self, particles, validation_particles, batch):
+    def step(self, particles, validation_particles, dlogp, val_dlogp):
         """Step and mutate state"""
         self.threadkey, key = random.split(self.threadkey)
         self.params, self.optimizer_state, auxdata = self._step(
-            key, self.params, batch, self.optimizer_state,
+            key, self.params, self.optimizer_state, dlogp, val_dlogp,
             particles, validation_particles)
         self.write_to_log(
             self._log(particles, validation_particles, auxdata, self.step_counter))
@@ -374,39 +378,51 @@ class TrainingMixin:
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, batch=None, next_batch: callable = None, key=None,
-              n_steps=5, progress_bar=False, data=None, early_stopping=True):
+    def train(self, split_particles, n_steps=5, data=None,
+              early_stopping=True, progress_bar=False):
         """
         batch and next_batch cannot both be None.
 
         Arguments:
-            batch: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
-            next_batch: callable, outputs next training batch. Signature:
-                next_batch(key)
+            split_particles: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
             key: random.PRGNKey
             n_steps: int, nr of steps to train
-            data: pytree (optional). Used to compute logp (passed through
-                to self.loss_fn).
+            data: pytree (optional). Used to compute logp.
         """
-        if key is None:
-            self.threadkey, key = random.split(self.threadkey)
+        self.patience.reset()
+        logp = self.get_target_logp(data)
+        train_dlogp, val_dlogp = [vmap(grad(logp))(xs) for xs in split_particles]
 
-        def step(key):
-            train_x, val_x = next_batch(key) if next_batch else batch
-            self.step(train_x, val_x, data)
+        def step():
+            self.step(*split_particles, train_dlogp, val_dlogp)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
             return
 
-        self.patience.reset()
         for i in tqdm(range(n_steps), disable=not progress_bar):
-            key, subkey = random.split(key)
-            step(subkey)
+            step()
             # self.write_to_log({"model_params": self.get_params()})
             if self.patience.out_of_patience() and early_stopping:
                 break
         self.write_to_log({"train_steps": i+1})
         return
+
+    def warmup(self, key, sample_split_particles: callable, next_data: callable,
+               n_iter: int = 10, n_inner_steps=30, progress_bar=False):
+        """resample from particle initializer to stabilize the beginning
+        of the trajectory
+        args:
+            key: prngkey
+            sample_split_particles: produces next x_train, x_val sample
+            next_data: produces next batch of data
+            n_iter: number of iterations (50 training steps each)
+        """
+        for _ in tqdm(range(n_iter), disable=not progress_bar):
+            key, subkey = random.split(key)
+            self.train(sample_split_particles(subkey),
+                       n_steps=n_inner_steps,
+                       data=next_data(),
+                       early_stopping=False)
 
     def freeze_state(self):
         """Stores current state as tuple (step_counter, params, rundata)"""
@@ -456,23 +472,23 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         self.scale = 1.  # scaling of self.field
         self.use_hutchinson = use_hutchinson
 
-    def loss_fn(self, params, batch, key, particles):
+    def loss_fn(self, params, dlogp: np.ndarray, key: np.ndarray, particles: np.ndarray):
         """
         Arguments:
             params: neural net paramers
-            batch: data used to compute logp. Can be none if logp is known precisely
+            dlogp: gradient grad(log p)(x), shaped (n, d)
             key: random PRNGKey
             particles: array of shape (n, d)
         """
-        target_logp = self.get_target_logp(batch)
         f = utils.negative(self.get_field(particles, params))
         if self.use_hutchinson:
-            stein_discrepancy = stein.stein_discrepancy_hutchinson(
-                key, particles, target_logp, f)
+            stein_discrepancy = stein.stein_discrepancy_hutchinson_fixed_log(
+                key, particles, dlogp, f)
             stein_aux = np.array([np.nan, np.nan])
         else:
-            stein_discrepancy, stein_aux = stein.stein_discrepancy(
-                particles, target_logp, f, aux=True)
+            stein_discrepancy = stein.stein_discrepancy_fixed_log(
+                particles, dlogp, f)
+            stein_aux = np.array([np.nan, np.nan])
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
         # loss = - 1/2 * stein_discrepancy**2 / l2_f_sq

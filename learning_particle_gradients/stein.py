@@ -106,6 +106,20 @@ def stein_discrepancy(xs: np.ndarray, logp, f, aux=False):
     return stein_expectation(f, xs, logp, transposed=True, aux=aux)
 
 
+def stein_discrepancy_fixed_log(xs: np.ndarray, dlogp, f, aux=False):
+    """Return estimated stein discrepancy using
+    witness function f
+    args:
+        xs: array of shape (n, d)
+        dlogp: array of shape (n, d)
+        f: callable (witness function)
+    """
+    def h(x, dlogp_x):
+        div_f = np.trace(jacfwd(f)(x))
+        return np.inner(f(x), dlogp_x) + div_f
+    return vmap(h)(xs, dlogp).mean()
+
+
 def stein_discrepancy_hutchinson(key, xs, logp, f):
     """
     Return random estimate of the stein discrepancy given
@@ -124,6 +138,26 @@ def stein_discrepancy_hutchinson(key, xs, logp, f):
         return np.inner(f(x), grad(logp)(x)) + div_f
     zs = random.normal(key, xs.shape)
     return vmap(h)(xs, zs).mean()
+
+
+def stein_discrepancy_hutchinson_fixed_log(key, xs, dlogp, f):
+    """
+    Return random estimate of the stein discrepancy given
+    witness function f. Div(f) is approximated using a one-sample
+    MC estimate (Hutchinsons estimator).
+    args:
+        key: jax PRNGkey
+        xs: array of shape (n, d)
+        dlogp: array of shape (n, d)
+        f: callable (witness function), computes a differentiable map
+    from R^d to R^d, d > 1.
+    """
+    def h(x, dlogp_x, z):
+        zdf = grad(lambda _x: np.vdot(z, f(_x)))
+        div_f = np.vdot(zdf(x), z)
+        return np.inner(f(x), dlogp_x) + div_f
+    zs = random.normal(key, xs.shape)
+    return vmap(h)(xs, dlogp, zs).mean()
 
 
 def phistar_i(xi, x, logp, kernel, aux=True):

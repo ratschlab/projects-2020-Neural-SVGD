@@ -1,6 +1,5 @@
 import os
 import jax.numpy as np
-from functools import partial
 from jax.scipy import stats, special
 from jax import jit, vmap, random, value_and_grad
 
@@ -238,16 +237,20 @@ def run_neural_svgd(key, plr, full_data=False, progress_bar=False):
     particles = models.Particles(key2, neural_grad.gradient, init_particles, custom_optimizer=nsvgd_opt)
 
     # Warmup on first batch
-    neural_grad.train(next_batch=sample_tv,
-                      n_steps=100,
-                      early_stopping=False,
-                      data=next(get_batches(x_train, y_train, n_steps=100+1)))
+    key, subkey = random.split(key)
+    neural_grad.warmup(key=subkey,
+                       sample_split_particles=sample_tv,
+                       next_data=lambda: next(get_batches(x_train, y_train, n_steps=100+1)),
+                       n_iter=3)
 
-    next_particles = partial(particles.next_batch)
     test_batches = get_batches(x_test, y_test, 2*NUM_VALS) if full_data else get_batches(x_val, y_val, 2*NUM_VALS)
     train_batches = get_batches(xx, yy, NUM_STEPS+1) if full_data else get_batches(x_train, y_train, NUM_STEPS+1)
+
     for i, data_batch in tqdm(enumerate(train_batches), total=NUM_STEPS, disable=not progress_bar):
-        neural_grad.train(next_batch=next_particles, n_steps=10, data=data_batch)
+        key, subkey = random.split(key)
+        neural_grad.train(particles.next_batch(subkey),
+                          n_steps=10,
+                          data=data_batch)
         particles.step(neural_grad.get_params())
         if i % (NUM_STEPS//NUM_VALS) == 0:
             test_logp = get_minibatch_logp(*next(test_batches))
@@ -316,16 +319,17 @@ def run_sweep(lrs, sampler):
 
 
 # Sweep
-print("Running learning rate sweep...")
 key, subkey = random.split(key)
 lrs = np.logspace(-9, -4, 10)
 svgd_lrs = np.logspace(-12, -6, 10)
 nsvgd_lrs = np.logspace(-5, -1, 10)
 
-sgld_acc_sweep, sgld_lr = run_sweep(lrs, run_sgld)
-svgd_acc_sweep, svgd_lr = run_sweep(lrs, run_svgd)
+print("Sweeping NSVGD step sizes...")
 nsvgd_acc_sweep, nsvgd_lr = run_sweep(nsvgd_lrs, run_neural_svgd)
-
+print("Sweeping SGLD step sizes...")
+sgld_acc_sweep, sgld_lr = run_sweep(lrs, run_sgld)
+print("Sweeping SVGD step sizes...")
+svgd_acc_sweep, svgd_lr = run_sweep(lrs, run_svgd)
 
 # run 10 times on full data with validated learning rate
 print("Now run again on full data with validated learning rate.")

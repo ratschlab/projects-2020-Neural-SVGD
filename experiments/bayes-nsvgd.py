@@ -17,7 +17,7 @@ on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # cli args
 parser = argparse.ArgumentParser()
-parser.add_argument("--num_samples", type=int, default=20, help="Number of parallel chains")
+parser.add_argument("--num_samples", type=int, default=100, help="Number of parallel chains")
 parser.add_argument("--num_epochs", type=int, default=1)
 args = parser.parse_args()
 
@@ -30,7 +30,7 @@ DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
 NUM_EVALS = 30  # nr accuracy evaluations
 LAMBDA_REG = 10**2
-STEP_SIZE = 1e-7 * LAMBDA_REG * 2 * 50
+STEP_SIZE = 1e-7 * LAMBDA_REG * 2  # * 50
 
 LAYER_SIZE = 128 if on_cluster else 32
 NUM_WARMUP_STEPS = 300 if on_cluster else 100
@@ -147,17 +147,20 @@ test_batches  = make_batches(test_images, test_labels, BATCH_SIZE)
 
 # Warmup on first batch
 print("Warmup...")
-neural_grad.train(next_batch=sample_tv,
-                  n_steps=NUM_WARMUP_STEPS,  # 100
-                  early_stopping=False,
-                  data=next(train_batches),
-                  progress_bar=not on_cluster)
+neural_grad.warmup(subkey,
+                   sample_tv,
+                   lambda: next(train_batches),
+                   n_iter=NUM_WARMUP_STEPS // 30 + 1,
+                   n_inner_steps=30,
+                   progress_bar=not on_cluster)
 
 
 # training loop
-def step(train_batch):
+def step(key, train_batch):
     """one iteration of the particle trajectory simulation"""
-    neural_grad.train(next_batch=particles.next_batch, n_steps=50, data=train_batch)
+    neural_grad.train(split_particles=particles.next_batch(key),
+                      n_steps=50,
+                      data=train_batch)
     particles.step(neural_grad.get_params())
     return
 
@@ -177,8 +180,9 @@ with open(results_file, "w") as file:
 print("Training...")
 num_steps = args.num_epochs * data_size // BATCH_SIZE
 for step_counter in tqdm(range(num_steps), disable=on_cluster):
+    key, subkey = random.split(key)
     train_batch = next(train_batches)
-    step(train_batch)
+    step(subkey, train_batch)
     if step_counter % (num_steps//NUM_EVALS) == 0:
         evaluate(step_counter)
 

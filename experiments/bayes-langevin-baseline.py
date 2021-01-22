@@ -22,7 +22,7 @@ on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # cli args
 parser = argparse.ArgumentParser()
-parser.add_argument("--num_samples", type=int, default=10, help="Number of parallel chains")
+parser.add_argument("--num_samples", type=int, default=100, help="Number of parallel chains")
 parser.add_argument("--num_epochs", type=int, default=1)
 args = parser.parse_args()
 

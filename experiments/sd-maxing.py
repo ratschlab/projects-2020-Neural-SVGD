@@ -2,6 +2,7 @@
 # neural stein discrepancy, kernelized SD, and theoretical optimum.
 from functools import partial
 from jax import grad, jit, random
+from tqdm import tqdm
 import jax.numpy as jnp
 import numpy as onp
 import matplotlib.pyplot as plt
@@ -54,22 +55,6 @@ for _ in range(100):
     sds.append(get_sd(samples, kl_gradient))
 
 
-# Kernelized SD (using Gaussian kernel w/ median heuristic)
-@jit
-def compute_scaled_ksd(samples):
-    kernel = kernels.get_rbf_kernel(kernels.median_heuristic(samples))
-    phi = stein.get_phistar(kernel, target.logpdf, samples)
-    ksd = stein.stein_discrepancy(samples, target.logpdf, phi)
-    return ksd**2 / utils.l2_norm_squared(samples, phi)
-
-
-print("Computing kernelized Stein discrepancy...")
-ksds = []
-for _ in range(100):
-    samples = proposal.sample(400)
-    ksds.append(compute_scaled_ksd(samples))
-
-
 # Neural SD
 print("Computing neural Stein discrepancy...")
 key, subkey = random.split(key)
@@ -86,8 +71,29 @@ def sample(key):
 
 
 key, subkey = random.split(key)
-learner.train(next_batch=sample, key=subkey, n_steps=800, progress_bar=True)
+learner.warmup(key=subkey,
+               sample_split_particles=sample,
+               next_data=lambda: None,
+               n_iter=30,
+               n_inner_steps=30,
+               progress_bar=True)
 learner.done()
+
+
+# Kernelized SD (using Gaussian kernel w/ median heuristic)
+@jit
+def compute_scaled_ksd(samples):
+    kernel = kernels.get_rbf_kernel(kernels.median_heuristic(samples))
+    phi = stein.get_phistar(kernel, target.logpdf, samples)
+    ksd = stein.stein_discrepancy(samples, target.logpdf, phi)
+    return ksd**2 / utils.l2_norm_squared(samples, phi)
+
+
+print("Computing kernelized Stein discrepancy...")
+ksds = []
+for _ in tqdm(range(100)):
+    samples = proposal.sample(400)
+    ksds.append(compute_scaled_ksd(samples))
 
 
 print("Saving results...")
