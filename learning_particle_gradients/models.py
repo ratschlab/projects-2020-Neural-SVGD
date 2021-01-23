@@ -158,9 +158,13 @@ class Particles:
             grad_aux: dict containing auxdata
         """
         grads, grad_aux = self.gradient(params, particles, aux=True)
-        grad_aux.update({"global_grad_norm": optax.global_norm(grads)})
         updated_grads, optimizer_state = self.opt.update(grads, optimizer_state, particles)
         particles = optax.apply_updates(particles, updated_grads)
+        grad_aux.update({
+            "global_grad_norm": optax.global_norm(grads),
+            "global_grad_norm_post_update": optax.global_norm(updated_grads),
+        })
+        grad_aux.update({})
         # grad_aux.update({"grads": updated_grads})
         return particles, optimizer_state, grad_aux
 
