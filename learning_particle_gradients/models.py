@@ -223,10 +223,12 @@ class VectorFieldMixin:
                  key=random.PRNGKey(42),
                  sizes: list = None,
                  aux=False,
+                 normalize_inputs=False,
                  **kwargs):
         """
         args:
             aux: bool; whether to add mean and std as auxiliary input to MLP.
+            normalize_inputs: whether to normalize particles
         """
         self.aux = aux
         self.d = target_dim
@@ -237,6 +239,7 @@ class VectorFieldMixin:
                           f"received output dim {sizes[-1]} and "
                           f"target dim {self.d}.")
         self.threadkey, subkey = random.split(key)
+        self.normalize_inputs = normalize_inputs
 
         # net and optimizer
         def field(x, aux, dropout: bool = False):
