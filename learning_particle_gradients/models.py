@@ -123,17 +123,24 @@ class Particles:
     def get_params(self):
         return self.particles
 
-    def next_batch(self, key, batch_size=None):
+    def next_batch(self,
+                   key,
+                   n_train_particles: int = None,
+                   n_val_particles: int = None):
         """
         Return next subsampled batch of training particles (split into training
         and validation) for the training of a gradient field approximator."""
         particles = self.get_params()
         shuffled_batch = random.permutation(key, particles)
 
-        # subsample batch
-        if batch_size is None:
-            batch_size = 3*self.n_particles//4
-        return shuffled_batch[:batch_size], shuffled_batch[batch_size:]
+        if n_train_particles is None:
+            if n_val_particles is None:
+                n_val_particles = self.n_particles // 4
+            n_train_particles = self.n_particles - n_val_particles
+        elif n_val_particles is None:
+            n_val_particles = self.n_particles = n_train_particles
+
+        return shuffled_batch[:n_train_particles], shuffled_batch[-n_val_particles:]
 
     @partial(jit, static_argnums=0)
     def _step(self, key, particles, optimizer_state, params):
@@ -210,9 +217,12 @@ class VectorFieldMixin:
                  target_logp: callable = None,
                  key=random.PRNGKey(42),
                  sizes: list = None,
-                 aux=True,
+                 aux=False,
                  **kwargs):
-        """if aux, then add mean and variance as auxiliary input to MLP."""
+        """
+        args:
+            aux: bool; whether to add mean and std as auxiliary input to MLP.
+        """
         self.aux = aux
         self.d = target_dim
         self.sizes = sizes if sizes else [32, 32, self.d]
@@ -224,11 +234,11 @@ class VectorFieldMixin:
         self.threadkey, subkey = random.split(key)
 
         # net and optimizer
-        def field(x, aux):
+        def field(x, aux, dropout: bool = False):
             mlp = nets.MLP(self.sizes)
             scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args))
             mlp_input = np.concatenate([x, aux]) if self.aux else x
-            return scale * mlp(mlp_input)
+            return scale * mlp(mlp_input, dropout)
         self.field = hk.transform(field)
         self.params = self.init_params()
         super().__init__(**kwargs)
@@ -255,18 +265,18 @@ class VectorFieldMixin:
     def get_params(self):
         return self.params
 
-    def get_field(self, init_particles, params=None):
+    def get_field(self, key, init_particles, params=None, dropout=False):
         """Retuns function v. v is a vector field, can take either single
         particle of shape (d,) or batch shaped (..., d)."""
         if params is None:
             params = self.get_params()
-        norm = nets.get_norm(init_particles)
+        # norm = nets.get_norm(init_particles)
         aux = self.compute_aux(init_particles)
-        # norm = lambda x: x
+        norm = lambda x: x
 
         def v(x):
             """x should have shape (n, d) or (d,)"""
-            return self.field.apply(params, None, norm(x), aux)
+            return self.field.apply(params, key, norm(x), aux, dropout=dropout)
         return v
 
 
@@ -301,7 +311,7 @@ class EBMMixin():
     def get_params(self):
         return self.params
 
-    def get_field(self, init_particles, params=None):
+    def get_field(self, key, init_particles, params=None, dropout=False):
         del init_particles
         if params is None:
             params = self.get_params()
@@ -310,7 +320,7 @@ class EBMMixin():
             """x should have shape (d,)"""
             # norm = nets.get_norm(init_particles)
             # x = norm(x)
-            return np.squeeze(self.ebm.apply(params, None, x))
+            return np.squeeze(self.ebm.apply(params, key, x))
         return grad(ebm)
 
 
@@ -342,18 +352,34 @@ class TrainingMixin:
         super().__init__(**kwargs)
 
     @partial(jit, static_argnums=0)
-    def _step(self, key, params, optimizer_state, dlogp, val_dlogp, particles, validation_particles):
+    def _step(self,
+              key,
+              params,
+              optimizer_state,
+              dlogp,
+              val_dlogp,
+              particles,
+              validation_particles):
         """
         update parameters and compute validation loss
         args:
             dlogp: array of shape (n_train, d)
             val_dlogp: array of shape (n_validation, d)
         """
-        [loss, loss_aux], grads = value_and_grad(self.loss_fn, has_aux=True)(params, dlogp, key, particles)
+        [loss, loss_aux], grads = value_and_grad(self.loss_fn,
+                                                 has_aux=True)(params,
+                                                               dlogp,
+                                                               key,
+                                                               particles,
+                                                               dropout=True)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
 
-        _, val_loss_aux = self.loss_fn(params, val_dlogp, key, validation_particles)
+        _, val_loss_aux = self.loss_fn(params,
+                                       val_dlogp,
+                                       key,
+                                       validation_particles,
+                                       dropout=False)
         auxdata = (loss_aux, val_loss_aux, grads, params)
         return params, optimizer_state, auxdata
 
@@ -378,8 +404,12 @@ class TrainingMixin:
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
 
-    def train(self, split_particles, n_steps=5, data=None,
-              early_stopping=True, progress_bar=False):
+    def train(self,
+              split_particles,
+              n_steps=5,
+              data=None,
+              early_stopping=True,
+              progress_bar=False):
         """
         batch and next_batch cannot both be None.
 
@@ -472,25 +502,33 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         self.scale = 1.  # scaling of self.field
         self.use_hutchinson = use_hutchinson
 
-    def loss_fn(self, params, dlogp: np.ndarray, key: np.ndarray, particles: np.ndarray):
+    def loss_fn(self,
+                params,
+                dlogp: np.ndarray,
+                key: np.ndarray,
+                particles: np.ndarray,
+                dropout: bool = False):
         """
         Arguments:
             params: neural net paramers
             dlogp: gradient grad(log p)(x), shaped (n, d)
             key: random PRNGKey
             particles: array of shape (n, d)
+            dropout: whether to use dropout in the gradient network
         """
-        f = utils.negative(self.get_field(particles, params))
+        key, subkey = random.split(key)
+        f = utils.negative(self.get_field(subkey, particles, params, dropout=dropout))
+        key, subkey = random.split(key)
         if self.use_hutchinson:
             stein_discrepancy = stein.stein_discrepancy_hutchinson_fixed_log(
-                key, particles, dlogp, f)
+                subkey, particles, dlogp, f)
             stein_aux = np.array([np.nan, np.nan])
         else:
             stein_discrepancy = stein.stein_discrepancy_fixed_log(
                 particles, dlogp, f)
             stein_aux = np.array([np.nan, np.nan])
         l2_f_sq = utils.l2_norm_squared(particles, f)
-        loss = -stein_discrepancy + self.lambda_reg * l2_f_sq
+        loss = -stein_discrepancy + self.lambda_reg * l2_f_sq  # + optax.global_norm(params)**2
         # loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
         return loss, aux
@@ -521,12 +559,13 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
 
     def gradient(self, params, particles, aux=False):
         """
+        Plug-in particle update method. No dropout.
         args:
             params: pytree of neural net parameters
             particles: array of shape (n, d)
             aux: bool
         """
-        v = vmap(self.get_field(particles, params))
+        v = vmap(self.get_field(None, particles, params, dropout=False))
         # v = vmap(self._get_grad(particles, params))
         if aux:
             return v(particles), {}

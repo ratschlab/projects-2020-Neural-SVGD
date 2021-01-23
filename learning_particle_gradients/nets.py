@@ -73,14 +73,25 @@ class MLP(hk.Module):
         super().__init__(name=name)
         self.sizes = sizes
 
-    def __call__(self, x):
-        """x is a batch of particles of shape (n, d) or a single particle
-        of shape (d,)"""
+    def __call__(self, x: np.ndarray, dropout: bool = False):
+        """
+        args:
+            x: a batch of particles of shape (n, d) or a single particle
+        of shape (d,)
+            dropout: bool; apply dropout to output?
+        """
         mlp = hk.nets.MLP(output_sizes=self.sizes,
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
                           activation=jax.nn.swish,
                           activate_final=False)
-        return mlp(x)
+        output = mlp(x)
+        if dropout:
+            output = hk.dropout(
+                rng=hk.next_rng_key(),
+                rate=0.5,
+                x=output
+            )
+        return output
 
 
 class KLGrad(hk.Module):

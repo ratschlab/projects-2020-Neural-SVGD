@@ -60,7 +60,7 @@ def neural_svgd_flow(key,
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            batch = particles.next_batch(subkey, batch_size=2*n_particles//3)  # TODO set to 99??
+            batch = particles.next_batch(subkey, n_train_particles=2*n_particles//3)  # TODO set to 99??
             learner.train(split_particles=batch, n_steps=n_learner_steps)
             particles.step(learner.get_params())
         except Exception as err:
