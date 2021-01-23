@@ -158,6 +158,7 @@ class Particles:
             grad_aux: dict containing auxdata
         """
         grads, grad_aux = self.gradient(params, particles, aux=True)
+        grad_aux.update({"global_grad_norm": optax.global_norm(grads)})
         updated_grads, optimizer_state = self.opt.update(grads, optimizer_state, particles)
         particles = optax.apply_updates(particles, updated_grads)
         # grad_aux.update({"grads": updated_grads})
@@ -270,9 +271,11 @@ class VectorFieldMixin:
         particle of shape (d,) or batch shaped (..., d)."""
         if params is None:
             params = self.get_params()
-        # norm = nets.get_norm(init_particles)
+        if self.normalize_inputs:
+            norm = nets.get_norm(init_particles)
+        else:
+            norm = lambda x: x
         aux = self.compute_aux(init_particles)
-        norm = lambda x: x
 
         def v(x):
             """x should have shape (n, d) or (d,)"""
@@ -335,14 +338,20 @@ class TrainingMixin:
     def __init__(self,
                  learning_rate: float = 1e-2,
                  patience: int = 10,
+                 dropout: bool = False,
                  **kwargs):
-        self.opt = optax.adam(learning_rate)
+        """
+        args:
+        dropout: whether to use dropout during training
+        """
 #        schedule_fn = optax.piecewise_constant_schedule(
 #                -learning_rate, {50: 1/5, 100: 1/2})
 #        self.opt = optax.chain(
 #                optax.scale_by_adam(),
 #                optax.scale_by_schedule(schedule_fn))
+        self.opt = optax.adam(learning_rate)
         self.optimizer_state = self.opt.init(self.params)
+        self.dropout = dropout
 
         # state and logging
         self.step_counter = 0
@@ -371,7 +380,7 @@ class TrainingMixin:
                                                                dlogp,
                                                                key,
                                                                particles,
-                                                               dropout=True)
+                                                               dropout=self.dropout)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
 
@@ -480,16 +489,20 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                  patience: int = 0,
                  aux=True,
                  lambda_reg=1/2,
-                 use_hutchinson: bool = False):
+                 use_hutchinson: bool = False,
+                 dropout=False,
+                 normalize_inputs=False):
         """
         args:
             aux: bool, whether to concatenate particle dist info onto
         mlp input
             use_hutchinson: when True, use Hutchinson's estimator to
         compute the stein discrepancy.
+            normalize_inputs: normalize particles
         """
         super().__init__(target_dim, target_logp, key=key, sizes=sizes,
-                         learning_rate=learning_rate, patience=patience, aux=aux)
+                         learning_rate=learning_rate, patience=patience,
+                         aux=aux, dropout=dropout, normalize_inputs=normalize_inputs)
         self.lambda_reg = lambda_reg
         if target_logp:
             assert not get_target_logp

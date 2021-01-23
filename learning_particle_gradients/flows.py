@@ -25,7 +25,8 @@ def neural_svgd_flow(key,
                      patience=default_patience,
                      aux=True,
                      compute_metrics=None,
-                     n_learner_steps=50):
+                     n_learner_steps=50,
+                     dropout=False):
     key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
@@ -34,7 +35,8 @@ def neural_svgd_flow(key,
                                sizes=sizes,
                                learning_rate=learner_lr,
                                patience=patience,
-                               aux=aux)
+                               aux=aux,
+                               dropout=dropout)
 
     if compute_metrics is None:
         compute_metrics = metrics.get_mmd_tracer(target.sample(500, keyc))
