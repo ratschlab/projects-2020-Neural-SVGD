@@ -24,13 +24,17 @@ tfpk = tfp.math.psd_kernels
 # Config
 sns.set(style='white')
 on_cluster = not os.getenv("HOME") == "/home/lauro"
+if on_cluster:
+    print("Can't get data on cluster")
+    raise
 disable_tqdm = on_cluster
 key = random.PRNGKey(0)
 a0, b0 = 1, 0.01  # hyper-parameters
 batch_size = 128
 
 print("Loading Covertype dataset")
-data = scipy.io.loadmat('/home/lauro/code/msc-thesis/wang_svgd/data/covertype.mat')
+data_path = '/home/lauro/code/msc-thesis/wang_svgd/data/covertype.mat'
+data = scipy.io.loadmat(data_path)
 features = data['covtype'][:, 1:]
 features = onp.hstack([features, onp.ones([features.shape[0], 1])])  # add intercept term
 labels = data['covtype'][:, 0]

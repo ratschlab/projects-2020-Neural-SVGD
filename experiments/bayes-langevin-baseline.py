@@ -17,6 +17,7 @@ import optax
 import utils
 from convnet import model, crossentropy_loss, log_prior, ensemble_accuracy
 import config as cfg
+import jax.flatten_util
 
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
@@ -110,6 +111,7 @@ for step_counter in tqdm(range(n_train_steps), disable=DISABLE_PROGRESS_BAR):
         acc = ensemble_accuracy(param_set, val_images[:BATCH_SIZE], val_labels[:BATCH_SIZE])
         accuracies.append(acc)
         print(f"Step {step_counter}, Accuracy:", acc)
+        print(f"Particle mean: {jax.flatten_util.ravel_pytree(param_set)[0].mean()}")
         with open(results_file, "a") as file:
             file.write(f"{step_counter},{acc}\n")
 

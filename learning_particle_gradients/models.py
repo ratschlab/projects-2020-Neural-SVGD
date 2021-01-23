@@ -113,7 +113,7 @@ class Particles:
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
         if callable(self.init_samples):
-            particles = self.init_particles(self.n_particles, key)
+            particles = self.init_samples(self.n_particles, key)
         else:
             particles = self.init_samples
             self.n_particles = len(particles)
@@ -179,7 +179,7 @@ class Particles:
     @partial(jit, static_argnums=0)
     def _log(self, particles, step):
         auxdata = {}
-        if self.d < 35:
+        if self.d < 400:
             auxdata.update({
                 "step": step,
                 "particles": particles,
@@ -407,8 +407,8 @@ class TrainingMixin:
         self.write_to_log({"train_steps": i+1})
         return
 
-    def warmup(self, key, sample_split_particles: callable, next_data: callable,
-               n_iter: int = 10, n_inner_steps=30, progress_bar=False):
+    def warmup(self, key, sample_split_particles: callable, next_data: callable = lambda: None,
+               n_iter: int = 10, n_inner_steps=30, progress_bar=False, early_stopping=True):
         """resample from particle initializer to stabilize the beginning
         of the trajectory
         args:
@@ -422,7 +422,7 @@ class TrainingMixin:
             self.train(sample_split_particles(subkey),
                        n_steps=n_inner_steps,
                        data=next_data(),
-                       early_stopping=False)
+                       early_stopping=early_stopping)
 
     def freeze_state(self):
         """Stores current state as tuple (step_counter, params, rundata)"""

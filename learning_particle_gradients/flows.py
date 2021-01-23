@@ -47,16 +47,21 @@ def neural_svgd_flow(key,
                                  compute_metrics=compute_metrics)
 
     # Warmup
-    def next_batch(key):
+    def sample_split_particles(key):
         return proposal.sample(2*n_particles, key).split(2)
-    learner.train(
-        next_batch=next_batch, n_steps=NUM_WARMUP_STEPS, early_stopping=False)
 
+    key, subkey = random.split(key)
+    learner.warmup(key=subkey,
+                   sample_split_particles=sample_split_particles,
+                   next_data=lambda: None,
+                   n_iter=NUM_WARMUP_STEPS // 30 + 1,
+                   n_inner_steps=30)
+                   
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
             batch = particles.next_batch(subkey, batch_size=2*n_particles//3)  # TODO set to 99??
-            learner.train(batch, n_steps=n_learner_steps)
+            learner.train(split_particles=batch, n_steps=n_learner_steps)
             particles.step(learner.get_params())
         except Exception as err:
             warnings.warn("Caught Exception")
