@@ -129,7 +129,8 @@ class Particles:
                    n_val_particles: int = None):
         """
         Return next subsampled batch of training particles (split into training
-        and validation) for the training of a gradient field approximator."""
+        and validation) for the training of a gradient field approximator.
+        """
         particles = self.get_params()
         shuffled_batch = random.permutation(key, particles)
 
@@ -453,8 +454,14 @@ class TrainingMixin:
         self.write_to_log({"train_steps": i+1})
         return
 
-    def warmup(self, key, sample_split_particles: callable, next_data: callable = lambda: None,
-               n_iter: int = 10, n_inner_steps=30, progress_bar=False, early_stopping=True):
+    def warmup(self,
+               key,
+               sample_split_particles: callable,
+               next_data: callable = lambda: None,
+               n_iter: int = 10,
+               n_inner_steps: int = 30,
+               progress_bar: bool = False,
+               early_stopping: bool = True):
         """resample from particle initializer to stabilize the beginning
         of the trajectory
         args:

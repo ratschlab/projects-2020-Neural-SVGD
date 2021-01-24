@@ -18,25 +18,23 @@ def neural_svgd_flow(key,
                      setup,
                      n_particles=default_num_particles,
                      n_steps=default_num_steps,
-                     sizes=None,
                      particle_lr=1e-2,
-                     learner_lr=1e-2,
                      noise_level=None,
                      patience=default_patience,
-                     aux=True,
                      compute_metrics=None,
                      n_learner_steps=50,
-                     dropout=False):
+                     **learner_kwargs):
+    """
+    args:
+        learning_rate: meta-learning rate of gradient learner model
+    """
     key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
                                target_logp=target.logpdf,
                                target_dim=target.d,
-                               sizes=sizes,
-                               learning_rate=learner_lr,
                                patience=patience,
-                               aux=aux,
-                               dropout=dropout)
+                               **learner_kwargs)
 
     if compute_metrics is None:
         compute_metrics = metrics.get_mmd_tracer(target.sample(500, keyc))
