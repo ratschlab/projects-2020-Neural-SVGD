@@ -573,7 +573,8 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
             "l2_norm": l2v,
             "mean_drift": np.mean(drift),
             "mean_repulsion": np.mean(repulsion),
-            "gradient_norms": gradient_norms,
+            "layer_gradient_norms": gradient_norms,
+            "global_gradient_norm": optax.global_norm(g),
         }
         return step_log
 
