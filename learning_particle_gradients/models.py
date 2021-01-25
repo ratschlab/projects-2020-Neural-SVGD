@@ -141,6 +141,7 @@ class Particles:
         elif n_val_particles is None:
             n_val_particles = self.n_particles = n_train_particles
 
+        assert n_train_particles + n_val_particles == self.n_particles
         return shuffled_batch[:n_train_particles], shuffled_batch[-n_val_particles:]
 
     @partial(jit, static_argnums=0)

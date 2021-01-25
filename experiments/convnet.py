@@ -65,16 +65,16 @@ def model_fn(image):
     """returns logits"""
     image = image.astype(jnp.float32)
     convnet = hk.Sequential([
-        hk.Conv2D(4, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
+        hk.Conv2D(32, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
         jax.nn.relu,
         hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
-        hk.Conv2D(4, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
+        hk.Conv2D(32, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
         jax.nn.relu,
         hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
         hk.Flatten(),
-        hk.AvgPool(window_shape=(5,), strides=(10,), padding="VALID"),
+        # hk.AvgPool(window_shape=(10,), strides=(10,), padding="VALID"),
         hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),
     ])
     return convnet(image)

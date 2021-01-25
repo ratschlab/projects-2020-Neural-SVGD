@@ -257,6 +257,7 @@ def dict_concatenate(dict_list):
             out[k] = dict_concatenate(v)
     return out
 
+
 def dict_mean(dict_list):
     """
     Arguments:
@@ -275,6 +276,7 @@ def dict_mean(dict_list):
             out[k] = dict_mean(v)
     return out
 
+
 def dict_divide(da, db):
     """divide numeric dict recursively, a / b."""
     for (k, a), (k, b) in zip(da.items(), db.items()):
@@ -283,6 +285,7 @@ def dict_divide(da, db):
         except TypeError:
             da[k] = dict_divide(a, b)
     return da
+
 
 def dict_asarray(dct: dict):
     for k, v in dct.items():
@@ -307,6 +310,7 @@ def flatten_dict(d):
         return flat
     return dict(visit(d))
 
+
 def dict_cartesian_product(**kwargs):
     """
     >>> [x for x in dict_cartesian_product(chars="ab", nums=[1,2])]
@@ -330,6 +334,7 @@ def nested_dict_contains_key(ndict: collections.Mapping, key):
                     return True
         return False
 
+
 def dejaxify(array, target="list"):
     if target=="list":
         return onp.asarray(array).tolist()
@@ -337,6 +342,7 @@ def dejaxify(array, target="list"):
         return onp.asarray(array)
     else:
         raise ValueError("target must be one of 'list', 'numpy'.")
+
 
 def dict_dejaxify(dictionary, target="list"): # alternatively, just remove the .tolist and make all onp
     """recursively turn all jax arrays into lists or np.arrays.
