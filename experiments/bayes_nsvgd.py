@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as onp
 import jax
 from jax import numpy as jnp
-from jax import vmap, pmap, random
+from jax import vmap, pmap, random, jit
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 import tensorflow_datasets as tfds
@@ -54,13 +54,14 @@ train_images, val_images, train_labels, val_labels = train_test_split(
 data_size = len(train_images)
 
 
-def make_batches(images, labels, batch_size):
-    """Returns an iterator that cycles through
-    tuples (image_batch, label_batch)."""
+
+def make_batches(images, labels, batch_size, cyclic=True):
+    """Returns an iterator through tuples (image_batch, label_batch).
+    if cyclic, then the iterator cycles back after exhausting the batches"""
     num_batches = len(images) // batch_size
     split_idx = onp.arange(1, num_batches+1)*batch_size
     batches = zip(*[onp.split(data, split_idx, axis=0) for data in (images, labels)])
-    return cycle(batches)
+    return cycle(batches) if cyclic else batches
 
 
 def loss(params, images, labels):
@@ -70,6 +71,8 @@ def loss(params, images, labels):
     logits = model.apply(params, images)
     return data_size/BATCH_SIZE * crossentropy_loss(logits, labels) - log_prior(params)
 
+
+validation_batches = make_batches(val_images, val_labels, BATCH_SIZE, cyclic=False)
 
 # utility functions for dealing with parameters
 params_tree = model.init(random.PRNGKey(0), train_images[:2])
@@ -103,10 +106,16 @@ def sample_tv(key):
     return vmap(init_flat_params)(random.split(key, args.num_samples)).split(2)
 
 
+@jit
+def minibatch_accuracy(param_set_flat, images, labels):
+    return ensemble_accuracy(vmap(unravel)(param_set_flat), images, labels)
+
+
 def compute_acc(param_set_flat):
-    return ensemble_accuracy(vmap(unravel)(param_set_flat),
-                             val_images[:BATCH_SIZE],
-                             val_labels[:BATCH_SIZE])
+    accs = []
+    for batch in validation_batches:
+        accs.append(minibatch_accuracy(param_set_flat, *batch))
+    return onp.mean(accs)
 
 
 def vmean(fun):
@@ -165,16 +174,6 @@ def train(key,
 
     train_batches = make_batches(train_images, train_labels, BATCH_SIZE)
 
-    # Warmup on first batch
-    print("Warmup...")
-    first_batch = next(train_batches)
-    key, subkey = random.split(key)
-    neural_grad.warmup(subkey,
-                       sample_tv,
-                       lambda: first_batch,
-                       n_iter=0, # TEST TODO
-                       n_inner_steps=100,
-                       progress_bar=not on_cluster)
 
     def step(key, train_batch):
         """one iteration of the particle trajectory simulation"""
@@ -200,7 +199,6 @@ def train(key,
 
     print("Training...")
     num_steps = args.num_epochs * data_size // BATCH_SIZE
-    num_steps = 2 # TEST TODO
     for step_counter in tqdm(range(num_steps), disable=on_cluster):
         key, subkey = random.split(key)
         train_batch = next(train_batches)
