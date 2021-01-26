@@ -26,11 +26,13 @@ args = parser.parse_args()
 # Config
 # date = datetime.today().strftime('%a-%H:%M-%f')
 results_file = cfg.results_path + "bnn-nsvgd.csv"
-BATCH_SIZE = 128
 DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
+
 LAMBDA_REG = 10**2
-LAYER_SIZE = 128 if on_cluster else 32
+LAYER_SIZE = 256 if on_cluster else 32
+BATCH_SIZE = 256 if on_cluster else 128
+NUM_STEPS = 200
 
 if USE_PMAP:
     vpmap = pmap

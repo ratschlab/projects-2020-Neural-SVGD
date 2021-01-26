@@ -11,7 +11,7 @@ OVERWRITE_FILE = False
 key = random.PRNGKey(0)
 key, subkey = random.split(key)
 EVALUATE_EVERY = 25
-results_file = cfg.results_path + "bnn-sweep.csv"
+results_file = cfg.results_path + "sweep-bnn.csv"
 
 sweep_dict = {
     "meta_lr": onp.logspace(start=-5, stop=-2, num=4),
