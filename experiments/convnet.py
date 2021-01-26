@@ -60,21 +60,21 @@ def make_model(size: str = "large"):
     def model_fn(image):
         """returns logits"""
         if size == "large":
-            conv = hk.Conv2D(32, kernel_shape=(3, 3), w_init=initializer, b_init=initializer)
+            n_channels = 32
             final_pool = lambda x: x
         elif size == "small":
-            conv = hk.Conv2D(2, kernel_shape=(3, 3), w_init=initializer, b_init=initializer)
-            final_pool = hk.AvgPool(window_shape=(10,), strides=(10,), padding="VALID")
+            n_channels = 2
+            final_pool = hk.AvgPool(window_shape=(3,), strides=(3,), padding="VALID")
         else:
             raise ValueError(f"Size must be 'large' or 'small'; received {size} instead.")
 
         image = image.astype(jnp.float32)
         convnet = hk.Sequential([
-            conv,
+            hk.Conv2D(n_channels, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
             jax.nn.relu,
             hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
-            conv,
+            hk.Conv2D(n_channels, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
             jax.nn.relu,
             hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
