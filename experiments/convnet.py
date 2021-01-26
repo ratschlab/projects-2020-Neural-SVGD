@@ -18,16 +18,11 @@ def accuracy(logits, labels):
 
 
 @jit
-def ensemble_accuracy(param_set, images, labels):
-    """use ensemble predictions to compute validation accuracy
+def ensemble_accuracy(logits, labels):
+    """use ensemble predictions to compute validation accuracy.
     args:
-        param_set: pytree w/ same structure as params, but all leaves
-    have an extra 'batch' dimension. Set of parameters across which we
-    compute the average.
-        images: batch of input images, shape (batch, 28, 28, 1)
+        logits: result from vmap(model.apply, (0, None))(param_set, images)
         labels: batch of corresponding labels, shape (batch,)"""
-    vapply = vmap(model.apply, (0, None))
-    logits = vapply(param_set, images)
     preds = jnp.mean(vmap(jax.nn.softmax)(logits), axis=0)  # mean prediction
     return jnp.mean(preds.argmax(axis=1) == labels)
 
@@ -61,23 +56,31 @@ def log_prior(params):
 initializer = hk.initializers.RandomNormal(stddev=1 / 100)
 
 
-def model_fn(image):
-    """returns logits"""
-    image = image.astype(jnp.float32)
-    convnet = hk.Sequential([
-        hk.Conv2D(32, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
-        jax.nn.relu,
-        hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
+def make_model(size: str = "large"):
+    def model_fn(image):
+        """returns logits"""
+        if size == "large":
+            conv = hk.Conv2D(32, kernel_shape=(3, 3), w_init=initializer, b_init=initializer)
+            final_pool = lambda x: x
+        elif size == "small":
+            conv = hk.Conv2D(2, kernel_shape=(3, 3), w_init=initializer, b_init=initializer)
+            final_pool = hk.AvgPool(window_shape=(10,), strides=(10,), padding="VALID")
+        else:
+            raise ValueError(f"Size must be 'large' or 'small'; received {size} instead.")
 
-        hk.Conv2D(32, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
-        jax.nn.relu,
-        hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
+        image = image.astype(jnp.float32)
+        convnet = hk.Sequential([
+            conv,
+            jax.nn.relu,
+            hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
-        hk.Flatten(),
-        # hk.AvgPool(window_shape=(10,), strides=(10,), padding="VALID"),
-        hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),
-    ])
-    return convnet(image)
+            conv,
+            jax.nn.relu,
+            hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
 
-
-model = hk.without_apply_rng(hk.transform(model_fn))
+            hk.Flatten(),
+            final_pool,
+            hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),
+        ])
+        return convnet(image)
+    return hk.without_apply_rng(hk.transform(model_fn))
