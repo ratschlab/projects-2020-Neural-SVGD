@@ -79,7 +79,6 @@ def train(key,
     # final eval
     metrics.append_to_log(particles.rundata,
                           evaluate(-1, particles.particles))
-    svgd_grad.done()
     particles.done()
     return particles.rundata['accuracy'][-1]
 

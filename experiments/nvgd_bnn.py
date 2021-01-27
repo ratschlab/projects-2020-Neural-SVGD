@@ -23,12 +23,12 @@ def train(key,
           particle_stepsize: float = 1e-3,
           evaluate_every: int = 10,
           n_iter: int = 400,
-          n_samples: int = 100,
+          n_samples: int = cfg.n_samples,
           particle_steps_per_iter: int = 1,
           max_train_steps_per_iter: int = 10,
           patience: int = 0,
           dropout: bool = True,
-          results_file: str = cfg.results_path + 'bnn-nsvgd.csv',
+          results_file: str = cfg.results_path + 'nsvgd-bnn.csv',
           overwrite_file: bool = False):
     """
     Initialize model; warmup; training; evaluation.

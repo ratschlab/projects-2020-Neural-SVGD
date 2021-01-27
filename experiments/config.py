@@ -11,4 +11,5 @@ else:
     model_size = 'small'
     data_dir = "/tmp/tfds"
 figure_path = results_path + "figures/"
+n_samples = 100
 # figure_path = "/home/lauro/documents/msc-thesis/paper/latex/figures/"

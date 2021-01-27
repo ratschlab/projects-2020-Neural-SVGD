@@ -32,7 +32,7 @@ def _make_batches(images, labels, batch_size, cyclic=True):
     num_batches = len(images) // batch_size
     split_idx = onp.arange(1, num_batches+1)*batch_size
     batches = zip(*[onp.split(data, split_idx, axis=0) for data in (images, labels)])
-    return cycle(batches) if cyclic else batches
+    return cycle(batches) if cyclic else list(batches)
 
 
 def make_batches(batch_size):

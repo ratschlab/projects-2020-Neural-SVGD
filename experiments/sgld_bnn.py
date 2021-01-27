@@ -1,9 +1,5 @@
 # Train a Bayesian neural network to classify MNIST using
 # (parallel) Langevin dynamics
-#
-# If using pmap, set the environment variable
-# `export XLA_FLAGS="--xla_force_host_platform_device_count=8"`
-# before running on CPU (this enables pmap to "see" multiple cores).
 import os
 import argparse
 from jax import jit, value_and_grad, vmap, random
@@ -21,13 +17,15 @@ on_cluster = not os.getenv("HOME") == "/home/lauro"
 key = random.PRNGKey(0)
 LEARNING_RATE = 1e-7
 DISABLE_PROGRESS_BAR = on_cluster
-NUM_EVALS = 30  # nr accuracy evaluations
 
 
 def train(key,
           particle_stepsize: float = 1e-7,
-          n_samples: int = 100,
-          n_epochs: int = 1):
+          evaluate_every: int = 10,
+          n_iter: int = 400,
+          n_samples: int = cfg.n_samples,
+          results_file: str = cfg.results_path + 'sgld-bnn.csv',
+          overwrite_file: bool = False):
     """Train langevin BNN"""
     opt = utils.sgld(particle_stepsize)
 
@@ -38,9 +36,9 @@ def train(key,
     opt_state = opt.init(param_set)
 
     # save accuracy to file
-    results_file = cfg.results_path + "bnn-langevin.csv"
-    with open(results_file, "w") as file:
-        file.write("step,accuracy\n")
+    if not os.path.isfile(results_file) or overwrite_file:
+        with open(results_file, "w") as file:
+            file.write("step,accuracy\n")
 
     @jit
     def step(param_set, opt_state, images, labels):
@@ -54,13 +52,12 @@ def train(key,
     # training loop
     losses = []
     accuracies = []
-    n_train_steps = n_epochs * mnist.train_data_size // cfg.batch_size
-    for step_counter in tqdm(range(n_train_steps), disable=DISABLE_PROGRESS_BAR):
+    for step_counter in tqdm(range(n_iter), disable=DISABLE_PROGRESS_BAR):
         images, labels = next(mnist.training_batches)
         param_set, opt_state, step_losses = step(param_set, opt_state, images, labels)
         losses.append(step_losses)
 
-        if step_counter % (n_train_steps // NUM_EVALS) == 0:
+        if step_counter % (n_iter // evaluate_every) == 0:
             acc = bnn.compute_acc(param_set)
             accuracies.append(acc)
             print(f"Step {step_counter}, Accuracy:", acc)
