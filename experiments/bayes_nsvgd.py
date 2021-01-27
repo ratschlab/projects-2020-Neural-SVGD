@@ -10,12 +10,13 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 import tensorflow_datasets as tfds
 import optax
-from convnet import model, crossentropy_loss, log_prior, ensemble_accuracy
+from convnet import make_model, crossentropy_loss, log_prior, ensemble_accuracy
 import models
 import metrics
 import config as cfg
 
 on_cluster = not os.getenv("HOME") == "/home/lauro"
+model = make_model("small")
 
 # cli args
 parser = argparse.ArgumentParser()
@@ -109,7 +110,7 @@ def sample_tv(key):
 
 
 @jit
-def minibatch_accuracy(param_set_flat, images, labels):
+def minibatch_accuracy(param_set_flat, images, labels): # TODO update
     return ensemble_accuracy(vmap(unravel)(param_set_flat), images, labels)
 
 
