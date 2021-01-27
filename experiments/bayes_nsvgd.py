@@ -18,22 +18,14 @@ import config as cfg
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 model = make_model("small")
 
-# cli args
-parser = argparse.ArgumentParser()
-parser.add_argument("--num_samples", type=int, default=100, help="Number of parallel chains")
-parser.add_argument("--num_epochs", type=int, default=1)
-args = parser.parse_args()
-
 # Config
 # date = datetime.today().strftime('%a-%H:%M-%f')
-results_file = cfg.results_path + "bnn-nsvgd.csv"
 DISABLE_PROGRESS_BAR = on_cluster
 USE_PMAP = False
 
 LAMBDA_REG = 10**2
 LAYER_SIZE = 256 if on_cluster else 32
-BATCH_SIZE = 256 if on_cluster else 128
-NUM_STEPS = 200
+BATCH_SIZE = 1024 if on_cluster else 128
 
 if USE_PMAP:
     vpmap = pmap
@@ -55,7 +47,7 @@ test_images, test_labels = test_data['image'], test_data['label']
 train_images, val_images, train_labels, val_labels = train_test_split(
     train_images, train_labels, test_size=0.1, random_state=0)
 data_size = len(train_images)
-
+steps_per_epoch = data_size // BATCH_SIZE
 
 
 def make_batches(images, labels, batch_size, cyclic=True):
@@ -75,7 +67,8 @@ def loss(params, images, labels):
     return data_size/BATCH_SIZE * crossentropy_loss(logits, labels) - log_prior(params)
 
 
-validation_batches = make_batches(val_images, val_labels, BATCH_SIZE, cyclic=False)
+# 6 val batches
+validation_batches = make_batches(val_images, val_labels, 1024, cyclic=False)
 
 # utility functions for dealing with parameters
 params_tree = model.init(random.PRNGKey(0), train_images[:2])
@@ -103,22 +96,24 @@ def get_minibatch_logp(batch):
     return minibatch_logp
 
 
-def sample_tv(key):
-    """return two sets of particles at initialization, for
-    training and validation in the warmup phase"""
-    return vmap(init_flat_params)(random.split(key, args.num_samples)).split(2)
+# def sample_tv(key, num_samples):
+#     """return two sets of particles at initialization, for
+#     training and validation in the warmup phase"""
+#     return vmap(init_flat_params)(random.split(key, num_samples)).split(2)
+
+
+def minibatch_accuracy(param_set_flat, images, labels):
+    param_set = vmap(unravel)(param_set_flat)
+    logits = vmap(model.apply, (0, None))(param_set, images)
+    return ensemble_accuracy(logits, labels)
 
 
 @jit
-def minibatch_accuracy(param_set_flat, images, labels): # TODO update
-    return ensemble_accuracy(vmap(unravel)(param_set_flat), images, labels)
-
-
 def compute_acc(param_set_flat):
     accs = []
     for batch in validation_batches:
         accs.append(minibatch_accuracy(param_set_flat, *batch))
-    return onp.mean(accs)
+    return jnp.mean(jnp.array(accs))
 
 
 def vmean(fun):
@@ -131,26 +126,35 @@ def vmean(fun):
 def train(key,
           meta_lr: float = 1e-3,
           particle_stepsize: float = 1e-3,
-          patience: int = 0,
-          max_train_steps: int = 10,
           evaluate_every: int = 10,
+          n_iter: int = 400,
+          n_samples: int = 100,
+          particle_steps_per_iter: int = 1,
+          max_train_steps_per_iter: int = 10,
+          patience: int = 0,
           dropout: bool = True,
-          write_results_to_file: bool = False):
+          results_file: str = cfg.results_path + 'bnn-nsvgd.csv',
+          overwrite_file: bool = False):
     """
     Initialize model; warmup; training; evaluation.
     Returns a dictionary of metrics.
     Args:
         meta_lr: learning rate of Stein network
         particle_stepsize: learning rate of BNN
-        patience: early stopping criterion
-        max_train_steps: cutoff for Stein network training iteration
         evaluate_every: compute metrics every `evaluate_every` steps
+        n_iter: number of train-update iterations
+        particle_steps_per_iter: num particle updates after training Stein network
+        max_train_steps_per_iter: cutoff for Stein network training iteration
+        patience: early stopping criterion
         dropout: use dropout during training of the Stein network
         write_results_to_file: whether to save accuracy in csv file
     """
+    csv_string = f"{meta_lr},{particle_stepsize}," \
+                 f"{patience},{max_train_steps_per_iter},"
+
     # initialize particles and the dynamics model
     key, subkey = random.split(key)
-    init_particles = vmap(init_flat_params)(random.split(subkey, args.num_samples))
+    init_particles = vmap(init_flat_params)(random.split(subkey, n_samples))
     opt = optax.sgd(particle_stepsize)
 
     #opt = optax.chain(
@@ -177,13 +181,13 @@ def train(key,
 
     train_batches = make_batches(train_images, train_labels, BATCH_SIZE)
 
-
     def step(key, train_batch):
         """one iteration of the particle trajectory simulation"""
         neural_grad.train(split_particles=particles.next_batch(key),
-                          n_steps=max_train_steps,
+                          n_steps=max_train_steps_per_iter,
                           data=train_batch)
-        particles.step(neural_grad.get_params())
+        for _ in range(particle_steps_per_iter):
+            particles.step(neural_grad.get_params())
         return
 
     def evaluate(step_counter, ps):
@@ -191,30 +195,40 @@ def train(key,
             "accuracy": compute_acc(ps),
             "step_counter": step_counter,
         }
-        if write_results_to_file:
-            with open(results_file, "a") as file:
-                file.write(f"{step_counter},{stepdata['accuracy']}\n")
+        with open(results_file, "a") as file:
+            file.write(csv_string + f"{step_counter},{stepdata['accuracy']}\n")
         return stepdata
 
-    if write_results_to_file:
+    if not os.path.isfile(results_file) or overwrite_file:
         with open(results_file, "w") as file:
-            file.write("step,accuracy\n")
+            file.write("meta_lr,particle_stepsize,patience,"
+                       "max_train_steps,step,accuracy\n")
 
     print("Training...")
-    num_steps = args.num_epochs * data_size // BATCH_SIZE
-    for step_counter in tqdm(range(num_steps), disable=on_cluster):
+    for step_counter in tqdm(range(n_iter), disable=on_cluster):
         key, subkey = random.split(key)
         train_batch = next(train_batches)
-
         step(subkey, train_batch)
+
         if step_counter % evaluate_every == 0:
             metrics.append_to_log(particles.rundata,
                                   evaluate(step_counter, particles.particles))
+
+        if (step_counter+1) % steps_per_epoch == 0:
+            print(f"Starting epoch {step_counter // steps_per_epoch + 1}")
+
     neural_grad.done()
     particles.done()
     return particles.rundata['step_counter'], particles.rundata['accuracy']
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n_samples", type=int, default=100, help="Number of parallel chains")
+    parser.add_argument("--n_epochs", type=int, default=1)
+    args = parser.parse_args()
+
     rngkey = random.PRNGKey(0)
-    train(rngkey, write_results_to_file=True)
+    train(key=rngkey,
+          n_samples=args.n_samples,
+          n_iter=args.n_epochs * data_size // BATCH_SIZE)
