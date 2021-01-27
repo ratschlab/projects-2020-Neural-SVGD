@@ -5,7 +5,7 @@ from bayes_nsvgd import train
 from jax import random
 
 OVERWRITE_FILE = False
-NUM_STEPS = 201
+NUM_STEPS = 200
 EVALUATE_EVERY = 100
 
 key = random.PRNGKey(0)
@@ -13,8 +13,8 @@ key, subkey = random.split(key)
 results_file = cfg.results_path + "sweep-bnn.csv"
 
 sweep_dict = {
-    "meta_lr": onp.logspace(start=-3, stop=-2, num=4),
-    "particle_stepsize": onp.logspace(start=-4, stop=-1, num=4),
+    "meta_lr": onp.logspace(start=-4, stop=-2, num=3),
+    "particle_stepsize": onp.logspace(start=-4, stop=0, num=6),
     "patience": [0, 5],
     "max_train_steps_per_iter": [10, 50],
     "particle_steps_per_iter": [1],

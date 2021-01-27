@@ -210,11 +210,11 @@ def train(key,
         train_batch = next(train_batches)
         step(subkey, train_batch)
 
-        if step_counter % evaluate_every == 0:
+        if (step_counter+1) % evaluate_every == 0:
             metrics.append_to_log(particles.rundata,
                                   evaluate(step_counter, particles.particles))
 
-        if (step_counter+1) % steps_per_epoch == 0:
+        if step_counter % steps_per_epoch == 0:
             print(f"Starting epoch {step_counter // steps_per_epoch + 1}")
 
     neural_grad.done()
