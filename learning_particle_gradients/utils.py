@@ -45,6 +45,7 @@ def smooth_and_normalize(vec, normalize=True):
     perturbation = (vec == 0)*epsilon - (vec != 0)*c
     return vec + perturbation
 
+
 def get_bins_and_bincounts(samples, normalized=False):
     """take in samples, create a common set of bins, and compute the counts count(x in bin)
     for each bin and each sample x.
@@ -74,6 +75,7 @@ def get_bins_and_bincounts(samples, normalized=False):
     else:
         raise ValueError(f"Input must have shape (n,) or shape (k,n). Instead received shape {samples.shape}")
 
+
 def get_histogram_likelihoods(samples):
     """
     Parameters:
@@ -95,6 +97,7 @@ def get_histogram_likelihoods(samples):
     sample_likelihoods = np.repeat(likelihoods, bincounts) # TODO this doesn't play well with jit, cause shape of output depends on values in bincounts
     return sample_likelihoods
 
+
 # wrapper that prints when the function compiles
 def verbose_jit(fun, *jargs, **jkwargs):
     """Does same thing as jax.jit, only that it also inserts a print statement."""
@@ -108,8 +111,10 @@ def verbose_jit(fun, *jargs, **jkwargs):
         return out
     return jit(verbose_fun, *jargs, **jkwargs)
 
+
 #from haiku._src.data_structures import frozendict
 import collections
+
 
 def isfinite(thing):
     if type(thing) is jax.interpreters.xla.DeviceArray:
@@ -126,11 +131,13 @@ def isfinite(thing):
         warnings.warn(f"Didn't recognize type {type(thing)}. Not checking for NaNs.", RuntimeWarning)
         return None
 
+
 def warn_if_nonfinite(*args):
     for arg in args:
         if not isfinite(arg):
             warnings.warn(f"Detected NaNs or infs.", RuntimeWarning)
     return None
+
 
 def is_pd(x):
     """check if matrix is positive defininite"""
@@ -143,17 +150,20 @@ def is_pd(x):
         else:
             raise
 
+
 ## fori_loop implementation in terms of lax.scan taken from here https://github.com/google/jax/issues/1112
 def fori_loop(lower, upper, body_fun, init_val):
     f = lambda x, i: (body_fun(i, x), ())
     result, _ = lax.scan(f, init_val, np.arange(lower, upper))
     return result
 
+
 # this one from here https://github.com/google/jax/issues/650
 # def fori_loop(_, num_iters, fun, init): # added the dummy _
 #     dummy_inputs = np.zeros((num_iters, 0))
 #     out, _ = lax.scan(lambda x, dummy: (fun(x), dummy), init, dummy_inputs)
 #     return out
+
 
 # this is the python equivalent given in the documentation https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.fori_loop.html
 def python_fori_loop(lower, upper, body_fun, init_val):
@@ -232,6 +242,7 @@ def cartesian_product(*arrays):
         arr = index_update(arr, index[..., i], a)
     return arr.reshape(-1, la)
 
+
 def dict_concatenate(dict_list):
     """
     Arguments:
@@ -298,7 +309,8 @@ def dict_asarray(dct: dict):
                 pass # be nice if value is neither np-ifiable nor a dictionary.
     return dct
 
-def flatten_dict(d):
+
+def flatten_dict(d): # TODO use jax.flatten_util.ravel_pytree instead
     """This assumes no name collisions"""
     def visit(subdict):
         flat = []
@@ -323,6 +335,7 @@ def dict_cartesian_product(**kwargs):
     vals = kwargs.values()
     for instance in itertools.product(*vals):
         yield dict(zip(keys, instance))
+
 
 def nested_dict_contains_key(ndict: collections.Mapping, key):
     if key in ndict:
@@ -360,9 +373,16 @@ def dict_dejaxify(dictionary, target="list"): # alternatively, just remove the .
             out[k] = dejaxify(v, target=target)
     return out
 
+
+def leaf_shapes(pytree):
+    """print shapes of pytree leaves"""
+    return jax.tree_map(lambda v: v.shape, pytree)
+
+
 def generate_pd_matrix(dim):
     A = onp.random.rand(dim, dim) * 2
     return onp.matmul(A, A.T)
+
 
 def generate_parameters_for_gaussian(dim, k=None):
     if k is not None:
@@ -375,6 +395,7 @@ def generate_parameters_for_gaussian(dim, k=None):
         mean = onp.random.randint(0, 10, size=(dim,)) # random mean in [0, 10]
         cov = generate_pd_matrix(dim)
         return mean.tolist(), cov.tolist()
+
 
 def subsample(key, array, n_subsamples, replace=True, axis=0):
     """
@@ -389,6 +410,7 @@ def subsample(key, array, n_subsamples, replace=True, axis=0):
     subsample_idx = random.choice(key, array.shape[axis], shape=(n_subsamples,), replace=replace)
     subsample = array.take(indices=subsample_idx, axis=axis)
     return subsample
+
 
 def compute_update_to_weight_ratio(params_pre, params_post):
     """
@@ -412,6 +434,7 @@ def compute_update_to_weight_ratio(params_pre, params_post):
         elif isinstance(v, collections.Mapping):
             ratios[k] = compute_update_to_weight_ratio(v, params_post[k])
     return ratios
+
 
 def mixture(components: list, weights: list):
     """
@@ -653,7 +676,6 @@ def scaled_sgld(key: np.ndarray, schedule_fn: callable = optax.constant_schedule
     """
     Scale SGLD the correct way, using a custom schedule for the stepsize.
 
-    Returns
         an (init_fn, update_fn) Tuple"""
     scaler = optax.scale_by_schedule(schedule_fn)
 
