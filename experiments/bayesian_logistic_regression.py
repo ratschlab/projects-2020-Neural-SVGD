@@ -202,8 +202,13 @@ def run_svgd(key, lr, full_data=False, progress_bar=False):
     init_particles = ravel(*sample_from_prior(subkey, n_particles))
     svgd_opt = optax.sgd(lr)
 
-    svgd_grad = models.KernelGradient(get_target_logp=lambda batch: get_minibatch_logp(*batch), scaled=True)
-    particles = models.Particles(key, svgd_grad.gradient, init_particles, custom_optimizer=svgd_opt)
+    svgd_grad = models.KernelGradient(
+        get_target_logp=lambda batch: get_minibatch_logp(*batch),
+        scaled=True)
+    particles = models.Particles(key,
+                                 svgd_grad.gradient,
+                                 init_particles, 
+                                 custom_optimizer=svgd_opt)
 
     test_batches = get_batches(x_test, y_test, 2*NUM_VALS) if full_data else get_batches(x_val, y_val, 2*NUM_VALS)
     train_batches = get_batches(xx, yy, NUM_STEPS+1) if full_data else get_batches(x_train, y_train, NUM_STEPS+1)
