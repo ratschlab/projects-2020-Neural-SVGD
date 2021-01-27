@@ -13,20 +13,24 @@ on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # Config
 # date = datetime.today().strftime('%a-%H:%M-%f')
+DEFAULT_MAX_TRAIN_STEPS = 100
+DEFAULT_META_LR = 1e-3  # should be as high as possible; regularize w/ max steps
+DEFAULT_PATIENCE = 5  # early stopping not v helpful, bc we overfit on all ps
+
 DISABLE_PROGRESS_BAR = on_cluster
-LAMBDA_REG = 10**2
+LAMBDA_REG = 100
 LAYER_SIZE = 256 if on_cluster else 32
 
 
 def train(key,
-          meta_lr: float = 1e-3,
+          meta_lr: float = DEFAULT_META_LR,
           particle_stepsize: float = 1e-3,
           evaluate_every: int = 10,
           n_iter: int = 400,
           n_samples: int = cfg.n_samples,
           particle_steps_per_iter: int = 1,
-          max_train_steps_per_iter: int = 10,
-          patience: int = 0,
+          max_train_steps_per_iter: int = DEFAULT_MAX_TRAIN_STEPS,
+          patience: int = DEFAULT_PATIENCE,
           dropout: bool = True,
           results_file: str = cfg.results_path + 'nsvgd-bnn.csv',
           overwrite_file: bool = False):
