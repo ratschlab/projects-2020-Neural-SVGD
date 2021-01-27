@@ -439,7 +439,8 @@ class TrainingMixin:
         """
         self.patience.reset()
         logp = self.get_target_logp(data)
-        train_dlogp, val_dlogp = [vmap(grad(logp))(xs) for xs in split_particles]
+        v_dlogp = jit(vmap(grad(logp)))
+        train_dlogp, val_dlogp = [v_dlogp(xs) for xs in split_particles]
 
         def step():
             self.step(*split_particles, train_dlogp, val_dlogp)

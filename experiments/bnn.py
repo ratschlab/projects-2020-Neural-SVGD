@@ -140,6 +140,7 @@ def get_minibatch_logp(batch):
     args:
         batch: tuple (images, labels)
     """
+    @jit
     def minibatch_logp(params_flat):
         return -loss(unravel(params_flat), *batch)
     return minibatch_logp
