@@ -71,10 +71,10 @@ def train(key,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_samples", type=int, default=100, help="Number of parallel chains")
-    parser.add_argument("--n_epochs", type=int, default=1)
+    parser.add_argument("--n_iter", type=int, default=200)
     args = parser.parse_args()
 
     rngkey = random.PRNGKey(0)
     train(key=rngkey,
           n_samples=args.n_samples,
-          n_epochs=args.n_epochs)
+          n_iter=args.n_iter)
