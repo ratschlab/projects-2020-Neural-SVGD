@@ -23,6 +23,7 @@ def neural_svgd_flow(key,
                      patience=default_patience,
                      compute_metrics=None,
                      n_learner_steps=50,
+                     catch_exceptions: bool = True,
                      **learner_kwargs):
     """
     args:
@@ -56,16 +57,19 @@ def neural_svgd_flow(key,
                    next_data=lambda: None,
                    n_iter=NUM_WARMUP_STEPS // 30 + 1,
                    n_inner_steps=30)
-                   
+
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            batch = particles.next_batch(subkey, n_train_particles=2*n_particles//3)  # TODO set to 99??
+            batch = particles.next_batch(subkey, n_train_particles=2*n_particles//3)
             learner.train(split_particles=batch, n_steps=n_learner_steps)
             particles.step(learner.get_params())
         except Exception as err:
-            warnings.warn("Caught Exception")
-            return learner, particles, err
+            if catch_exceptions:
+                warnings.warn("Caught Exception")
+                return learner, particles, err
+            else:
+                raise err
     particles.done()
     return learner, particles, None
 
@@ -80,7 +84,9 @@ def svgd_flow(key,
               particle_optimizer="sgd",
               scaled=True,
               bandwidth=1.,
-              compute_metrics=None):
+              compute_metrics=None,
+              catch_exceptions: bool = True,
+              ):
     key, keyb, keyc = random.split(key, 3)
     target, proposal = setup.get()
 
@@ -103,8 +109,11 @@ def svgd_flow(key,
         try:
             svgd_particles.step(None)
         except Exception as err:
-            warnings.warn("caught error!")
-            return kernel_gradient, svgd_particles, err
+            if catch_exceptions:
+                warnings.warn("caught error!")
+                return kernel_gradient, svgd_particles, err
+            else:
+                raise err
     svgd_particles.done()
     return kernel_gradient, svgd_particles, None
 
@@ -117,7 +126,8 @@ def sgld_flow(key,
               lambda_reg=1/2,
               noise_level=None,
               particle_optimizer="sgld",
-              compute_metrics=None):
+              compute_metrics=None,
+              catch_exceptions: bool = True):
     keya, keyb, keyc = random.split(key, 3)
     target, proposal = setup.get()
     energy_gradient = models.EnergyGradient(target.logpdf, keya, lambda_reg=lambda_reg)
@@ -135,7 +145,10 @@ def sgld_flow(key,
         try:
             particles.step(None)
         except Exception as err:
-            warnings.warn("Caught and returned exception")
-            return energy_gradient, particles, err
+            if catch_exceptions:
+                warnings.warn("Caught and returned exception")
+                return energy_gradient, particles, err
+            else:
+                raise err
     particles.done()
     return energy_gradient, particles, None

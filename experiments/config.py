@@ -1,8 +1,9 @@
 import os
-if os.environ['CLUSTERNAME']:
+try:
     location = os.environ['CLUSTERNAME']
-elif os.getenv("HOME") == "/home/lauro":
-    location = "local"
+except KeyError:
+    if os.getenv("HOME") == "/home/lauro":
+        location = "local"
 else:
     raise
 

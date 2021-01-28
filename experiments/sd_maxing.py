@@ -45,7 +45,7 @@ def get_sd(samples, fun):
 
 def kl_gradient(x):
     """Optimal witness function."""
-    return grad(lambda x: target.logpdf(x) - proposal.logpdf(x))(x) / 2
+    return grad(lambda x: target.logpdf(x) - proposal.logpdf(x))(x)
 
 
 print("Computing theoretically optimal Stein discrepancy...")
