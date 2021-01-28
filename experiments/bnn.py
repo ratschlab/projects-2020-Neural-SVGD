@@ -14,7 +14,7 @@ initializer = hk.initializers.RandomNormal(stddev=1 / 100)
 def make_model(size: str = "large"):
     def model_fn(image):
         """returns logits"""
-        n_channels = 4 if size == "small" else 32
+        n_channels = 4 if size == "small" else 16
         image = image.astype(jnp.float32)
         convnet = hk.Sequential([
             hk.Conv2D(n_channels, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
@@ -72,12 +72,12 @@ def ensemble_accuracy(logits, labels):
     return jnp.mean(preds.argmax(axis=1) == labels)
 
 
+@jit
 def minibatch_accuracy(param_set, images, labels):
     logits = vmap(model.apply, (0, None))(param_set, images)
     return ensemble_accuracy(logits, labels)
 
 
-@jit
 def compute_acc(param_set):
     accs = []
     for batch in mnist.validation_batches:
@@ -85,7 +85,6 @@ def compute_acc(param_set):
     return jnp.mean(jnp.array(accs))
 
 
-@jit
 def compute_acc_from_flat(param_set_flat):
     param_set = vmap(unravel)(param_set_flat)
     return compute_acc(param_set)

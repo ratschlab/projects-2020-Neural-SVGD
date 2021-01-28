@@ -6,7 +6,7 @@ import svgd_bnn
 import sgld_bnn
 from jax import random
 
-DEBUG = True  # TODO testing
+DEBUG = False
 if DEBUG:
     NUM_STEPS = 2
     n_lrs = 1

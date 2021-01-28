@@ -32,7 +32,7 @@ def train(key,
           max_train_steps_per_iter: int = DEFAULT_MAX_TRAIN_STEPS,
           patience: int = DEFAULT_PATIENCE,
           dropout: bool = True,
-          results_file: str = cfg.results_path + 'nsvgd-bnn.csv',
+          results_file: str = cfg.results_path + 'nvgd-bnn.csv',
           overwrite_file: bool = False):
     """
     Initialize model; warmup; training; evaluation.
@@ -55,6 +55,7 @@ def train(key,
     key, subkey = random.split(key)
     init_particles = vmap(bnn.init_flat_params)(random.split(subkey, n_samples))
     opt = optax.sgd(particle_stepsize)
+    print(f"particle shape: {init_particles.shape}")
 
     # opt = optax.chain(
     #    optax.scale_by_adam(),
