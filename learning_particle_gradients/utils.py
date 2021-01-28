@@ -659,8 +659,9 @@ import optax
 def polynomial_schedule(step):
     return 1. / (step + 1)**0.55
 
-#def polynomial_schedule(step):
-#    return 1. / (step + 1)**0.35 # .25
+# def polynomial_schedule(step):
+#     return 1. / (step + 1)**0.35 # .25
+
 
 def sgld(learning_rate: float = 1e-2, random_seed: int = 0):
     return optax.chain(
@@ -668,9 +669,11 @@ def sgld(learning_rate: float = 1e-2, random_seed: int = 0):
         optax.add_noise(np.sqrt(2*np.abs(learning_rate)), 0, random_seed),
     )
 
+
 class ScaledSGLDState(NamedTuple):
     count: int
     key: np.ndarray
+
 
 def scaled_sgld(key: np.ndarray, schedule_fn: callable = optax.constant_schedule(1.)):
     """
@@ -700,7 +703,6 @@ def scaled_sgld(key: np.ndarray, schedule_fn: callable = optax.constant_schedule
     return optax.GradientTransformation(init_fn, update_fn)
 
 
-
 optimizer_mapping = {
     "sgd": optax.sgd,
     "adam": optax.adam,
@@ -719,3 +721,10 @@ def suppress_stdout():
             yield
         finally:
             sys.stdout = old_stdout
+
+
+def vmean(fun):
+    """vmap, but computes mean along mapped axis"""
+    def compute_mean(*args, **kwargs):
+        return np.mean(vmap(fun)(*args, **kwargs), axis=-1)
+    return compute_mean

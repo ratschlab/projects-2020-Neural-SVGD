@@ -14,7 +14,7 @@ initializer = hk.initializers.RandomNormal(stddev=1 / 100)
 def make_model(size: str = "large"):
     def model_fn(image):
         """returns logits"""
-        n_channels = 4 if size == "small" else 32
+        n_channels = 4 if size == "small" else 16
         image = image.astype(jnp.float32)
         convnet = hk.Sequential([
             hk.Conv2D(n_channels, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
@@ -137,8 +137,3 @@ def get_minibatch_logp(batch):
     return minibatch_logp
 
 
-def vmean(fun):
-    """vmap, but computes mean along mapped axis"""
-    def compute_mean(*args, **kwargs):
-        return jnp.mean(vmap(fun)(*args, **kwargs), axis=-1)
-    return compute_mean
