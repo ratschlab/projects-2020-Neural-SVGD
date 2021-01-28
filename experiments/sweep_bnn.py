@@ -20,11 +20,24 @@ EVALUATE_EVERY = -1  # never
 key = random.PRNGKey(0)
 key, subkey = random.split(key)
 results_file = "/dev/null"
-sweep_results_file = cfg.results_path + "sweep.csv"
-stepsizes = onp.logspace(start=-7, stop=-1, num=n_lrs)
+sweep_results_file = cfg.results_path + "sweep.csv"  # best LR / acc goes here
+temp_results_file = cfg.results_path + "temp_sweep.csv"  # results from entire sweep go here
 
-with open(sweep_results_file, "w") as f:
-    f.write("name,optimal_stepsize,max_val_accuracy\n")
+vgd_stepsizes = onp.logspace(start=-7, stop=-1, num=n_lrs)
+sgld_stepsizes = onp.logspace(start=-9, stop=-5, num=n_lrs)
+
+if not os.path.isfile(sweep_results_file) or OVERWRITE_FILE:
+    with open(sweep_results_file, "w") as f:
+        f.write("name,optimal_stepsize,max_val_accuracy\n")
+
+
+with open(temp_results_file, "w") as f:
+    f.write("name,stepsize,val_accuracy\n")
+
+
+def save_single_run(name, accuracy, step_size):
+    with open(temp_results_file, "a") as f:
+        f.write(f"{name},{step_size},{accuracy}\n")
 
 
 def get_best_run(name, accuracy_list):
@@ -41,10 +54,9 @@ def get_best_run(name, accuracy_list):
     print(f"Max accuracy {max_accuracy} achieved using step size {max_stepsize}.")
     print()
 
-    if not os.path.isfile(results_file) or OVERWRITE_FILE:
-        with open(sweep_results_file, "a") as f:
-            f.write(f"{name},{max_stepsize},{max_accuracy}\n")
-    
+    with open(sweep_results_file, "a") as f:
+        f.write(f"{name},{max_stepsize},{max_accuracy}\n")
+
     return max_accuracy, max_stepsize
 
 
@@ -59,6 +71,7 @@ for particle_stepsize in stepsizes:
                                overwrite_file=OVERWRITE_FILE,
                                dropout=True,
                                results_file=results_file)
+    save_single_run("nvgd", final_acc, particle_stepsize)
     final_accs.append((final_acc, particle_stepsize))
 
 max_accuracy, nvgd_max_stepsize = get_best_run("nvgd", final_accs)
@@ -72,6 +85,7 @@ for particle_stepsize in stepsizes:
                                evaluate_every=EVALUATE_EVERY,
                                results_file=results_file)
     final_accs.append((final_acc, particle_stepsize))
+    save_single_run("sgld", final_acc, particle_stepsize)
 
 max_accuracy, sgld_max_stepsize = get_best_run("sgld", final_accs)
 
@@ -84,5 +98,6 @@ for particle_stepsize in stepsizes:
                                evaluate_every=EVALUATE_EVERY,
                                results_file=results_file)
     final_accs.append((final_acc, particle_stepsize))
+    save_single_run("svgd", final_acc, particle_stepsize)
 
 max_accuracy, svgd_max_stepsize = get_best_run("svgd", final_accs)
