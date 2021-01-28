@@ -654,7 +654,10 @@ class KernelGradient():
 
     def gradient(self, batch, particles, aux=False):
         """Compute approximate KL gradient.
-        particles is an np.ndarray of shape (n, d)"""
+        args:
+            batch: minibatch data used to estimate logp (can be None)
+            particles: array of shape (n, d)
+        """
         target_logp = self.get_target_logp(batch)
         v, h = self.get_field_scaled(particles, batch) if self.scaled \
             else self.get_field(particles, batch)

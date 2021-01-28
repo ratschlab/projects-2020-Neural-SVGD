@@ -37,7 +37,7 @@ def _make_batches(images, labels, batch_size, cyclic=True):
 
 def make_batches(batch_size):
     validation_batches = _make_batches(
-        val_images, val_labels, 1024, cyclic=False)
+        val_images, val_labels, cfg.batch_size, cyclic=False)
     training_batches = _make_batches(train_images, train_labels, batch_size)
     test_batches = _make_batches(train_images, train_labels, batch_size)
     return (training_batches, validation_batches, test_batches)

@@ -72,12 +72,12 @@ def ensemble_accuracy(logits, labels):
     return jnp.mean(preds.argmax(axis=1) == labels)
 
 
+@jit
 def minibatch_accuracy(param_set, images, labels):
     logits = vmap(model.apply, (0, None))(param_set, images)
     return ensemble_accuracy(logits, labels)
 
 
-@jit
 def compute_acc(param_set):
     accs = []
     for batch in mnist.validation_batches:
@@ -85,7 +85,6 @@ def compute_acc(param_set):
     return jnp.mean(jnp.array(accs))
 
 
-@jit
 def compute_acc_from_flat(param_set_flat):
     param_set = vmap(unravel)(param_set_flat)
     return compute_acc(param_set)
