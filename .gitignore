@@ -5,3 +5,4 @@ notebooks/illustrations/*.mp4
 .vscode
 experiments/results/figures/
 **data
+**pgf

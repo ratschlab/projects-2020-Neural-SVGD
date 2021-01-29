@@ -340,6 +340,10 @@ sgld_acc_sweep, sgld_lr = run_sweep(lrs, run_sgld)
 print("Sweeping SVGD step sizes...")
 svgd_acc_sweep, svgd_lr = run_sweep(lrs, run_svgd)
 
+print(nsvgd_lr)
+print(sgld_lr)
+print(svgd_lr)
+
 # run 10 times on full data with validated learning rate
 print("Now run again on full data with validated learning rate.")
 print("Take average of 10 runs...")
@@ -360,7 +364,7 @@ def get_run_avg(key, lr, sampler):
     for _ in tqdm(range(10)):
         key, subkey = random.split(key)
         accs.append(get_run(subkey, lr, sampler))
-    accs = np.array(accs)
+    accs = onp.array(accs)
     return accs.mean(axis=0)
 
 
@@ -369,9 +373,9 @@ svgd_final = get_run_avg(subkey, svgd_lr, run_svgd)
 ngf_final  = get_run_avg(subkey, nsvgd_lr, run_neural_svgd)
 
 results = {
-    "SGLD": sgld_final,
-    "SVGD": svgd_final,
-    "NGF": ngf_final,
+    "SGLD": sgld_final.tolist(),
+    "SVGD": svgd_final.tolist(),
+    "NGF": ngf_final.tolist(),
 }
 
 
