@@ -1,6 +1,6 @@
 import os
 import argparse
-from jax import vmap, random
+from jax import vmap, random, jit
 from tqdm import tqdm
 import optax
 import bnn

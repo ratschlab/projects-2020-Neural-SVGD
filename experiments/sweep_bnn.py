@@ -1,4 +1,5 @@
 import os
+import argparse
 import config as cfg
 import numpy as onp
 import nvgd_bnn
@@ -6,8 +7,17 @@ import svgd_bnn
 import sgld_bnn
 from jax import random
 
-DEBUG = False
+parser = argparse.ArgumentParser()
+parser.add_argument("--run", type=str, default='all',
+                    help="Which method to sweep. Can be 'nvgd', 'sgld',"
+                         "'svgd', or 'all'.")
+parser.add_argument("--debug", action='store_true')
+args = parser.parse_args()
+
+
+DEBUG = args.debug
 if DEBUG:
+    print("Running in debug mode")
     NUM_STEPS = 2
     n_lrs = 1
 else:
@@ -19,9 +29,10 @@ EVALUATE_EVERY = -1  # never
 
 key = random.PRNGKey(0)
 key, subkey = random.split(key)
-results_file = "/dev/null"
-sweep_results_file = cfg.results_path + "sweep.csv"  # best LR / acc goes here
-temp_results_file = cfg.results_path + "temp_sweep.csv"  # results from entire sweep go here
+results_path = cfg.results_path + "bnn-sweep/"
+sweep_results_file = results_path + "best-stepsizes.csv"  # best LR / acc goes here
+temp_results_file = results_path + "all-runs.csv"  # results from entire sweep go here
+dumpfile = "/dev/null"
 final_accs = []
 
 vgd_stepsizes = onp.logspace(start=-7, stop=-3, num=n_lrs)
@@ -41,7 +52,7 @@ def save_single_run(name, accuracy, step_size):
         f.write(f"{name},{step_size},{accuracy}\n")
 
 
-def get_best_run(name, accuracy_list):
+def save_best_run(name, accuracy_list):
     """
     return best step size and highest accuracy
     args:
@@ -61,43 +72,60 @@ def get_best_run(name, accuracy_list):
     return max_accuracy, max_stepsize
 
 
-print("Sweeping NVGD...")
-key, subkey = random.split(key)
-for particle_stepsize in vgd_stepsizes:
-    final_acc = nvgd_bnn.train(key=subkey,
-                               particle_stepsize=particle_stepsize,
-                               n_iter=NUM_STEPS,
-                               evaluate_every=EVALUATE_EVERY,
-                               overwrite_file=OVERWRITE_FILE,
-                               dropout=True,
-                               results_file=results_file)
-    save_single_run("nvgd", final_acc, particle_stepsize)
-    final_accs.append((final_acc, particle_stepsize))
+def sweep_nvgd():
+    print("Sweeping NVGD...")
+    for particle_stepsize in vgd_stepsizes:
+        final_acc = nvgd_bnn.train(key=subkey,
+                                   particle_stepsize=particle_stepsize,
+                                   n_iter=NUM_STEPS,
+                                   evaluate_every=EVALUATE_EVERY,
+                                   overwrite_file=OVERWRITE_FILE,
+                                   dropout=True,
+                                   results_file=dumpfile)
+        save_single_run("nvgd", final_acc, particle_stepsize)
+        final_accs.append((final_acc, particle_stepsize))
 
-max_accuracy, nvgd_max_stepsize = get_best_run("nvgd", final_accs)
-
-
-print("Sweeping Langevin...")
-for particle_stepsize in sgld_stepsizes:
-    final_acc = sgld_bnn.train(key=subkey,
-                               particle_stepsize=particle_stepsize,
-                               n_iter=NUM_STEPS,
-                               evaluate_every=EVALUATE_EVERY,
-                               results_file=results_file)
-    final_accs.append((final_acc, particle_stepsize))
-    save_single_run("sgld", final_acc, particle_stepsize)
-
-max_accuracy, sgld_max_stepsize = get_best_run("sgld", final_accs)
+    max_accuracy, nvgd_max_stepsize = save_best_run("nvgd", final_accs)
 
 
-print("Sweeping SVGD...")
-for particle_stepsize in vgd_stepsizes:
-    final_acc = svgd_bnn.train(key=subkey,
-                               particle_stepsize=particle_stepsize,
-                               n_iter=NUM_STEPS,
-                               evaluate_every=EVALUATE_EVERY,
-                               results_file=results_file)
-    final_accs.append((final_acc, particle_stepsize))
-    save_single_run("svgd", final_acc, particle_stepsize)
+def sweep_sgld():
+    print("Sweeping Langevin...")
+    for particle_stepsize in sgld_stepsizes:
+        final_acc = sgld_bnn.train(key=subkey,
+                                   particle_stepsize=particle_stepsize,
+                                   n_iter=NUM_STEPS,
+                                   evaluate_every=EVALUATE_EVERY,
+                                   results_file=dumpfile)
+        final_accs.append((final_acc, particle_stepsize))
+        save_single_run("sgld", final_acc, particle_stepsize)
 
-max_accuracy, svgd_max_stepsize = get_best_run("svgd", final_accs)
+    max_accuracy, sgld_max_stepsize = save_best_run("sgld", final_accs)
+
+
+def sweep_svgd():
+    print("Sweeping SVGD...")
+    for particle_stepsize in vgd_stepsizes:
+        final_acc = svgd_bnn.train(key=subkey,
+                                   particle_stepsize=particle_stepsize,
+                                   n_iter=NUM_STEPS,
+                                   evaluate_every=EVALUATE_EVERY,
+                                   results_file=dumpfile)
+        final_accs.append((final_acc, particle_stepsize))
+        save_single_run("svgd", final_acc, particle_stepsize)
+
+    max_accuracy, svgd_max_stepsize = save_best_run("svgd", final_accs)
+
+
+if args.run == "nvgd":
+    sweep_nvgd()
+elif args.run == "sgld":
+    sweep_sgld()
+elif args.run == "svgd":
+    sweep_svgd()
+elif args.run == "all":
+    sweep_sgld()
+    sweep_svgd()
+    sweep_nvgd()
+else:
+    raise ValueError("cli argument 'run' must be one of 'nvgd', 'sgld',"
+                     "'svgd', or 'all'.")
