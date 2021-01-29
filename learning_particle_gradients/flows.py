@@ -1,4 +1,4 @@
-from jax import random, jit, vmap
+from jax import random, jit, vmap, grad
 import warnings
 from tqdm import tqdm
 import metrics
@@ -9,7 +9,6 @@ default_num_particles = 50
 default_num_steps = 100
 # default_particle_lr = 1e-1
 # default_learner_lr = 1e-2
-default_patience = 10
 disable_tqdm = False
 NUM_WARMUP_STEPS = 500
 
@@ -19,7 +18,6 @@ def neural_svgd_flow(key,
                      n_particles=default_num_particles,
                      n_steps=default_num_steps,
                      particle_lr=1e-2,
-                     patience=default_patience,
                      compute_metrics=None,
                      n_learner_steps=50,
                      catch_exceptions: bool = True,
@@ -32,7 +30,6 @@ def neural_svgd_flow(key,
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
                                target_dim=target.d,
-                               patience=patience,
                                **learner_kwargs)
 
     if compute_metrics is None:
@@ -45,11 +42,14 @@ def neural_svgd_flow(key,
                                  optimizer="sgd",
                                  compute_metrics=compute_metrics)
 
-    vdlogp = jit(vmap(target.logpdf))
+    vdlogp = jit(vmap(grad(target.logpdf)))
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            split_particles = particles.next_batch(subkey, n_train_particles=2*n_particles//3)
+            split_particles = particles.next_batch(
+                subkey,
+                n_train_particles=2*n_particles//3
+            )
             split_dlogp = [vdlogp(x) for x in split_particles]
             learner.train(split_particles=split_particles,
                           split_dlogp=split_dlogp,
