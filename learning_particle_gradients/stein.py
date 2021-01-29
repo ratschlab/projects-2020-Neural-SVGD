@@ -160,6 +160,25 @@ def stein_discrepancy_hutchinson_fixed_log(key, xs, dlogp, f):
     return vmap(h)(xs, dlogp, zs).mean()
 
 
+def phistar_i_from_dlogp(xi, dlogp_xi, x, kernel):
+    """
+    """
+    def kx(y):
+        return kernel(y, xi)
+
+    def h(y):
+        return np.inner(dlogp_xi, kx(y)) + grad(kx)(y)
+
+    return vmap(h)(x).mean(axis=0)
+
+
+def phistar_from_dlogp(x, dlogp, kernel):
+    return vmap(phistar_i_from_dlogp, (0, 0, None, None))(
+        x, dlogp, x, kernel)
+
+
+
+
 def phistar_i(xi, x, logp, kernel, aux=True):
     """
     Arguments:
@@ -364,10 +383,6 @@ def ksd_squared_l(samples, logp, k, return_stddev=False):
 
 
     
-
-
-
-
 def h(x, y, kernel, logp):
     k = kernel
 

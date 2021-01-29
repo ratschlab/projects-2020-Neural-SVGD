@@ -221,7 +221,6 @@ class VectorFieldMixin:
     """Methods for init of vector field MLP"""
     def __init__(self,
                  target_dim: int,
-                 target_logp: callable = None,
                  key=random.PRNGKey(42),
                  sizes: list = None,
                  aux=False,
@@ -295,7 +294,6 @@ class VectorFieldMixin:
 class EBMMixin():
     def __init__(self,
                  target_dim: int,
-                 target_logp: callable = None,
                  key=random.PRNGKey(42),
                  sizes: list = None,
                  **kwargs):
@@ -338,8 +336,9 @@ class EBMMixin():
 
 class TrainingMixin:
     """
-    Methods for training NNs.
-    Needs existence of a self.params at initialization.
+    Encapsulates methods for training the Stein network (which approximates
+    the particle update). Agnostic re: architecture. Needs existence of 
+    a self.params at initialization.
     Methods to implement:
     * self.loss_fn
     * self._log
@@ -424,26 +423,25 @@ class TrainingMixin:
 
     def train(self,
               split_particles,
+              split_dlogp,
               n_steps=5,
-              data=None,
               early_stopping=True,
               progress_bar=False):
         """
         batch and next_batch cannot both be None.
 
         Arguments:
-            split_particles: arrays (training, validation) of particles, shaped (n, d) resp (m, d)
+            split_particles: arrays (training, validation) of particles,
+                shaped (n, d) resp (m, d)
+            split_dlogp: arrays (training, validation) of loglikelihood
+                gradients. Same shape as split_particles.
             key: random.PRGNKey
             n_steps: int, nr of steps to train
-            data: pytree (optional). Used to compute logp.
         """
         self.patience.reset()
-        logp = self.get_target_logp(data)
-        v_dlogp = jit(vmap(grad(logp)))
-        train_dlogp, val_dlogp = [v_dlogp(xs) for xs in split_particles]
 
         def step():
-            self.step(*split_particles, train_dlogp, val_dlogp)
+            self.step(*split_particles, *split_dlogp)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
             return
@@ -497,8 +495,6 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
     """Parametrize vector field to maximize the stein discrepancy"""
     def __init__(self,
                  target_dim: int,
-                 target_logp: callable = None,
-                 get_target_logp: callable = None,
                  key: np.array = random.PRNGKey(42),
                  sizes: list = None,
                  learning_rate: float = 5e-3,
@@ -516,18 +512,10 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         compute the stein discrepancy.
             normalize_inputs: normalize particles
         """
-        super().__init__(target_dim, target_logp, key=key, sizes=sizes,
+        super().__init__(target_dim, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience,
                          aux=aux, dropout=dropout, normalize_inputs=normalize_inputs)
         self.lambda_reg = lambda_reg
-        if target_logp:
-            assert not get_target_logp
-            self.get_target_logp = lambda *args: target_logp
-        elif get_target_logp:
-            self.get_target_logp = get_target_logp
-        else:
-            return ValueError("One of target_logp and get_target_logp must"
-                              "be given.")
         self.scale = 1.  # scaling of self.field
         self.use_hutchinson = use_hutchinson
 
@@ -618,12 +606,13 @@ class KernelGradient():
     """Computes the SVGD approximation to grad(KL), ie
     phi*(y) = E[grad(log p)(y) k(x, y) + div(k)(x, y)]"""
     def __init__(self,
-                 target_logp: callable = None,
+                 target_logp: callable = None,  # TODO replace with dlogp supplied as array
                  get_target_logp: callable = None,
                  kernel=kernels.get_rbf_kernel,
                  bandwidth=None,
                  scaled=False,
-                 lambda_reg=1/2):
+                 lambda_reg=1/2,
+                 use_hutchinson: bool = False):
         """get_target_log is a callable that takes in a batch of data
         (can be any pytree of jnp.ndarrays) and returns a callable logp
         that computes the target log prob (up to an additive constant).
@@ -668,12 +657,16 @@ class KernelGradient():
             return vmap(v)(particles)
 
     def get_field_scaled(self, inducing_particles, batch=None):
+        hardcoded_seed = random.PRNGKey(0)  # TODO seed should change across iters
         target_logp = self.get_target_logp(batch)
         bandwidth = self.bandwidth if self.bandwidth else kernels.median_heuristic(inducing_particles)
         kernel = self.kernel(bandwidth)
         phi = stein.get_phistar(kernel, target_logp, inducing_particles)
         l2_phi_squared = utils.l2_norm_squared(inducing_particles, phi)
-        ksd = stein.stein_discrepancy(inducing_particles, target_logp, phi)
+        if self.use_hutchinson:
+            ksd = stein.stein_discrepancy_hutchinson(hardcoded_seed, inducing_particles, target_logp, phi)
+        else:
+            ksd = stein.stein_discrepancy(inducing_particles, target_logp, phi)
         alpha = ksd / (2*self.lambda_reg*l2_phi_squared)
         return utils.mul(phi, -alpha), bandwidth
 

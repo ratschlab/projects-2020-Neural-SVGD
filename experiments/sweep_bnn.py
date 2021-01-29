@@ -48,8 +48,13 @@ with open(temp_results_file, "w") as f:
 
 
 def save_single_run(name, accuracy, step_size):
-    with open(temp_results_file, "a") as f:
-        f.write(f"{name},{step_size},{accuracy}\n")
+    file = results_path + name + ".csv"
+    if not os.path.isfile(file):
+        with open(file, "w") as f:
+            f.write("stepsize,accuracy\n")
+
+    with open(file, "a") as f:
+        f.write(f"{step_size},{accuracy}\n")
 
 
 def save_best_run(name, accuracy_list):

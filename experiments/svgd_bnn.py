@@ -42,7 +42,7 @@ def train(key,
 
     key, subkey1, subkey2 = random.split(key, 3)
     svgd_grad = models.KernelGradient(get_target_logp=bnn.get_minibatch_logp,
-                                      scaled=True,
+                                      scaled=False,
                                       lambda_reg=LAMBDA_REG)
 
     particles = models.Particles(key=subkey2,
