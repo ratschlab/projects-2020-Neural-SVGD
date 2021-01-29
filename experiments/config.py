@@ -4,8 +4,8 @@ try:
 except KeyError:
     if os.getenv("HOME") == "/home/lauro":
         location = "local"
-else:
-    raise
+    else:
+        raise
 
 
 model_size = 'large' if location == "leonhard" else 'small'
