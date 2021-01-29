@@ -17,14 +17,8 @@ def make_model(size: str = "large"):
         n_channels = 8 if size == "small" else 8
         image = image.astype(jnp.float32)
         convnet = hk.Sequential([
-#            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer),
-#            jax.nn.relu,
-
             hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
             jax.nn.relu,
-
-#            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer),
-#            jax.nn.relu,
 
             hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
             jax.nn.relu,
@@ -139,4 +133,7 @@ def get_minibatch_logp(batch):
         return -loss(unravel(params_flat), *batch)
     return minibatch_logp
 
+
+def minibatch_logp(params_flat, batch):
+    return -loss(unravel(params_flat), *batch)
 

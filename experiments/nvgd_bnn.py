@@ -1,6 +1,6 @@
 import os
 import argparse
-from jax import vmap, random, jit
+from jax import vmap, random, jit, grad
 from tqdm import tqdm
 import optax
 import bnn
@@ -64,7 +64,6 @@ def train(key,
 
     key, subkey1, subkey2 = random.split(key, 3)
     neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
-                                   get_target_logp=bnn.get_minibatch_logp,
                                    learning_rate=meta_lr,
                                    key=subkey1,
                                    sizes=[LAYER_SIZE, LAYER_SIZE, LAYER_SIZE, init_particles.shape[1]],
@@ -79,11 +78,13 @@ def train(key,
                                  init_samples=init_particles,
                                  custom_optimizer=opt)
 
-    def step(key, train_batch):
+    minibatch_vdlogp = jit(vmap(grad(bnn.minibatch_logp), (0, None)))
+
+    def step(key, split_particles, split_dlogp):
         """one iteration of the particle trajectory simulation"""
-        neural_grad.train(split_particles=particles.next_batch(key),
-                          n_steps=max_train_steps_per_iter,
-                          data=train_batch)
+        neural_grad.train(split_particles=split_particles,
+                          split_dlogp=split_dlogp,
+                          n_steps=max_train_steps_per_iter)
         for _ in range(particle_steps_per_iter):
             particles.step(neural_grad.get_params())
         return
@@ -106,7 +107,11 @@ def train(key,
     for step_counter in tqdm(range(n_iter), disable=on_cluster):
         key, subkey = random.split(key)
         train_batch = next(mnist.training_batches)
-        step(subkey, train_batch)
+        split_particles = particles.next_batch(key)
+        split_dlogp = [minibatch_vdlogp(x, train_batch)
+                       for x in split_particles]
+
+        step(subkey, split_particles, split_dlogp)
 
         if (step_counter+1) % evaluate_every == 0:
             metrics.append_to_log(particles.rundata,
@@ -125,7 +130,8 @@ def train(key,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_samples", type=int, default=100, help="Number of parallel chains")
+    parser.add_argument("--n_samples", type=int, default=100,
+                        help="Number of parallel chains")
     parser.add_argument("--n_epochs", type=int, default=1)
     args = parser.parse_args()
 

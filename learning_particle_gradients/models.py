@@ -539,11 +539,11 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         if self.use_hutchinson:
             stein_discrepancy = stein.stein_discrepancy_hutchinson_fixed_log(
                 subkey, particles, dlogp, f)
-            stein_aux = np.array([np.nan, np.nan])
+            stein_aux = np.array([1, 1.])
         else:
             stein_discrepancy = stein.stein_discrepancy_fixed_log(
                 particles, dlogp, f)
-            stein_aux = np.array([np.nan, np.nan])
+            stein_aux = np.array([1., 1.])
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq  # + optax.global_norm(params)**2
         # loss = - 1/2 * stein_discrepancy**2 / l2_f_sq

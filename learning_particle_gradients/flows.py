@@ -1,4 +1,4 @@
-from jax import random
+from jax import random, jit, vmap
 import warnings
 from tqdm import tqdm
 import metrics
@@ -19,7 +19,6 @@ def neural_svgd_flow(key,
                      n_particles=default_num_particles,
                      n_steps=default_num_steps,
                      particle_lr=1e-2,
-                     noise_level=None,
                      patience=default_patience,
                      compute_metrics=None,
                      n_learner_steps=50,
@@ -32,7 +31,6 @@ def neural_svgd_flow(key,
     key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
     learner = models.SDLearner(key=keya,
-                               target_logp=target.logpdf,
                                target_dim=target.d,
                                patience=patience,
                                **learner_kwargs)
@@ -47,22 +45,15 @@ def neural_svgd_flow(key,
                                  optimizer="sgd",
                                  compute_metrics=compute_metrics)
 
-    # Warmup
-    def sample_split_particles(key):
-        return proposal.sample(2*n_particles, key).split(2)
-
-    key, subkey = random.split(key)
-    learner.warmup(key=subkey,
-                   sample_split_particles=sample_split_particles,
-                   next_data=lambda: None,
-                   n_iter=NUM_WARMUP_STEPS // 30 + 1,
-                   n_inner_steps=30)
-
+    vdlogp = jit(vmap(target.logpdf))
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:
             key, subkey = random.split(key)
-            batch = particles.next_batch(subkey, n_train_particles=2*n_particles//3)
-            learner.train(split_particles=batch, n_steps=n_learner_steps)
+            split_particles = particles.next_batch(subkey, n_train_particles=2*n_particles//3)
+            split_dlogp = [vdlogp(x) for x in split_particles]
+            learner.train(split_particles=split_particles,
+                          split_dlogp=split_dlogp,
+                          n_steps=n_learner_steps)
             particles.step(learner.get_params())
         except Exception as err:
             if catch_exceptions:
