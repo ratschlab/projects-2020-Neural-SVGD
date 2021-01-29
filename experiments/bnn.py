@@ -14,16 +14,20 @@ initializer = hk.initializers.RandomNormal(stddev=1 / 100)
 def make_model(size: str = "large"):
     def model_fn(image):
         """returns logits"""
-        n_channels = 4 if size == "small" else 16
+        n_channels = 8 if size == "small" else 8
         image = image.astype(jnp.float32)
         convnet = hk.Sequential([
-            hk.Conv2D(n_channels, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
-            jax.nn.relu,
-            hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
+#            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer),
+#            jax.nn.relu,
 
-            hk.Conv2D(n_channels//2, kernel_shape=(3, 3), w_init=initializer, b_init=initializer),
+            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
             jax.nn.relu,
-            hk.MaxPool(window_shape=(2, 2), strides=2, padding="VALID"),
+
+#            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer),
+#            jax.nn.relu,
+
+            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
+            jax.nn.relu,
 
             hk.Flatten(),
             hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),

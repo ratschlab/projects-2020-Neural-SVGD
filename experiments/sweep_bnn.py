@@ -22,6 +22,7 @@ key, subkey = random.split(key)
 results_file = "/dev/null"
 sweep_results_file = cfg.results_path + "sweep.csv"  # best LR / acc goes here
 temp_results_file = cfg.results_path + "temp_sweep.csv"  # results from entire sweep go here
+final_accs = []
 
 vgd_stepsizes = onp.logspace(start=-7, stop=-3, num=n_lrs)
 sgld_stepsizes = onp.logspace(start=-9, stop=-5, num=n_lrs)
@@ -61,7 +62,6 @@ def get_best_run(name, accuracy_list):
 
 
 print("Sweeping NVGD...")
-final_accs = []
 key, subkey = random.split(key)
 for particle_stepsize in vgd_stepsizes:
     final_acc = nvgd_bnn.train(key=subkey,
