@@ -31,7 +31,6 @@ key = random.PRNGKey(0)
 key, subkey = random.split(key)
 results_path = cfg.results_path + "bnn-sweep/"
 sweep_results_file = results_path + "best-stepsizes.csv"  # best LR / acc goes here
-temp_results_file = results_path + "all-runs.csv"  # results from entire sweep go here
 dumpfile = "/dev/null"
 final_accs = []
 
@@ -41,10 +40,6 @@ sgld_stepsizes = onp.logspace(start=-9, stop=-5, num=n_lrs)
 if not os.path.isfile(sweep_results_file) or OVERWRITE_FILE:
     with open(sweep_results_file, "w") as f:
         f.write("name,optimal_stepsize,max_val_accuracy\n")
-
-
-with open(temp_results_file, "w") as f:
-    f.write("name,stepsize,val_accuracy\n")
 
 
 def save_single_run(name, accuracy, step_size):
