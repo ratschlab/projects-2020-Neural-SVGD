@@ -10,6 +10,7 @@ import config as cfg
 import jax.flatten_util
 import mnist
 import bnn
+import pandas as pd
 
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
@@ -73,6 +74,19 @@ if __name__ == "__main__":
     parser.add_argument("--n_samples", type=int, default=100, help="Number of parallel chains")
     parser.add_argument("--n_iter", type=int, default=200)
     args = parser.parse_args()
+
+    # 1) read stepsize from sweep csv
+    # 2) run one epoch and keep track of accuracy
+    # 3) save to csv
+    print("Loading optimal step size")
+    results_file = cfg.results_path + "sgld-bnn.csv"
+    stepsize_csv = cfg.results_path + "bnn-sweep/best-stepsizes.csv"
+    try:
+        sweep_results = pd.read_csv(stepsize_csv, index_col=0)
+        stepsize = sweep_results['optimal_stepsize']['sgld']
+    except (FileNotFoundError, TypeError):
+        print('CSV sweep results not found; using default')
+        stepsize = 1e-3
 
     rngkey = random.PRNGKey(0)
     train(key=rngkey,

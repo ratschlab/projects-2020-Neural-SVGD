@@ -8,6 +8,7 @@ import models
 import metrics
 import mnist
 import config as cfg
+import pandas as pd
 
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
@@ -17,7 +18,6 @@ DEFAULT_MAX_TRAIN_STEPS = 100
 DEFAULT_META_LR = 1e-3  # should be as high as possible; regularize w/ max steps
 DEFAULT_PATIENCE = 5  # early stopping not v helpful, bc we overfit on all ps
 
-DISABLE_PROGRESS_BAR = on_cluster
 LAMBDA_REG = 100
 LAYER_SIZE = 256 if on_cluster else 32
 
@@ -26,7 +26,7 @@ def train(key,
           meta_lr: float = DEFAULT_META_LR,
           particle_stepsize: float = 1e-3,
           evaluate_every: int = 10,
-          n_iter: int = 400,
+          n_iter: int = 200,
           n_samples: int = cfg.n_samples,
           particle_steps_per_iter: int = 1,
           max_train_steps_per_iter: int = DEFAULT_MAX_TRAIN_STEPS,
@@ -132,10 +132,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_samples", type=int, default=100,
                         help="Number of parallel chains")
-    parser.add_argument("--n_epochs", type=int, default=1)
+    parser.add_argument("--n_iter", type=int, default=200)
     args = parser.parse_args()
+
+    print("Loading optimal step size")
+    results_file = cfg.results_path + "nvgd-bnn.csv"
+    stepsize_csv = cfg.results_path + "bnn-sweep/best-stepsizes.csv"
+    try:
+        sweep_results = pd.read_csv(stepsize_csv, index_col=0)
+        stepsize = sweep_results['optimal_stepsize']['nvgd']
+    except (FileNotFoundError, TypeError):
+        print('CSV sweep results not found; using default')
+        stepsize = 1e-3
 
     rngkey = random.PRNGKey(0)
     train(key=rngkey,
           n_samples=args.n_samples,
-          n_iter=args.n_epochs * mnist.train_data_size // cfg.batch_size)
+          n_iter=args.n_iter,
+          particle_stepsize=stepsize)
