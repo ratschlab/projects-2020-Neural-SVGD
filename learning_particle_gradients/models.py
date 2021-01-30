@@ -436,7 +436,7 @@ class TrainingMixin:
               n_steps=5,
               early_stopping=True,
               progress_bar=False,
-              extra_term=np.ndarray(0)):
+              extra_term=np.array(0)):
         """
         batch and next_batch cannot both be None.
 
