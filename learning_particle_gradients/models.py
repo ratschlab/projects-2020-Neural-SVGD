@@ -225,7 +225,7 @@ class VectorFieldMixin:
                  sizes: list = None,
                  aux=False,
                  normalize_inputs=False,
-                 extra_term: callable = lambda: 0,
+                 extra_term: callable = lambda x: 0,
                  **kwargs):
         """
         args:
@@ -242,7 +242,7 @@ class VectorFieldMixin:
                           f"target dim {self.d}.")
         self.threadkey, subkey = random.split(key)
         self.normalize_inputs = normalize_inputs
-        extra_term = extra_term
+        self.extra_term = extra_term
 
         # net and optimizer
         def field(x, aux, dropout: bool = False):
@@ -509,7 +509,8 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                  lambda_reg=1/2,
                  use_hutchinson: bool = False,
                  dropout=False,
-                 normalize_inputs=False):
+                 normalize_inputs=False,
+                 extra_term: callable = lambda x: 0):
         """
         args:
             aux: bool, whether to concatenate particle dist info onto
@@ -520,7 +521,8 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         """
         super().__init__(target_dim, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience,
-                         aux=aux, dropout=dropout, normalize_inputs=normalize_inputs)
+                         aux=aux, dropout=dropout, normalize_inputs=normalize_inputs, 
+                         extra_term=extra_term)
         self.lambda_reg = lambda_reg
         self.scale = 1.  # scaling of self.field
         self.use_hutchinson = use_hutchinson
