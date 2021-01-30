@@ -225,6 +225,7 @@ class VectorFieldMixin:
                  sizes: list = None,
                  aux=False,
                  normalize_inputs=False,
+                 extra_term: callable = lambda: 0,
                  **kwargs):
         """
         args:
@@ -241,6 +242,7 @@ class VectorFieldMixin:
                           f"target dim {self.d}.")
         self.threadkey, subkey = random.split(key)
         self.normalize_inputs = normalize_inputs
+        extra_term = extra_term
 
         # net and optimizer
         def field(x, aux, dropout: bool = False):
@@ -274,14 +276,10 @@ class VectorFieldMixin:
     def get_params(self):
         return self.params
 
-    def get_field(
-        self, key, init_particles, params=None, dropout=False, extra_term=0
-    ):
+    def get_field(self, key, init_particles, params=None, dropout=False):
         """Retuns function v. v is a vector field, can take either single
         particle of shape (d,) or batch shaped (..., d).
-        args:
-            extra_term: constant term added to v. must have shape (),
-                (d,), or (n, d)."""
+        """
         if params is None:
             params = self.get_params()
         if self.normalize_inputs:
@@ -293,7 +291,7 @@ class VectorFieldMixin:
         def v(x):
             """x should have shape (n, d) or (d,)"""
             return self.field.apply(
-                params, key, norm(x), aux, dropout=dropout) + extra_term
+                params, key, norm(x), aux, dropout=dropout) + self.extra_term(x)
         return v
 
 
@@ -343,7 +341,7 @@ class EBMMixin():
 class TrainingMixin:
     """
     Encapsulates methods for training the Stein network (which approximates
-    the particle update). Agnostic re: architecture. Needs existence of 
+    the particle update). Agnostic re: architecture. Needs existence of
     a self.params at initialization.
     Methods to implement:
     * self.loss_fn
@@ -382,9 +380,7 @@ class TrainingMixin:
               dlogp,
               val_dlogp,
               particles,
-              val_particles,
-              extra_term,
-              val_extra_term):
+              val_particles):
         """
         update parameters and compute validation loss
         args:
@@ -396,8 +392,7 @@ class TrainingMixin:
                                                                dlogp,
                                                                key,
                                                                particles,
-                                                               dropout=self.dropout,
-                                                               extra_term=extra_term)
+                                                               dropout=self.dropout)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
 
@@ -405,20 +400,18 @@ class TrainingMixin:
                                        val_dlogp,
                                        key,
                                        val_particles,
-                                       dropout=False,
-                                       extra_term=val_extra_term)
+                                       dropout=False)
         auxdata = (loss_aux, val_loss_aux, grads, params)
         return params, optimizer_state, auxdata
 
     def step(self,
              particles, validation_particles,
-             dlogp, val_dlogp,
-             extra_term, val_extra_term):
+             dlogp, val_dlogp):
         """Step and mutate state"""
         self.threadkey, key = random.split(self.threadkey)
         self.params, self.optimizer_state, auxdata = self._step(
             key, self.params, self.optimizer_state, dlogp, val_dlogp,
-            particles, validation_particles, extra_term, val_extra_term)
+            particles, validation_particles)
         self.write_to_log(
             self._log(particles, validation_particles, auxdata, self.step_counter))
         self.step_counter += 1
@@ -437,7 +430,6 @@ class TrainingMixin:
     def train(self,
               split_particles,
               split_dlogp,
-              split_extra_term=(0, 0),
               n_steps=5,
               early_stopping=True,
               progress_bar=False):
@@ -451,12 +443,11 @@ class TrainingMixin:
                 gradients. Same shape as split_particles.
             key: random.PRGNKey
             n_steps: int, nr of steps to train
-            extra_term: add on to the update function
         """
         self.patience.reset()
 
         def step():
-            self.step(*split_particles, *split_dlogp, *split_extra_term)
+            self.step(*split_particles, *split_dlogp)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
             return
@@ -499,7 +490,7 @@ class TrainingMixin:
                                    self.rundata))
         return
 
-    def loss_fn(self, params, dlogp, key, particles, dropout, extra_term):
+    def loss_fn(self, params, dlogp, key, particles, dropout):
         raise NotImplementedError()
 
     def gradient(self, params, particles, aux=False):
@@ -539,8 +530,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                 dlogp: np.ndarray,
                 key: np.ndarray,
                 particles: np.ndarray,
-                dropout: bool = False,
-                extra_term: np.ndarray = np.array(0)):
+                dropout: bool = False):
         """
         Arguments:
             params: neural net paramers
@@ -551,7 +541,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         """
         key, subkey = random.split(key)
         f = utils.negative(self.get_field(
-            subkey, particles, params, dropout=dropout, extra_term=extra_term))
+            subkey, particles, params, dropout=dropout))
         key, subkey = random.split(key)
         if self.use_hutchinson:
             stein_discrepancy = stein.stein_discrepancy_hutchinson_fixed_log(
