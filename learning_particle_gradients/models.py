@@ -108,7 +108,7 @@ class Particles:
         self.donedone = False
         self.compute_metrics = compute_metrics
 
-    def init_particles(self, key):
+    def init_particles(self, key=None):
         """Returns an jnp.ndarray of shape (n, d) containing particles."""
         if key is None:
             self.threadkey, key = random.split(self.threadkey)
@@ -274,9 +274,14 @@ class VectorFieldMixin:
     def get_params(self):
         return self.params
 
-    def get_field(self, key, init_particles, params=None, dropout=False):
+    def get_field(
+        self, key, init_particles, params=None, dropout=False, extra_term=0
+    ):
         """Retuns function v. v is a vector field, can take either single
-        particle of shape (d,) or batch shaped (..., d)."""
+        particle of shape (d,) or batch shaped (..., d).
+        args:
+            extra_term: constant term added to v. must have shape (),
+                (d,), or (n, d)."""
         if params is None:
             params = self.get_params()
         if self.normalize_inputs:
@@ -287,7 +292,8 @@ class VectorFieldMixin:
 
         def v(x):
             """x should have shape (n, d) or (d,)"""
-            return self.field.apply(params, key, norm(x), aux, dropout=dropout)
+            return self.field.apply(
+                params, key, norm(x), aux, dropout=dropout) + extra_term
         return v
 
 
@@ -376,7 +382,8 @@ class TrainingMixin:
               dlogp,
               val_dlogp,
               particles,
-              validation_particles):
+              validation_particles,
+              extra_term):
         """
         update parameters and compute validation loss
         args:
@@ -388,7 +395,8 @@ class TrainingMixin:
                                                                dlogp,
                                                                key,
                                                                particles,
-                                                               dropout=self.dropout)
+                                                               dropout=self.dropout,
+                                                               extra_term=extra_term)
         grads, optimizer_state = self.opt.update(grads, optimizer_state, params)
         params = optax.apply_updates(params, grads)
 
@@ -396,16 +404,17 @@ class TrainingMixin:
                                        val_dlogp,
                                        key,
                                        validation_particles,
-                                       dropout=False)
+                                       dropout=False,
+                                       extra_term=extra_term)
         auxdata = (loss_aux, val_loss_aux, grads, params)
         return params, optimizer_state, auxdata
 
-    def step(self, particles, validation_particles, dlogp, val_dlogp):
+    def step(self, particles, validation_particles, dlogp, val_dlogp, extra_term=0):
         """Step and mutate state"""
         self.threadkey, key = random.split(self.threadkey)
         self.params, self.optimizer_state, auxdata = self._step(
             key, self.params, self.optimizer_state, dlogp, val_dlogp,
-            particles, validation_particles)
+            particles, validation_particles, extra_term)
         self.write_to_log(
             self._log(particles, validation_particles, auxdata, self.step_counter))
         self.step_counter += 1
@@ -426,7 +435,8 @@ class TrainingMixin:
               split_dlogp,
               n_steps=5,
               early_stopping=True,
-              progress_bar=False):
+              progress_bar=False,
+              extra_term=np.ndarray(0)):
         """
         batch and next_batch cannot both be None.
 
@@ -437,11 +447,12 @@ class TrainingMixin:
                 gradients. Same shape as split_particles.
             key: random.PRGNKey
             n_steps: int, nr of steps to train
+            extra_term: add on to the update function
         """
         self.patience.reset()
 
         def step():
-            self.step(*split_particles, *split_dlogp)
+            self.step(*split_particles, *split_dlogp, extra_term)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
             return
@@ -484,7 +495,7 @@ class TrainingMixin:
                                    self.rundata))
         return
 
-    def loss_fn(self, params, batch, key, particles):
+    def loss_fn(self, params, dlogp, key, particles, dropout, extra_term):
         raise NotImplementedError()
 
     def gradient(self, params, particles, aux=False):
@@ -524,7 +535,8 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                 dlogp: np.ndarray,
                 key: np.ndarray,
                 particles: np.ndarray,
-                dropout: bool = False):
+                dropout: bool = False,
+                extra_term: np.ndarray = np.array(0)):
         """
         Arguments:
             params: neural net paramers
@@ -534,7 +546,8 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
             dropout: whether to use dropout in the gradient network
         """
         key, subkey = random.split(key)
-        f = utils.negative(self.get_field(subkey, particles, params, dropout=dropout))
+        f = utils.negative(self.get_field(
+            subkey, particles, params, dropout=dropout, extra_term=extra_term))
         key, subkey = random.split(key)
         if self.use_hutchinson:
             stein_discrepancy = stein.stein_discrepancy_hutchinson_fixed_log(

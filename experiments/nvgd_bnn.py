@@ -80,7 +80,7 @@ def train(key,
 
     minibatch_vdlogp = jit(vmap(grad(bnn.minibatch_logp), (0, None)))
 
-    def step(key, split_particles, split_dlogp):
+    def step(split_particles, split_dlogp):
         """one iteration of the particle trajectory simulation"""
         neural_grad.train(split_particles=split_particles,
                           split_dlogp=split_dlogp,
@@ -111,7 +111,7 @@ def train(key,
         split_dlogp = [minibatch_vdlogp(x, train_batch)
                        for x in split_particles]
 
-        step(subkey, split_particles, split_dlogp)
+        step(split_particles, split_dlogp)
 
         if (step_counter+1) % evaluate_every == 0:
             metrics.append_to_log(particles.rundata,
