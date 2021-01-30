@@ -632,6 +632,9 @@ class KernelGradient():
         self.lambda_reg = lambda_reg
         self.rundata = {}
         self.scaled = scaled
+        self.use_hutchinson = use_hutchinson
+
+
 
     def get_field(self, inducing_particles, batch=None):
         """return -phistar"""

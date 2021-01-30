@@ -14,8 +14,7 @@ PARTICLE_STEP_SIZE = 1e-2
 LEARNING_RATE = 1e-4
 NUM_PARTICLES = 200  # 200
 d = 2
-PATIENCE = 0
-# PATIENCE = 15 # try this
+PATIENCE = 15  # (-1 vs. 0 makes a noticeable diff, but not large)
 
 target = distributions.Funnel(d)
 proposal = distributions.Gaussian(jnp.zeros(d), jnp.ones(d))
