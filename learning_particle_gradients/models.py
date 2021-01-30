@@ -634,8 +634,6 @@ class KernelGradient():
         self.scaled = scaled
         self.use_hutchinson = use_hutchinson
 
-
-
     def get_field(self, inducing_particles, batch=None):
         """return -phistar"""
         target_logp = self.get_target_logp(batch)
