@@ -382,8 +382,9 @@ class TrainingMixin:
               dlogp,
               val_dlogp,
               particles,
-              validation_particles,
-              extra_term):
+              val_particles,
+              extra_term,
+              val_extra_term):
         """
         update parameters and compute validation loss
         args:
@@ -403,18 +404,21 @@ class TrainingMixin:
         _, val_loss_aux = self.loss_fn(params,
                                        val_dlogp,
                                        key,
-                                       validation_particles,
+                                       val_particles,
                                        dropout=False,
-                                       extra_term=extra_term)
+                                       extra_term=val_extra_term)
         auxdata = (loss_aux, val_loss_aux, grads, params)
         return params, optimizer_state, auxdata
 
-    def step(self, particles, validation_particles, dlogp, val_dlogp, extra_term=0):
+    def step(self,
+             particles, validation_particles,
+             dlogp, val_dlogp,
+             extra_term, val_extra_term):
         """Step and mutate state"""
         self.threadkey, key = random.split(self.threadkey)
         self.params, self.optimizer_state, auxdata = self._step(
             key, self.params, self.optimizer_state, dlogp, val_dlogp,
-            particles, validation_particles, extra_term)
+            particles, validation_particles, extra_term, val_extra_term)
         self.write_to_log(
             self._log(particles, validation_particles, auxdata, self.step_counter))
         self.step_counter += 1
@@ -433,10 +437,10 @@ class TrainingMixin:
     def train(self,
               split_particles,
               split_dlogp,
+              split_extra_term=(0, 0),
               n_steps=5,
               early_stopping=True,
-              progress_bar=False,
-              extra_term=np.array(0)):
+              progress_bar=False):
         """
         batch and next_batch cannot both be None.
 
@@ -452,7 +456,7 @@ class TrainingMixin:
         self.patience.reset()
 
         def step():
-            self.step(*split_particles, *split_dlogp, extra_term)
+            self.step(*split_particles, *split_dlogp, *split_extra_term)
             val_loss = self.rundata["validation_loss"][-1]
             self.patience.update(val_loss)
             return
