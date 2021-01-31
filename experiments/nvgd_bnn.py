@@ -114,13 +114,13 @@ def train(key,
         train_batch = next(mnist.training_batches)
         n_train_particles = 3*n_samples // 4 if early_stopping else n_samples - 1
         split_particles = particles.next_batch(key, n_train_particles=n_train_particles)
-        split_loss, split_dlogp = split_vdlogp(split_particles, train_batch)
+        split_logp, split_dlogp = split_vdlogp(split_particles, train_batch)
         step(split_particles, split_dlogp)
 
         if (step_counter+1) % evaluate_every == 0:
             eval_ps = particles.particles if early_stopping else split_particles[0]
             metrics.append_to_log(particles.rundata,
-                                  evaluate(step_counter, eval_ps))
+                                  evaluate(step_counter, eval_ps, split_logp[0]))
 
         if step_counter % mnist.steps_per_epoch == 0:
             print(f"Starting epoch {step_counter // mnist.steps_per_epoch + 1}")
