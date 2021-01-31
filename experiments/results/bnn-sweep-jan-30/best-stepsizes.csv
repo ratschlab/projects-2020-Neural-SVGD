@@ -1,0 +1,3 @@
+name,optimal_stepsize,max_val_accuracy
+svgd,1e-05,0.9105480909347534
+nvgd,0.0001,0.8812215328216553
