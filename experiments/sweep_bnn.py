@@ -22,7 +22,7 @@ if DEBUG:
     n_lrs = 1
 else:
     NUM_STEPS = 200
-    n_lrs = 5
+    n_lrs = 10
 
 OVERWRITE_FILE = True
 EVALUATE_EVERY = -1  # never
@@ -75,13 +75,13 @@ def save_best_run(name, accuracy_list):
 def sweep_nvgd():
     print("Sweeping NVGD...")
     for particle_stepsize in vgd_stepsizes:
-        final_acc = nvgd_bnn.train(key=subkey,
-                                   particle_stepsize=particle_stepsize,
-                                   n_iter=NUM_STEPS,
-                                   evaluate_every=EVALUATE_EVERY,
-                                   overwrite_file=OVERWRITE_FILE,
-                                   dropout=True,
-                                   results_file=dumpfile)
+        final_acc, nvgd_rundata = nvgd_bnn.train(key=subkey,
+                                                particle_stepsize=particle_stepsize,
+                                                n_iter=NUM_STEPS,
+                                                evaluate_every=EVALUATE_EVERY,
+                                                overwrite_file=OVERWRITE_FILE,
+                                                dropout=True,
+                                                results_file=dumpfile)
         save_single_run("nvgd", final_acc, particle_stepsize)
         final_accs.append((final_acc, particle_stepsize))
 

@@ -78,10 +78,10 @@ def train(key,
             print(f"Starting epoch {step_counter // mnist.steps_per_epoch + 1}")
 
     # final eval
-    metrics.append_to_log(particles.rundata,
-                          evaluate(-1, particles.particles))
+    final_eval = evaluate(-1, particles.particles)
     particles.done()
-    return particles.rundata['accuracy'][-1]
+
+    return final_eval['accuracy']
 
 
 if __name__ == "__main__":

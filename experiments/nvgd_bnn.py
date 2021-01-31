@@ -27,13 +27,14 @@ def train(key,
           particle_stepsize: float = 1e-3,
           evaluate_every: int = 10,
           n_iter: int = 200,
-          n_samples: int = cfg.n_samples,
+          n_samples: int = cfg.n_samples+1, # add 1 to account for dummy val set
           particle_steps_per_iter: int = 1,
           max_train_steps_per_iter: int = DEFAULT_MAX_TRAIN_STEPS,
           patience: int = DEFAULT_PATIENCE,
           dropout: bool = True,
           results_file: str = cfg.results_path + 'nvgd-bnn.csv',
-          overwrite_file: bool = False):
+          overwrite_file: bool = False,
+          early_stopping: bool = True):
     """
     Initialize model; warmup; training; evaluation.
     Returns a dictionary of metrics.
@@ -57,11 +58,6 @@ def train(key,
     opt = optax.sgd(particle_stepsize)
     print(f"particle shape: {init_particles.shape}")
 
-    # opt = optax.chain(
-    #    optax.scale_by_adam(),
-    #    optax.scale(-particle_stepsize),
-    # )
-
     key, subkey1, subkey2 = random.split(key, 3)
     neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
                                    learning_rate=meta_lr,
@@ -78,54 +74,66 @@ def train(key,
                                  init_samples=init_particles,
                                  custom_optimizer=opt)
 
-    minibatch_vdlogp = jit(vmap(grad(bnn.minibatch_logp), (0, None)))
+    minibatch_vdlogp = vmap(value_and_grad(bnn.minibatch_logp), (0, None))
+
+    @jit
+    def split_vdlogp(split_particles, train_batch):
+        """returns tuple (split_logp, split_dlogp)"""
+        train_out, val_out = [minibatch_vdlogp(x, train_batch)
+                              for x in split_particles]
+        return tuple(zip(train_out, val_out))
 
     def step(split_particles, split_dlogp):
         """one iteration of the particle trajectory simulation"""
         neural_grad.train(split_particles=split_particles,
                           split_dlogp=split_dlogp,
-                          n_steps=max_train_steps_per_iter)
+                          n_steps=max_train_steps_per_iter,
+                          early_stopping=early_stopping)
         for _ in range(particle_steps_per_iter):
             particles.step(neural_grad.get_params())
         return
 
-    def evaluate(step_counter, ps):
+    def evaluate(step_counter, ps, logp):
+        ll = logp.mean()
         stepdata = {
             "accuracy": bnn.compute_acc_from_flat(ps),
             "step_counter": step_counter,
+            "loglikelihood": ll,
         }
         with open(results_file, "a") as file:
-            file.write(csv_string + f"{step_counter},{stepdata['accuracy']}\n")
+            file.write(csv_string + f"{step_counter},{stepdata['accuracy']},{ll}\n")
         return stepdata
 
     if not os.path.isfile(results_file) or overwrite_file:
         with open(results_file, "w") as file:
-            file.write("meta_lr,particle_stepsize,patience,"
-                       "max_train_steps,step,accuracy\n")
+            file.write("step_counter,accuracy,loglikelihood\n")
 
     print("Training...")
     for step_counter in tqdm(range(n_iter), disable=on_cluster):
         key, subkey = random.split(key)
         train_batch = next(mnist.training_batches)
-        split_particles = particles.next_batch(key)
-        split_dlogp = [minibatch_vdlogp(x, train_batch)
-                       for x in split_particles]
+
+        # MODIFIED: remove validation set by reducing it's size to one particle
+        # and eval accuracy only on training set
+        n_train_particles = 3*n_samples // 4 if early_stopping else n_samples - 1
+        split_particles = particles.next_batch(key, n_train_particles=n_train_particles)
+        split_loss, split_dlogp = split_vdlogp(split_particles, train_batch)
 
         step(split_particles, split_dlogp)
 
         if (step_counter+1) % evaluate_every == 0:
+            eval_ps = particles.particles if early_stopping else split_particles[0]
             metrics.append_to_log(particles.rundata,
-                                  evaluate(step_counter, particles.particles))
+                                  evaluate(step_counter, eval_ps))
 
         if step_counter % mnist.steps_per_epoch == 0:
             print(f"Starting epoch {step_counter // mnist.steps_per_epoch + 1}")
 
-    # final eval
-    metrics.append_to_log(particles.rundata,
-                          evaluate(-1, particles.particles))
     neural_grad.done()
     particles.done()
-    return particles.rundata['accuracy'][-1]
+
+    final_eval = evaluate(-1, particles.particles, split_particles[0])
+    return final_eval['accuracy'], particles.rundata
 
 
 if __name__ == "__main__":
