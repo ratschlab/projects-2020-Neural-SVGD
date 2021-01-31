@@ -24,7 +24,8 @@ def train(key,
           n_iter: int = 400,
           n_samples: int = 100,
           results_file: str = cfg.results_path + 'svgd-bnn.csv',
-          overwrite_file: bool = False):
+          overwrite_file: bool = False,
+          optimizer="sgd"):
     """
     Initialize model; warmup; training; evaluation.
     Returns a dictionary of metrics.
@@ -39,7 +40,13 @@ def train(key,
     # initialize particles and the dynamics model
     key, subkey = random.split(key)
     init_particles = vmap(bnn.init_flat_params)(random.split(subkey, n_samples))
-    opt = optax.sgd(particle_stepsize)
+
+    if optimizer == "sgd":
+        opt = optax.sgd(particle_stepsize)
+    elif optimizer == "adam":
+        opt = optax.adam(particle_stepsize)
+    else:
+        raise ValueError("must be adam or sgd")
 
     key, subkey1, subkey2 = random.split(key, 3)
     svgd_grad = models.KernelGradient(get_target_logp=bnn.get_minibatch_logp,

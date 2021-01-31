@@ -112,13 +112,9 @@ def train(key,
     for step_counter in tqdm(range(n_iter), disable=on_cluster):
         key, subkey = random.split(key)
         train_batch = next(mnist.training_batches)
-
-        # MODIFIED: remove validation set by reducing it's size to one particle
-        # and eval accuracy only on training set
         n_train_particles = 3*n_samples // 4 if early_stopping else n_samples - 1
         split_particles = particles.next_batch(key, n_train_particles=n_train_particles)
         split_loss, split_dlogp = split_vdlogp(split_particles, train_batch)
-
         step(split_particles, split_dlogp)
 
         if (step_counter+1) % evaluate_every == 0:
