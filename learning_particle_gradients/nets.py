@@ -88,7 +88,7 @@ class MLP(hk.Module):
         if dropout:
             output = hk.dropout(
                 rng=hk.next_rng_key(),
-                rate=0.5,
+                rate=0.2,
                 x=output
             )
         return output

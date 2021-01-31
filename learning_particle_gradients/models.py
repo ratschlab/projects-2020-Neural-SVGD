@@ -1,4 +1,5 @@
 import jax.numpy as np
+import jax.numpy as jnp
 from jax import jit, vmap, random, value_and_grad, grad
 import haiku as hk
 import jax
@@ -137,9 +138,9 @@ class Particles:
         if n_train_particles is None:
             if n_val_particles is None:
                 n_val_particles = self.n_particles // 4
-            n_train_particles = self.n_particles - n_val_particles
+            n_train_particles = jnp.clip(self.n_particles - n_val_particles, 0)
         elif n_val_particles is None:
-            n_val_particles = self.n_particles - n_train_particles
+            n_val_particles = jnp.clip(self.n_particles - n_train_particles, 0)
 
         assert n_train_particles + n_val_particles == self.n_particles
         return shuffled_batch[:n_train_particles], shuffled_batch[-n_val_particles:]
