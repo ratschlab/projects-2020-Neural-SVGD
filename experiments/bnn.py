@@ -64,7 +64,7 @@ def ensemble_accuracy(logits, labels):
     """use ensemble predictions to compute validation accuracy.
     args:
         logits: result from vmap(model.apply, (0, None))(param_set, images),
-            shaped (batch, NUM_CLASSES)
+            shaped (num_models, batch, NUM_CLASSES)
         labels: batch of corresponding labels, shape (batch,)"""
     preds = jnp.mean(vmap(jax.nn.softmax)(logits), axis=0)  # mean prediction
     return jnp.mean(preds.argmax(axis=1) == labels)

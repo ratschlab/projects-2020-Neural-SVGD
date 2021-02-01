@@ -38,7 +38,12 @@ sweep_results_file = results_path + "best-stepsizes.csv"  # best LR / acc goes h
 dumpfile = "/dev/null"
 final_accs = []
 
-vgd_stepsizes = onp.logspace(start=-7, stop=-3, num=n_lrs)
+if args.opt == "sgd":
+    vgd_stepsizes = onp.logspace(start=-7, stop=-3, num=n_lrs)
+else:
+    vgd_stepsizes = onp.logspace(start=-5, stop=-1, num=n_lrs)
+
+
 sgld_stepsizes = onp.logspace(start=-9, stop=-5, num=n_lrs)
 
 if not os.path.isfile(sweep_results_file) or OVERWRITE_FILE:
@@ -78,6 +83,7 @@ def save_best_run(name, accuracy_list):
 
 def sweep_nvgd():
     print("Sweeping NVGD...")
+    final_accs = []
     for particle_stepsize in vgd_stepsizes:
         final_acc, nvgd_rundata = nvgd_bnn.train(key=subkey,
                                                 particle_stepsize=particle_stepsize,
@@ -98,6 +104,7 @@ def sweep_sgld():
     if args.opt != "sgd":
         print(f"Using vanilla SGLD for langevin, even though "
               "you requested adaptive optimizer {args.opt}")
+    final_accs = []
     for particle_stepsize in sgld_stepsizes:
         final_acc = sgld_bnn.train(key=subkey,
                                    particle_stepsize=particle_stepsize,
@@ -112,6 +119,7 @@ def sweep_sgld():
 
 def sweep_svgd():
     print("Sweeping SVGD...")
+    final_accs = []
     for particle_stepsize in vgd_stepsizes:
         final_acc = svgd_bnn.train(key=subkey,
                                    particle_stepsize=particle_stepsize,
