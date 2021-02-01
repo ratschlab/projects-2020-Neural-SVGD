@@ -12,6 +12,10 @@ parser.add_argument("--run", type=str, default='all',
                     help="Which method to sweep. Can be 'nvgd', 'sgld',"
                          "'svgd', or 'all'.")
 parser.add_argument("--debug", action='store_true')
+parser.add_argument("--results_folder", type=str,
+                    default="bnn-sweep")
+parser.add_argument("--steps", type=int, default=200)
+parser.add_argument("--opt", type=str, default="sgd")
 args = parser.parse_args()
 
 
@@ -21,7 +25,7 @@ if DEBUG:
     NUM_STEPS = 2
     n_lrs = 1
 else:
-    NUM_STEPS = 200
+    NUM_STEPS = args.steps
     n_lrs = 10
 
 OVERWRITE_FILE = True
@@ -29,7 +33,7 @@ EVALUATE_EVERY = -1  # never
 
 key = random.PRNGKey(0)
 key, subkey = random.split(key)
-results_path = cfg.results_path + "bnn-sweep/"
+results_path = cfg.results_path + args.results_folder + "/"
 sweep_results_file = results_path + "best-stepsizes.csv"  # best LR / acc goes here
 dumpfile = "/dev/null"
 final_accs = []
@@ -81,7 +85,8 @@ def sweep_nvgd():
                                                 evaluate_every=EVALUATE_EVERY,
                                                 overwrite_file=OVERWRITE_FILE,
                                                 dropout=True,
-                                                results_file=dumpfile)
+                                                results_file=dumpfile,
+                                                optimizer=args.opt)
         save_single_run("nvgd", final_acc, particle_stepsize)
         final_accs.append((final_acc, particle_stepsize))
 
@@ -90,6 +95,9 @@ def sweep_nvgd():
 
 def sweep_sgld():
     print("Sweeping Langevin...")
+    if args.opt != "sgd":
+        print(f"Using vanilla SGLD for langevin, even though "
+              "you requested adaptive optimizer {args.opt}")
     for particle_stepsize in sgld_stepsizes:
         final_acc = sgld_bnn.train(key=subkey,
                                    particle_stepsize=particle_stepsize,
@@ -109,7 +117,8 @@ def sweep_svgd():
                                    particle_stepsize=particle_stepsize,
                                    n_iter=NUM_STEPS,
                                    evaluate_every=EVALUATE_EVERY,
-                                   results_file=dumpfile)
+                                   results_file=dumpfile,
+                                   optimizer=args.opt)
         final_accs.append((final_acc, particle_stepsize))
         save_single_run("svgd", final_acc, particle_stepsize)
 

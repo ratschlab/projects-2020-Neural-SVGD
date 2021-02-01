@@ -34,7 +34,8 @@ def train(key,
           dropout: bool = True,
           results_file: str = cfg.results_path + 'nvgd-bnn.csv',
           overwrite_file: bool = False,
-          early_stopping: bool = True):
+          early_stopping: bool = True,
+          optimizer: str = "sgd"):
     """
     Initialize model; warmup; training; evaluation.
     Returns a dictionary of metrics.
@@ -55,14 +56,19 @@ def train(key,
     # initialize particles and the dynamics model
     key, subkey = random.split(key)
     init_particles = vmap(bnn.init_flat_params)(random.split(subkey, n_samples))
-    opt = optax.sgd(particle_stepsize)
-    print(f"particle shape: {init_particles.shape}")
+
+    if optimizer == "sgd":
+        opt = optax.sgd(particle_stepsize)
+    elif optimizer == "adam":
+        opt = optax.adam(particle_stepsize)
+    else:
+        raise ValueEror("optimizer must be sgd or adam")
 
     key, subkey1, subkey2 = random.split(key, 3)
     neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
                                    learning_rate=meta_lr,
                                    key=subkey1,
-                                   sizes=[LAYER_SIZE, LAYER_SIZE, LAYER_SIZE, init_particles.shape[1]],
+                                   sizes= [LAYER_SIZE]*3 + [init_particles.shape[1]],
                                    aux=False,
                                    use_hutchinson=True,
                                    lambda_reg=LAMBDA_REG,
