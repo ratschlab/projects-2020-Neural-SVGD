@@ -27,7 +27,7 @@ def train(key,
           particle_stepsize: float = 1e-3,
           evaluate_every: int = 10,
           n_iter: int = 200,
-          n_samples: int = cfg.n_samples+1, # add 1 to account for dummy val set
+          n_samples: int = cfg.n_samples+1,  # add 1 to account for dummy val set
           particle_steps_per_iter: int = 1,
           max_train_steps_per_iter: int = DEFAULT_MAX_TRAIN_STEPS,
           patience: int = DEFAULT_PATIENCE,

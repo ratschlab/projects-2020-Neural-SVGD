@@ -76,12 +76,12 @@ def sweep_nvgd():
     print("Sweeping NVGD...")
     for particle_stepsize in vgd_stepsizes:
         final_acc, nvgd_rundata = nvgd_bnn.train(key=subkey,
-                                                particle_stepsize=particle_stepsize,
-                                                n_iter=NUM_STEPS,
-                                                evaluate_every=EVALUATE_EVERY,
-                                                overwrite_file=OVERWRITE_FILE,
-                                                dropout=True,
-                                                results_file=dumpfile)
+                                                 particle_stepsize=particle_stepsize,
+                                                 n_iter=NUM_STEPS,
+                                                 evaluate_every=EVALUATE_EVERY,
+                                                 overwrite_file=OVERWRITE_FILE,
+                                                 dropout=True,
+                                                 results_file=dumpfile)
         save_single_run("nvgd", final_acc, particle_stepsize)
         final_accs.append((final_acc, particle_stepsize))
 
