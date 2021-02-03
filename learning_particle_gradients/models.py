@@ -506,12 +506,13 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
                  sizes: list = None,
                  learning_rate: float = 5e-3,
                  patience: int = 0,
-                 aux=True,
+                 aux=False,
                  lambda_reg=1/2,
                  use_hutchinson: bool = False,
                  dropout=False,
                  normalize_inputs=False,
-                 extra_term: callable = lambda x: 0):
+                 extra_term: callable = lambda x: 0,
+                 l1_weight: float = None):
         """
         args:
             aux: bool, whether to concatenate particle dist info onto
@@ -527,6 +528,7 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         self.lambda_reg = lambda_reg
         self.scale = 1.  # scaling of self.field
         self.use_hutchinson = use_hutchinson
+        self.l1_weight = l1_weight
 
     def loss_fn(self,
                 params,
@@ -557,6 +559,10 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         l2_f_sq = utils.l2_norm_squared(particles, f)
         loss = -stein_discrepancy + self.lambda_reg * l2_f_sq  # + optax.global_norm(params)**2
         # loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
+
+        # add L1 term
+        if self.l1_weight:
+            loss = loss + self.l1_weight * np.abs(jnp.mean(vmap(f)(particles) - dlogp))
         aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
         return loss, aux
 

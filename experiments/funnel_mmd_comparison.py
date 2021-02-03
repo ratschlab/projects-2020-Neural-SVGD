@@ -74,7 +74,7 @@ svgd_gradient, svgd_particles, err4 = flows.svgd_flow(
 particle_containers = (neural_particles, sgld_particles,
                        sgld_particles2, svgd_particles)
 names = ("Neural", "SGLD", "SGLD2", "SVGD")
-results = {name: p.rundata["funnel_mmd"].tolist()
+results = {name: p.rundata["rbf_mmd"].tolist()  # CHANGED from 'funnel_mmd'
            for name, p in zip(names, particle_containers)}
 
 with open(cfg.results_path + "funnel-mmd-comparison.json", "w") as f:
