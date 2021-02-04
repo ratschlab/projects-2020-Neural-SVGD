@@ -277,22 +277,31 @@ class VectorFieldMixin:
     def get_params(self):
         return self.params
 
-    def get_field(self, key, init_particles, params=None, dropout=False):
+    def get_field(self, init_particles=None, params=None, dropout=False):
         """Retuns function v. v is a vector field, can take either single
         particle of shape (d,) or batch shaped (..., d).
         """
         if params is None:
             params = self.get_params()
         if self.normalize_inputs:
+            if init_particles is None:
+                raise ValueError("init_particles must not be None when"
+                                 "normalize_inputs is True.")
             norm = nets.get_norm(init_particles)
         else:
             norm = lambda x: x
         aux = self.compute_aux(init_particles)
 
-        def v(x):
-            """x should have shape (n, d) or (d,)"""
-            return self.field.apply(
-                params, key, norm(x), aux, dropout=dropout) + self.extra_term(x)
+        if dropout:
+            def v(x, key):
+                """x should have shape (n, d) or (d,)"""
+                return self.field.apply(
+                    params, key, norm(x), aux, dropout=dropout) + self.extra_term(x)
+        else:
+            def v(x):
+                """x should have shape (n, d) or (d,)"""
+                return self.field.apply(
+                    params, None, norm(x), aux, dropout=dropout) + self.extra_term(x)
         return v
 
 
@@ -326,7 +335,7 @@ class EBMMixin():
     def get_params(self):
         return self.params
 
-    def get_field(self, key, init_particles, params=None, dropout=False):
+    def get_field(self, init_particles, params=None):
         del init_particles
         if params is None:
             params = self.get_params()
@@ -335,7 +344,7 @@ class EBMMixin():
             """x should have shape (d,)"""
             # norm = nets.get_norm(init_particles)
             # x = norm(x)
-            return np.squeeze(self.ebm.apply(params, key, x))
+            return np.squeeze(self.ebm.apply(params, None, x))
         return grad(ebm)
 
 
@@ -355,7 +364,7 @@ class TrainingMixin:
                  **kwargs):
         """
         args:
-        dropout: whether to use dropout during training
+            dropout: whether to use dropout during training
         """
 #        schedule_fn = optax.piecewise_constant_schedule(
 #                -learning_rate, {50: 1/5, 100: 1/2})
@@ -402,28 +411,24 @@ class TrainingMixin:
                                        key,
                                        val_particles,
                                        dropout=False)
-        auxdata = (loss_aux, val_loss_aux, grads, params)
+        auxdata = {k: v for k, v in loss_aux.items()}
+        auxdata.update({"val_" + k: v for k, v in val_loss_aux.items()})
+        auxdata.update({"global_gradient_norm": optax.global_norm(grads),})
         return params, optimizer_state, auxdata
 
     def step(self,
-             particles, validation_particles,
-             dlogp, val_dlogp):
+             particles,
+             validation_particles,
+             dlogp,
+             val_dlogp):
         """Step and mutate state"""
         self.threadkey, key = random.split(self.threadkey)
         self.params, self.optimizer_state, auxdata = self._step(
             key, self.params, self.optimizer_state, dlogp, val_dlogp,
             particles, validation_particles)
-        self.write_to_log(
-            self._log(particles, validation_particles, auxdata, self.step_counter))
+        self.write_to_log(auxdata)
         self.step_counter += 1
         return None
-
-    def _log(self, particles, val_particles, auxdata, step_counter):  # depends on loss_fn aux
-        """
-        Arguments
-        * aux: list (train_aux, val_aux, grads, params)
-        """
-        raise NotImplementedError()
 
     def write_to_log(self, step_data: Mapping[str, np.ndarray]):
         metrics.append_to_log(self.rundata, step_data)
@@ -449,7 +454,7 @@ class TrainingMixin:
 
         def step():
             self.step(*split_particles, *split_dlogp)
-            val_loss = self.rundata["validation_loss"][-1]
+            val_loss = self.rundata["val_loss"][-1]
             self.patience.update(val_loss)
             return
 
@@ -544,63 +549,47 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
             particles: array of shape (n, d)
             dropout: whether to use dropout in the gradient network
         """
-        key, subkey = random.split(key)
-        f = utils.negative(self.get_field(
-            subkey, particles, params, dropout=dropout))
-        key, subkey = random.split(key)
-        if self.use_hutchinson:
-            stein_discrepancy = stein.stein_discrepancy_hutchinson_fixed_log(
-                subkey, particles, dlogp, f)
-            stein_aux = np.array([1, 1.])
+        n, d = particles.shape
+        v = self.get_field(particles, params, dropout=dropout)
+        if dropout:
+            f = utils.negative(v)
         else:
-            stein_discrepancy = stein.stein_discrepancy_fixed_log(
-                particles, dlogp, f)
-            stein_aux = np.array([1., 1.])
-        l2_f_sq = utils.l2_norm_squared(particles, f)
-        loss = -stein_discrepancy + self.lambda_reg * l2_f_sq  # + optax.global_norm(params)**2
-        # loss = - 1/2 * stein_discrepancy**2 / l2_f_sq
+            def f(x, dummy_key):
+                return -v(x)
 
-        # add L1 term
-        if self.l1_weight:
-            loss = loss + self.l1_weight * np.abs(jnp.mean(vmap(f)(particles) - dlogp))
-        aux = [loss, stein_discrepancy, l2_f_sq, stein_aux]
+        # stein discrepancy
+        def h(x, dlogp_x, key):
+            zkey, fkey = random.split(key)
+            z = random.normal(zkey, (d,))
+            zdf = grad(lambda _x: np.vdot(z, f(_x, fkey)))
+            div_f = np.vdot(zdf(x), z)
+            l2 = np.inner(f(x, fkey), f(x, fkey))
+            sd = np.inner(f(x, fkey), dlogp_x) + div_f
+            aux = {
+                "sd": sd,
+                "l2": l2,
+            }
+            return sd + l2 / 2, aux
+        keys = random.split(key, n)
+        loss, aux = vmap(h)(particles, dlogp, keys)
+        loss = loss.mean()
+        aux = {k: v.mean() for k, v in aux.items()}
+        aux.update({"loss": loss})
+#        #  add L1 term
+#        if self.l1_weight:
+#            loss = loss + self.l1_weight * np.abs(jnp.mean(vmap(f)(particles) - dlogp))
         return loss, aux
-
-    @partial(jit, static_argnums=0)
-    def _log(self, particles, validation_particles, aux, step_counter):
-        """
-        Arguments:
-            aux: list (train_aux, val_aux, grads, params)
-        """
-        train_aux, val_aux, g, params = aux
-        loss, sd, l2v, stein_aux = train_aux
-        drift, repulsion = stein_aux  # shape (2, d)
-        val_loss, val_sd, *_ = val_aux
-        gradient_norms = [np.linalg.norm(v) for v in jax.tree_leaves(g)]
-        step_log = {
-            "step_counter": step_counter,
-            "training_loss": loss,
-            "training_sd": sd,
-            "validation_loss": val_loss,
-            "validation_sd": val_sd,
-            "l2_norm": l2v,
-            "mean_drift": np.mean(drift),
-            "mean_repulsion": np.mean(repulsion),
-            "layer_gradient_norms": gradient_norms,
-            "global_gradient_norm": optax.global_norm(g),
-        }
-        return step_log
 
     def gradient(self, params, particles, aux=False):
         """
         Plug-in particle update method. No dropout.
+        Update particles via particles = particles - eps * v(particles)
         args:
             params: pytree of neural net parameters
             particles: array of shape (n, d)
             aux: bool
         """
-        v = vmap(self.get_field(None, particles, params, dropout=False))
-        # v = vmap(self._get_grad(particles, params))
+        v = vmap(self.get_field(particles, params, dropout=False))
         if aux:
             return v(particles), {}
         else:
