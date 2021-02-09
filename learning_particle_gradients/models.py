@@ -146,7 +146,7 @@ class Particles:
         return shuffled_batch[:n_train_particles], shuffled_batch[-n_val_particles:]
 
     @partial(jit, static_argnums=0)
-    def _step(self, key, particles, optimizer_state, params):
+    def _step(self, particles, optimizer_state, params):
         """
         Updates particles in the direction given by self.gradient
 
@@ -171,12 +171,10 @@ class Particles:
         # grad_aux.update({"grads": updated_grads})
         return particles, optimizer_state, grad_aux
 
-    def step(self, params, key=None):
+    def step(self, params):
         """Log rundata, take step. Mutates state"""
-        if key is None:
-            self.threadkey, key = random.split(self.threadkey)
         updated_particles, self.optimizer_state, auxdata = self._step(
-            key, self.particles, self.optimizer_state, params)
+            self.particles, self.optimizer_state, params)
         self.log(auxdata)
         self.particles = updated_particles
         self.step_counter += 1
@@ -563,8 +561,8 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
             z = random.normal(zkey, (d,))
             zdf = grad(lambda _x: np.vdot(z, f(_x, fkey)))
             div_f = np.vdot(zdf(x), z)
-            l2 = np.inner(f(x, fkey), f(x, fkey))
-            sd = np.inner(f(x, fkey), dlogp_x) + div_f
+            sd = np.vdot(f(x, fkey), dlogp_x) + div_f
+            l2 = np.vdot(f(x, fkey), f(x, fkey))
             aux = {
                 "sd": sd,
                 "l2": l2,
@@ -574,7 +572,11 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         loss, aux = vmap(h)(particles, dlogp, keys)
         loss = loss.mean()
         aux = {k: v.mean() for k, v in aux.items()}
-        aux.update({"loss": loss})
+        l1 = jnp.mean(dlogp - vmap(f)(particles))
+        ratio = jnp.mean(vmap(f)(particles)) / dlogp.mean()
+        aux.update({"loss": loss,
+                    "l1_diff": l1,
+                    "l1_ratio": ratio})
 #        #  add L1 term
 #        if self.l1_weight:
 #            loss = loss + self.l1_weight * np.abs(jnp.mean(vmap(f)(particles) - dlogp))

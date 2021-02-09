@@ -128,11 +128,20 @@ def get_funnel_tracer(target_samples):
     return compute_mmd
 
 
-def get_squared_error_tracer(target_statistic: np.ndarray, statistic: callable, name: str):
-    """statistic is a callable that takes in particles and returns
-    a value. If the value is not scalar, then the final squared
-    error is summed across components. value must be of same shape
-    as target_statistic."""
+def get_squared_error_tracer(target_samples: np.ndarray,
+                             statistic: callable,
+                             name: str):
+    """
+    Trace the squared error of a statistic.
+    args:
+        target_samples: array of shape (n, d)
+        statistic: fn to compute scalar from samples
+        name: dict key for logging
+    (if statistic is not scalar, then report squared error summed over all
+    components.)
+    """
+    target_statistic = statistic(target_samples)
+
     def compute_summed_error(particles: np.ndarray):
         """compute squared error for each component, then
         sum across components."""
@@ -140,12 +149,11 @@ def get_squared_error_tracer(target_statistic: np.ndarray, statistic: callable, 
     return compute_summed_error
 
 
-def get_2nd_moment_tracer(target_2nd_moment):
+def get_2nd_moment_tracer(target_samples):
     return get_squared_error_tracer(
-        target_2nd_moment,
-        lambda particles: np.mean(particles**2, axis=0),
-        "second_error"
-    )
+        target_samples=target_samples,
+        statistic=lambda particles: np.mean(particles**2, axis=0),
+        name="second_error")
 
 
 def combine_tracers(*tracers):

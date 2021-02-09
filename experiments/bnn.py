@@ -1,6 +1,6 @@
 import jax
 from jax import numpy as jnp
-from jax import jit, vmap, random
+from jax import jit, vmap, random, value_and_grad
 import haiku as hk
 import config as cfg
 import mnist
@@ -137,3 +137,34 @@ def get_minibatch_logp(batch):
 def minibatch_logp(params_flat, batch):
     return -loss(unravel(params_flat), *batch)
 
+
+@jit
+def squared_error_loss(particles, fnet, ftrue):
+    """
+    MC estimate of the true loss (without using the div(f) trick.
+    Up to rescaling + constant, this is equal to the squared
+    error E[(f - f_true)**2].
+    args:
+        particles: array shaped (n, d)
+        fnet: callable, computes witness fn
+        ftrue: callable, computes grad(log p) - grad(log q)
+    """
+    return jnp.mean(vmap(
+        lambda x: jnp.inner(fnet(x), fnet(x)) / 2 - jnp.inner(fnet(x), ftrue(x)))(
+            particles))
+
+
+@jit
+def split_vdlogp(split_particles, batch):
+    """
+    Compute value and grad of logp.
+    args:
+        split_particles: tuple (train_particles, val_particles)
+        batch: tuple (images, labels)
+
+    returns:
+        two tuples: logp = (train_logp, val_logp) and similarly for grad(logp).
+    """
+    vg = vmap(value_and_grad(minibatch_logp), (0, None))
+    train_out, val_out = [vg(x, batch) for x in split_particles]
+    return tuple(zip(train_out, val_out))

@@ -177,8 +177,6 @@ def phistar_from_dlogp(x, dlogp, kernel):
         x, dlogp, x, kernel)
 
 
-
-
 def phistar_i(xi, x, logp, kernel, aux=True):
     """
     Arguments:
