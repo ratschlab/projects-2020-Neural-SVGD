@@ -572,8 +572,10 @@ class SDLearner(VectorFieldMixin, TrainingMixin):
         loss, aux = vmap(h)(particles, dlogp, keys)
         loss = loss.mean()
         aux = {k: v.mean() for k, v in aux.items()}
-        l1 = jnp.mean(dlogp - vmap(f)(particles, keys))
-        ratio = jnp.mean(vmap(f)(particles, keys)) / dlogp.mean()
+        fnorm = optax.global_norm(jnp.mean(vmap(f)(particles, keys), axis=0))
+        pnorm = optax.global_norm(jnp.mean(dlogp, axis=0))
+        l1 = pnorm - fnorm
+        ratio = fnorm / pnorm
         aux.update({"loss": loss,
                     "l1_diff": l1,
                     "l1_ratio": ratio})

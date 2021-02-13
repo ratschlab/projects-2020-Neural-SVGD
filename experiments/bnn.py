@@ -78,7 +78,7 @@ def minibatch_accuracy(param_set, images, labels):
 
 def compute_acc(param_set):
     accs = []
-    for batch in mnist.validation_batches:
+    for batch in mnist.val_batches:
         accs.append(minibatch_accuracy(param_set, *batch))
     return jnp.mean(jnp.array(accs))
 
