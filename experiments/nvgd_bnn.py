@@ -17,6 +17,8 @@ on_cluster = not os.getenv("HOME") == "/home/lauro"
 DEFAULT_MAX_TRAIN_STEPS = 100
 DEFAULT_META_LR = 1e-3  # should be as high as possible; regularize w/ max steps
 DEFAULT_PATIENCE = 5  # early stopping not v helpful, bc we overfit on all ps
+                      # UPDATE: we don't seem to overfit on all particles.
+                      # TODO: see what follows when I remove this assumption
 
 LAMBDA_REG = 100
 LAYER_SIZE = 256 if on_cluster else 32
