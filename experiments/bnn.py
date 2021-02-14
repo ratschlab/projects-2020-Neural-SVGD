@@ -88,6 +88,32 @@ def compute_acc_from_flat(param_set_flat):
     return compute_acc(param_set)
 
 
+@jit
+def test_accuracy(param_set):
+    """
+    args:
+        param_set: pytree of neural network parameters
+            such that every leaf has an added first axis
+            storing n sets of nn parameters
+    """
+    return jax.lax.map(
+        lambda images, labels: minibatch_accuracy(param_set, images, labels)
+    )(*mnist.test_batches_arr).mean()
+
+
+@jit
+def val_accuracy(param_set):
+    """
+    args:
+        param_set: pytree of neural network parameters
+            such that every leaf has an added first axis
+            storing n sets of nn parameters
+    """
+    return jax.lax.map(
+        lambda images, labels: minibatch_accuracy(param_set, images, labels)
+    )(*mnist.val_batches_arr).mean()
+
+
 # Loss
 def crossentropy_loss(logits, labels, label_smoothing=0.):
     """Compute cross entropy for logits and labels w/ label smoothing

@@ -1,13 +1,11 @@
 # Maximize the stein discrepancy, keeping distributions p and q fixed. Compare
 # neural stein discrepancy, kernelized SD, and theoretical optimum.
 from functools import partial
-from jax import grad, jit, random
+from jax import grad, jit, random, vmap
 from tqdm import tqdm
 import jax.numpy as jnp
 import numpy as onp
-import matplotlib.pyplot as plt
 import json_tricks as json
-import matplotlib
 
 import utils
 import stein
@@ -17,18 +15,6 @@ import models
 import config as cfg
 
 key = random.PRNGKey(0)
-
-# Config
-# set up exporting
-matplotlib.use("pgf")
-matplotlib.rcParams.update({
-    "pgf.texsystem": "pdflatex",
-    'pgf.rcfonts': False,
-    'axes.unicode_minus': False,  # avoid unicode error on saving plots with negative numbers (??)
-})
-
-# figure_path = "/home/lauro/documents/msc-thesis/paper/latex/figures/"
-
 
 # Poorly conditioned Gaussian
 d = 50
@@ -59,7 +45,6 @@ for _ in range(100):
 print("Computing neural Stein discrepancy...")
 key, subkey = random.split(key)
 learner = models.SDLearner(target_dim=d,
-                           target_logp=target.logpdf,
                            key=subkey,
                            learning_rate=1e-2,
                            patience=-1)
@@ -71,12 +56,13 @@ def sample(key):
 
 
 key, subkey = random.split(key)
-learner.warmup(key=subkey,
-               sample_split_particles=sample,
-               next_data=lambda: None,
-               n_iter=30,
-               n_inner_steps=30,
-               progress_bar=True)
+split_particles = sample(subkey)
+split_dlogp = [vmap(grad(target.logpdf))(x) for x in split_particles]
+for _ in tqdm(range(900)):
+    key, subkey = random.split(key)
+    learner.step(*split_particles,
+                 *split_dlogp)
+
 learner.done()
 
 
@@ -97,28 +83,11 @@ for _ in tqdm(range(100)):
 
 
 print("Saving results...")
-# Plotting config
-plt.rc('font', size=7)
-printsize_singlecolumn = [3.6, 3]  # adapted for ICML submission (single-column)
-
-fig, axs = plt.subplots(figsize=printsize_singlecolumn)
-
-plt.plot(learner.rundata["training_sd"], label="Stein discrepancy given $f_{\\theta}$")
-plt.axhline(y=onp.mean(sds), linestyle="--", label="Optimal Stein discrepancy", color="green")
-plt.axhline(y=onp.mean(ksds), linestyle="--", label="Kernelized Stein discrepancy", color="tab:orange")
-
-plt.ylabel("Stein discrepancy")
-plt.xlabel("Iteration")
-
-plt.legend(fontsize='small')
-plt.savefig(cfg.figure_path + "sd_maxing.pgf")
-
-
 # save json results
 results = {
     "KSD": onp.mean(ksds).tolist(),
     "Optimal_SD": onp.mean(sds).tolist(),
-    "Neural_SD": learner.rundata["training_sd"].tolist(),
+    "Neural_SD": learner.rundata["sd"].tolist(),
 }
 
 with open(cfg.results_path + "sd_maxing.json", "w") as f:

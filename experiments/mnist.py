@@ -36,11 +36,25 @@ def _make_batches(images, labels, batch_size, cyclic=True):
 
 
 def make_batches(batch_size):
-    val_batches = _make_batches(
-        val_images, val_labels, cfg.batch_size, cyclic=False)
+    test_batches = _make_batches(train_images, train_labels, batch_size, cyclic=False)
+    val_batches = _make_batches(val_images, val_labels, batch_size, cyclic=False)
     train_batches = _make_batches(train_images, train_labels, batch_size)
-    test_batches = _make_batches(train_images, train_labels, batch_size)
     return (train_batches, val_batches, test_batches)
 
 
 train_batches, val_batches, test_batches = make_batches(cfg.batch_size)
+
+
+# batches as array so we can jax.lax.map over them
+def convert_to_array(batches):
+    """
+    args:
+        batches: list of tuples (images, labels),
+            where images, labels are batches.
+    """
+    batches = list(zip(*batches[:-1]))  # [image_batches, label_batches]
+    return [onp.asarray(bs) for bs in batches]
+
+
+test_batches_arr = convert_to_array(test_batches)
+val_batches_arr = convert_to_array(val_batches)

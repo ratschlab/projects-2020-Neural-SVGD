@@ -63,7 +63,7 @@ mmd_sweep = onp.array(mmd_sweep)
 
 # save json results
 results = {
-    "NSVGD": mmd_sweep[:, 0].tolist(),
+    "NVGD": mmd_sweep[:, 0].tolist(),
     "SVGD":  mmd_sweep[:, 1].tolist(),
     "SGLD":  mmd_sweep[:, 2].tolist(),
 }
