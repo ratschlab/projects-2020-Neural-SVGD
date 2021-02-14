@@ -54,7 +54,7 @@ def train(key,
     losses = []
     accuracies = []
     for step_counter in tqdm(range(n_iter), disable=DISABLE_PROGRESS_BAR):
-        images, labels = next(mnist.training_batches)
+        images, labels = next(mnist.train_batches)
         param_set, opt_state, step_losses = step(param_set, opt_state, images, labels)
         losses.append(step_losses)
 

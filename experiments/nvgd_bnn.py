@@ -117,7 +117,7 @@ def train(key,
     print("Training...")
     for step_counter in tqdm(range(n_iter), disable=on_cluster):
         key, subkey = random.split(key)
-        train_batch = next(mnist.training_batches)
+        train_batch = next(mnist.train_batches)
         n_train_particles = 3*n_samples // 4 if early_stopping else n_samples - 1
         split_particles = particles.next_batch(key, n_train_particles=n_train_particles)
         split_logp, split_dlogp = split_vdlogp(split_particles, train_batch)

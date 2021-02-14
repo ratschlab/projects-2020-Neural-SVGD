@@ -74,7 +74,7 @@ def train(key,
 
     print("Training...")
     for step_counter in tqdm(range(n_iter), disable=on_cluster):
-        train_batch = next(mnist.training_batches)
+        train_batch = next(mnist.train_batches)
         particles.step(train_batch)
 
         if (step_counter+1) % evaluate_every == 0:
