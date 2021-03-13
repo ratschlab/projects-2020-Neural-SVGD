@@ -96,9 +96,10 @@ def test_accuracy(param_set):
             such that every leaf has an added first axis
             storing n sets of nn parameters
     """
-    return jax.lax.map(
-        lambda images, labels: minibatch_accuracy(param_set, images, labels)
-    )(*mnist.test_batches_arr).mean()
+    return jax.lax.map( 
+        lambda batch: minibatch_accuracy(param_set, *batch),
+        mnist.test_batches_arr
+        ).mean()
 
 
 @jit
@@ -110,8 +111,9 @@ def val_accuracy(param_set):
             storing n sets of nn parameters
     """
     return jax.lax.map(
-        lambda images, labels: minibatch_accuracy(param_set, images, labels)
-    )(*mnist.val_batches_arr).mean()
+        lambda batch: minibatch_accuracy(param_set, *batch),
+        mnist.val_batches_arr
+        ).mean()
 
 
 # Loss

@@ -20,8 +20,8 @@ DEFAULT_PATIENCE = 5  # early stopping not v helpful, bc we overfit on all ps
                       # UPDATE: we don't seem to overfit on all particles.
                       # TODO: see what follows when I remove this assumption
 
-LAMBDA_REG = 100
-LAYER_SIZE = 256 if on_cluster else 32
+LAMBDA_REG = 1/2
+DEFAULT_LAYER_SIZE = 256 if on_cluster else 32
 
 
 def train(key,
@@ -37,7 +37,8 @@ def train(key,
           results_file: str = cfg.results_path + 'nvgd-bnn.csv',
           overwrite_file: bool = False,
           early_stopping: bool = True,
-          optimizer: str = "sgd"):
+          optimizer: str = "sgd",
+          hidden_sizes=[DEFAULT_LAYER_SIZE]*3):
     """
     Initialize model; warmup; training; evaluation.
     Returns a dictionary of metrics.
@@ -70,7 +71,7 @@ def train(key,
     neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
                                    learning_rate=meta_lr,
                                    key=subkey1,
-                                   sizes= [LAYER_SIZE]*3 + [init_particles.shape[1]],
+                                   sizes=hidden_sizes + [init_particles.shape[1]],
                                    aux=False,
                                    use_hutchinson=True,
                                    lambda_reg=LAMBDA_REG,
