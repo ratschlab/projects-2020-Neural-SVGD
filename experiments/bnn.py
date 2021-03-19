@@ -73,6 +73,7 @@ def ensemble_accuracy(logits, labels):
 
 @jit
 def minibatch_accuracy(param_set, images, labels):
+    """ensemble accuracy computed on a minibatch given by images, labels"""
     logits = vmap(model.apply, (0, None))(param_set, images)
     return ensemble_accuracy(logits, labels)
 
@@ -117,13 +118,23 @@ def val_accuracy(param_set):
         ).mean()
 
 
+@jit
+def val_accuracy_single_net(params):
+    """same as val_accuracy, but params is just a simple pytree
+    where each leaf stores a parameter array"""
+    def acc(images, labels):
+        logits = model.apply(params, images)
+        return accuracy(logits, labels)
+    return jax.lax.map(acc, data.val_batches_arr).mean()
+
 # Loss
 def crossentropy_loss(logits, labels, label_smoothing=0.):
     """Compute cross entropy for logits and labels w/ label smoothing
     Args:
         logits: [batch, num_classes] float array.
         labels: categorical labels [batch,] int array (not one-hot).
-        label_smoothing: label smoothing constant, used to determine the on and off values.
+        label_smoothing: label smoothing constant, used to determine the 
+        on and off values.
     """
     num_classes = logits.shape[-1]
     labels = jax.nn.one_hot(labels, num_classes)
