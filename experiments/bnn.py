@@ -122,7 +122,8 @@ def val_accuracy(param_set):
 def val_accuracy_single_net(params):
     """same as val_accuracy, but params is just a simple pytree
     where each leaf stores a parameter array"""
-    def acc(images, labels):
+    def acc(batch):
+        images, labels = batch
         logits = model.apply(params, images)
         return accuracy(logits, labels)
     return jax.lax.map(acc, data.val_batches_arr).mean()
