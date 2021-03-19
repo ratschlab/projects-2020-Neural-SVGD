@@ -19,10 +19,11 @@ elif location in ['local']:
     batch_size = 128
     data_dir = "/tmp/tfds"
 else:
-    raise
+    raise ValueError
 
 figure_path = results_path + "figures/"
 n_samples = 100
 evaluate_every = 10
-num_iter = 400  # for final run (sweep less)
+num_iter = 400  # for final run (sweep uses less iterations)
 # figure_path = "/home/lauro/documents/msc-thesis/paper/latex/figures/"
+dataset = "mnist" # passed to tfds

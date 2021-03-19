@@ -27,10 +27,9 @@ def load_data(dataset="mnist"):
         train_images, train_labels, test_size=0.1, random_state=0)
 
     train_data_size = len(train_images)
-    steps_per_epoch = train_data_size // cfg.batch_size
 
     return (train_images, train_labels), (val_images, val_labels), \
-        (test_images, test_labels)
+        (test_images, test_labels), train_data_size, train_images
 
 
 def _make_batches(images, labels, batch_size, cyclic=True):
@@ -40,14 +39,6 @@ def _make_batches(images, labels, batch_size, cyclic=True):
     split_idx = onp.arange(1, num_batches+1)*batch_size
     batches = zip(*[onp.split(data, split_idx, axis=0) for data in (images, labels)])
     return cycle(batches) if cyclic else list(batches)
-
-
-def make_batches(batch_size, dataset="mnist"):
-    train, val, test = load_data(dataset)
-    train_batches = _make_batches(*train, batch_size)
-    val_batches = _make_batches(*val, batch_size, cyclic=False)
-    test_batches = _make_batches(*test, batch_size, cyclic=False)
-    return (train_batches, val_batches, test_batches)
 
 
 # batches as array so we can jax.lax.map over them
@@ -62,14 +53,16 @@ def convert_to_array(batches):
 
 
 class Data():
-    def __init__(self, train_batches, val_batches, test_batches):
-        self.train_batches = train_batches
-        self.val_batches = val_batches
-        self.test_batches = test_batches
+    def __init__(self, dataset="mnist", batch_size=cfg.batch_size):
+        train, val, test, self.train_data_size, self.train_images = load_data(dataset)
+        self.train_batches = _make_batches(*train, batch_size)
+        self.val_batches = _make_batches(*val, batch_size, cyclic=False)
+        self.test_batches = _make_batches(*test, batch_size, cyclic=False)
 
-        self.test_batches_arr = convert_to_array(test_batches)
-        self.val_batches_arr = convert_to_array(val_batches)
+        self.test_batches_arr = convert_to_array(self.test_batches)
+        self.val_batches_arr = convert_to_array(self.val_batches)
 
 
-mnist = Data(*make_batches(cfg.batch_size, "mnist"))
-cifar10 = Data(*make_batches(cfg.batch_size, "cifar10"))
+data = Data(cfg.dataset)
+# mnist = Data("mnist")
+# cifar10 = Data("cifar10")

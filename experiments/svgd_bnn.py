@@ -6,10 +6,11 @@ import optax
 import bnn
 import models
 import metrics
-import mnist
+import dataloader
 import config as cfg
 import pandas as pd
 
+data = dataloader.data
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # Config
@@ -74,15 +75,15 @@ def train(key,
 
     print("Training...")
     for step_counter in tqdm(range(n_iter), disable=on_cluster):
-        train_batch = next(mnist.train_batches)
+        train_batch = next(data.train_batches)
         particles.step(train_batch)
 
         if (step_counter+1) % evaluate_every == 0:
             metrics.append_to_log(particles.rundata,
                                   evaluate(step_counter, particles.particles))
 
-        if step_counter % mnist.steps_per_epoch == 0:
-            print(f"Starting epoch {step_counter // mnist.steps_per_epoch + 1}")
+        if step_counter % data.steps_per_epoch == 0:
+            print(f"Starting epoch {step_counter // data.steps_per_epoch + 1}")
 
     # final eval
     final_eval = evaluate(-1, particles.particles)

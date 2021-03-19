@@ -3,8 +3,9 @@ from jax import numpy as jnp
 from jax import jit, vmap, random, value_and_grad
 import haiku as hk
 import config as cfg
-import mnist
+import dataloader
 
+data = dataloader.data
 NUM_CLASSES = 10
 
 # Initialize all weights and biases the same way
@@ -33,7 +34,7 @@ def make_model(size: str = "large"):
 model = make_model(cfg.model_size)
 
 # utility functions for dealing with parameter shapes
-params_tree = model.init(random.PRNGKey(0), mnist.train_images[:2])
+params_tree = model.init(random.PRNGKey(0), data.train_images[:2])
 _, unravel = jax.flatten_util.ravel_pytree(params_tree)
 del params_tree
 
@@ -43,7 +44,7 @@ def ravel(tree):
 
 
 def init_flat_params(key):
-    return ravel(model.init(key, mnist.train_images[:2]))
+    return ravel(model.init(key, data.train_images[:2]))
 
 
 # Accuracy
@@ -78,7 +79,7 @@ def minibatch_accuracy(param_set, images, labels):
 
 def compute_acc(param_set):
     accs = []
-    for batch in mnist.val_batches:
+    for batch in data.val_batches:
         accs.append(minibatch_accuracy(param_set, *batch))
     return jnp.mean(jnp.array(accs))
 
@@ -98,7 +99,7 @@ def test_accuracy(param_set):
     """
     return jax.lax.map( 
         lambda batch: minibatch_accuracy(param_set, *batch),
-        mnist.test_batches_arr
+        data.test_batches_arr
         ).mean()
 
 
@@ -112,7 +113,7 @@ def val_accuracy(param_set):
     """
     return jax.lax.map(
         lambda batch: minibatch_accuracy(param_set, *batch),
-        mnist.val_batches_arr
+        data.val_batches_arr
         ).mean()
 
 
@@ -145,7 +146,7 @@ def loss(params, images, labels):
     negative log-posterior evaluated at `params`. That is,
     -log model_likelihood(data_batch | params) * batch_rescaling_constant - log prior(params))"""
     logits = model.apply(params, images)
-    return mnist.train_data_size/cfg.batch_size * crossentropy_loss(logits, labels) - log_prior(params)
+    return data.train_data_size/cfg.batch_size * crossentropy_loss(logits, labels) - log_prior(params)
 
 
 def get_minibatch_logp(batch):

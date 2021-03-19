@@ -1,4 +1,4 @@
-# Train a Bayesian neural network to classify MNIST using
+# Train a Bayesian neural network to classify data using
 # (parallel) Langevin dynamics
 import os
 import argparse
@@ -8,10 +8,12 @@ import optax
 import utils
 import config as cfg
 import jax.flatten_util
-import mnist
+import dataloader
 import bnn
 import pandas as pd
 
+data = dataloader.data
+NUM_CLASSES = 10
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 
 # Config
@@ -33,7 +35,7 @@ def train(key,
     print("Initializing parameters...")
     key, subkey = random.split(key)
     param_set = vmap(bnn.model.init, (0, None))(
-        random.split(subkey, n_samples), mnist.train_images[:5])
+        random.split(subkey, n_samples), data.train_images[:5])
     opt_state = opt.init(param_set)
 
     # save accuracy to file
@@ -54,7 +56,7 @@ def train(key,
     losses = []
     accuracies = []
     for step_counter in tqdm(range(n_iter), disable=DISABLE_PROGRESS_BAR):
-        images, labels = next(mnist.train_batches)
+        images, labels = next(data.train_batches)
         param_set, opt_state, step_losses = step(param_set, opt_state, images, labels)
         losses.append(step_losses)
 
