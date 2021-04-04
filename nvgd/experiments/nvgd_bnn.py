@@ -53,8 +53,8 @@ def train(key,
         dropout: use dropout during training of the Stein network
         write_results_to_file: whether to save accuracy in csv file
     """
-    csv_string = f"{meta_lr},{particle_stepsize}," \
-                 f"{patience},{max_train_steps_per_iter},"
+#    csv_string = f"{meta_lr},{particle_stepsize}," \
+#                 f"{patience},{max_train_steps_per_iter},"
 
     # initialize particles and the dynamics model
     key, subkey = random.split(key)
@@ -110,7 +110,7 @@ def train(key,
             "loglikelihood": ll,
         }
         with open(results_file, "a") as file:
-            file.write(csv_string + f"{step_counter},{stepdata['accuracy']},{ll}\n")
+            file.write(f"{step_counter},{stepdata['accuracy']},{ll}\n")
         return stepdata
 
     if not os.path.isfile(results_file) or overwrite_file:
@@ -143,9 +143,8 @@ def train(key,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_samples", type=int, default=100,
-                        help="Number of parallel chains")
-    parser.add_argument("--n_iter", type=int, default=200)
+    parser.add_argument("--steps", type=int, default=200)
+    parser.add_argument("--opt", type=str, default="sgd")
     args = parser.parse_args()
 
     print("Loading optimal step size")
@@ -155,11 +154,11 @@ if __name__ == "__main__":
         sweep_results = pd.read_csv(stepsize_csv, index_col=0)
         stepsize = sweep_results['optimal_stepsize']['nvgd']
     except (FileNotFoundError, TypeError):
-        print('CSV sweep results not found; using default')
-        stepsize = 1e-3
+        stepsize = 1e-3 if args.opt == "sgd" else 4e-3
+        print(f'CSV sweep results not found; using default stepsize {stepsize}')
 
     rngkey = random.PRNGKey(0)
     train(key=rngkey,
-          n_samples=args.n_samples,
-          n_iter=args.n_iter,
-          particle_stepsize=stepsize)
+          particle_stepsize=stepsize,
+          n_iter=args.steps,
+          optimizer=args.opt)

@@ -18,7 +18,7 @@ def make_model(size: str = "large"):
         """returns logits"""
         n_channels = 8 if size == "small" else 8
 #        image = image.astype(jnp.float32)
-        image = image / 78
+        image = (image - 33) / 78
         convnet = hk.Sequential([
             hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
             jax.nn.relu,

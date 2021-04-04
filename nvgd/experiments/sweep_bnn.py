@@ -94,7 +94,6 @@ def sweep_nvgd():
                                                  n_iter=NUM_STEPS,
                                                  evaluate_every=EVALUATE_EVERY,
                                                  overwrite_file=OVERWRITE_FILE,
-                                                 dropout=True,
                                                  results_file=dumpfile,
                                                  optimizer=args.opt,
                                                  hidden_sizes=args.hidden_sizes)
