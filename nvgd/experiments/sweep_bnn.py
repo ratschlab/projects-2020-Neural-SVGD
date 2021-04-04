@@ -6,6 +6,7 @@ import nvgd_bnn
 import svgd_bnn
 import sgld_bnn
 from jax import random
+from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--run", type=str, default='all',
@@ -16,6 +17,7 @@ parser.add_argument("--results_folder", type=str,
                     default="bnn-sweep")
 parser.add_argument("--steps", type=int, default=200)
 parser.add_argument("--opt", type=str, default="sgd")
+parser.add_argument("--hidden_sizes", nargs="*", type=int, default=[256]*3)
 args = parser.parse_args()
 
 
@@ -46,6 +48,8 @@ else:
 
 sgld_stepsizes = onp.logspace(start=-9, stop=-5, num=n_lrs)
 
+
+Path(results_path).mkdir(parents=True, exist_ok=True)
 if not os.path.isfile(sweep_results_file) or OVERWRITE_FILE:
     with open(sweep_results_file, "w") as f:
         f.write("name,optimal_stepsize,max_val_accuracy\n")
@@ -92,7 +96,8 @@ def sweep_nvgd():
                                                  overwrite_file=OVERWRITE_FILE,
                                                  dropout=True,
                                                  results_file=dumpfile,
-                                                 optimizer=args.opt)
+                                                 optimizer=args.opt,
+                                                 hidden_sizes=args.hidden_sizes)
 
         save_single_run("nvgd", final_acc, particle_stepsize)
         final_accs.append((final_acc, particle_stepsize))
@@ -141,9 +146,9 @@ elif args.run == "sgld":
 elif args.run == "svgd":
     sweep_svgd()
 elif args.run == "all":
+    sweep_nvgd()
     sweep_sgld()
     sweep_svgd()
-    sweep_nvgd()
 else:
     raise ValueError("cli argument 'run' must be one of 'nvgd', 'sgld',"
                      "'svgd', or 'all'.")

@@ -62,6 +62,8 @@ class Data():
         self.test_batches_arr = convert_to_array(self.test_batches)
         self.val_batches_arr = convert_to_array(self.val_batches)
 
+        self.steps_per_epoch = self.train_data_size // cfg.batch_size
+
 
 data = Data(cfg.dataset)
 # mnist = Data("mnist")
