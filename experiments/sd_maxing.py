@@ -44,7 +44,7 @@ for _ in range(100):
 # Neural SD
 print("Computing neural Stein discrepancy...")
 key, subkey = random.split(key)
-learner = models.SDLearner(target_dim=d,
+learner = models.SteinNetwork(target_dim=d,
                            key=subkey,
                            learning_rate=1e-2,
                            patience=-1)

@@ -27,7 +27,7 @@ It is structured as follows:
 The class `Particles` acts as container for the particle positions and associated data.
 Any update rule can be 'plugged in' by supplying the `gradient` argument. The following
 update rules are implemented here:
-- `SDLearner`: the method developed in this project, which dynamically learns a trajectory using a neural network.
+- `SteinNetwork`: the method developed in this project, which dynamically learns a trajectory using a neural network.
 - `KernelGradient`: simulates SVGD dynamics
 - `EnergyGradient`: simulates Langevin dynamics
 
@@ -501,7 +501,7 @@ class TrainingMixin:
         raise NotImplementedError()
 
 
-class SDLearner(VectorFieldMixin, TrainingMixin):
+class SteinNetwork(VectorFieldMixin, TrainingMixin):
     """Parametrize vector field to maximize the stein discrepancy"""
     def __init__(self,
                  target_dim: int,

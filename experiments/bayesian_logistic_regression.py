@@ -237,7 +237,7 @@ def run_neural_svgd(key, plr, full_data=False, progress_bar=False):
     nsvgd_opt = optax.sgd(plr)
 
     key1, key2 = random.split(key)
-    neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
+    neural_grad = models.SteinNetwork(target_dim=init_particles.shape[1],
                                    get_target_logp=lambda batch: get_minibatch_logp(*batch),
                                    learning_rate=neural_lr,
                                    key=key1,

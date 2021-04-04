@@ -4,6 +4,7 @@ from jax import jit, vmap, random, value_and_grad
 import haiku as hk
 import config as cfg
 import dataloader
+from ..learning_particle_gradients import nets
 
 data = dataloader.data
 NUM_CLASSES = 10

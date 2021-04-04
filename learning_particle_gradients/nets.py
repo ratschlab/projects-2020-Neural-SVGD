@@ -1,4 +1,4 @@
-import jax.numpy as np
+import jax.numpy as jnp
 from jax import vmap, grad
 import jax
 import haiku as hk
@@ -6,10 +6,10 @@ import haiku as hk
 import kernels
 
 
-def bandwidth_init(shape, dtype=np.float32):
+def bandwidth_init(shape, dtype=jnp.float32):
     """Init for bandwith matrix"""
     d = shape[0]
-    return np.identity(d, dtype)
+    return jnp.identity(d, dtype)
 
 
 class RBFKernel(hk.Module):
@@ -27,13 +27,13 @@ class RBFKernel(hk.Module):
     def __call__(self, xy):
         """xy should have shape (2, d)"""
         d = xy.shape[-1]
-        scale = hk.get_parameter("scale", shape=(), init=np.ones) if self.scale_param else 1.
+        scale = hk.get_parameter("scale", shape=(), init=jnp.ones) if self.scale_param else 1.
         if self.parametrization == "log_diagonal":
-            log_bandwidth = hk.get_parameter("log_bandwidth", shape=(d,), init=np.zeros)
-            log_bandwidth = np.clip(log_bandwidth, a_min=-5, a_max=5)
+            log_bandwidth = hk.get_parameter("log_bandwidth", shape=(d,), init=jnp.zeros)
+            log_bandwidth = jnp.clip(log_bandwidth, a_min=-5, a_max=5)
             return scale * kernels.get_rbf_kernel_logscaled(log_bandwidth)(*xy)
         elif self.parametrization == "diagonal":
-            bandwidth = hk.get_parameter("bandwidth", shape=(d,), init=np.ones)
+            bandwidth = hk.get_parameter("bandwidth", shape=(d,), init=jnp.ones)
             return scale * kernels.get_rbf_kernel(bandwidth)(*xy)
         elif self.parametrization == "full":
             sigma = hk.get_parameter("sigma", shape=(d, d), init=bandwidth_init)
@@ -56,8 +56,8 @@ class DeepKernel(hk.Module):
 
 
 def get_norm(init_x):
-    mean = np.mean(init_x, axis=0)
-    std = np.std(init_x, axis=0)
+    mean = jnp.mean(init_x, axis=0)
+    std = jnp.std(init_x, axis=0)
 
     def norm(x):
         return (x - mean) / (std + 1e-5)
@@ -73,7 +73,7 @@ class MLP(hk.Module):
         super().__init__(name=name)
         self.sizes = sizes
 
-    def __call__(self, x: np.ndarray, dropout: bool = False):
+    def __call__(self, x: jnp.ndarray, dropout: bool = False):
         """
         args:
             x: a batch of particles of shape (n, d) or a single particle
@@ -112,7 +112,7 @@ class KLGrad(hk.Module):
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
                           activation=jax.nn.swish,
                           activate_final=False)
-        s = hk.get_parameter("scale", (), init=np.ones)
+        s = hk.get_parameter("scale", (), init=jnp.ones)
         if x.ndim == 1:
             return mlp(x) - s*grad(self.logp)(x)
         elif x.ndim == 2:
@@ -141,3 +141,46 @@ def build_mlp(sizes, name=None, skip_connection=False,
         else:
             return lin(x) + x  # make sure sizes fit (ie sizes[-1] == input dimension)
     return hk.transform(mlp)
+
+
+class StaticHypernet(hk.Module):
+    def __init__(self, sizes: list = [256, 256], embedding_size=64, name: str = None):
+        """
+        args
+            sizes: sizes of the fully connected layers
+            embedding_size: dimension of z (input to hypernetwork)
+
+        Take care to choose sizes[-1] equal to the particle dimension.
+        init_x should have shape (n, d)
+        """
+        super().__init__(name=name)
+        self.sizes = sizes
+        self.embedding_size = embedding_size
+
+    def __call__(self, base_params: jnp.ndarray, dropout: bool = False):
+        """
+        args:
+            base_params: parameters of the base network, layer-wise. Must have
+                shape (m, _), where m is the number of layers in the base
+                convnet.
+            dropout: bool; apply dropout to output?
+        """
+        num_base_layers = len(base_params)
+        mlp = hk.nets.MLP(output_sizes=self.sizes,
+                          w_init=hk.initializers.VarianceScaling(scale=2.0),
+                          activation=jax.nn.swish,
+                          activate_final=False)
+
+        z = hk.get_parameter("z",
+                             shape=(num_base_layers, self.embedding_size),
+                             init=hk.initializers.RandomNormal())
+
+        output = mlp(jnp.hstack((base_params, z)))  # input now has (batched) shape
+                                                    # (num_base_layers, self.embedding_size + layer_size)
+        if dropout:
+            output = hk.dropout(
+                rng=hk.next_rng_key(),
+                rate=0.2,
+                x=output
+            )
+        return output

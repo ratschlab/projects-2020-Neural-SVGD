@@ -28,7 +28,7 @@ def neural_svgd_flow(key,
     """
     key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
-    learner = models.SDLearner(key=keya,
+    learner = models.SteinNetwork(key=keya,
                                target_dim=target.d,
                                **learner_kwargs)
 

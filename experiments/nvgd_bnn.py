@@ -69,7 +69,7 @@ def train(key,
         raise ValueEror("optimizer must be sgd or adam")
 
     key, subkey1, subkey2 = random.split(key, 3)
-    neural_grad = models.SDLearner(target_dim=init_particles.shape[1],
+    neural_grad = models.SteinNetwork(target_dim=init_particles.shape[1],
                                    learning_rate=meta_lr,
                                    key=subkey1,
                                    sizes=hidden_sizes + [init_particles.shape[1]],
