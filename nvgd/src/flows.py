@@ -1,9 +1,7 @@
 from jax import random, jit, vmap, grad
 import warnings
 from tqdm import tqdm
-import metrics
-import kernels
-import models
+from nvgd.src import metrics, kernels, models
 
 default_num_particles = 50
 default_num_steps = 100
@@ -12,6 +10,8 @@ default_num_steps = 100
 disable_tqdm = False
 NUM_WARMUP_STEPS = 500
 
+raise NotImplementedError("Need to update call to SteinNetwork to match "
+                          "the updated argument signature in flows.py")
 
 def neural_svgd_flow(key,
                      setup,

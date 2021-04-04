@@ -3,8 +3,7 @@ from jax import vmap, jacfwd
 from scipy.spatial.distance import cdist
 import ot
 
-import utils
-import kernels
+from . import utils, kernels
 
 
 def append_to_log(dct, update_dict):

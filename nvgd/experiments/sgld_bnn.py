@@ -2,15 +2,15 @@
 # (parallel) Langevin dynamics
 import os
 import argparse
+import jax.flatten_util
+import pandas as pd
+import optax
 from jax import jit, value_and_grad, vmap, random
 from tqdm import tqdm
-import optax
-import utils
+from nvgd.src import utils
 import config as cfg
-import jax.flatten_util
 import dataloader
 import bnn
-import pandas as pd
 
 data = dataloader.data
 NUM_CLASSES = 10

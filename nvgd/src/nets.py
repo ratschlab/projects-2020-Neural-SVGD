@@ -2,8 +2,7 @@ import jax.numpy as jnp
 from jax import vmap, grad
 import jax
 import haiku as hk
-
-import kernels
+from . import kernels
 
 
 def bandwidth_init(shape, dtype=jnp.float32):

@@ -1,7 +1,7 @@
 import jax.numpy as np
 from jax import vmap, grad
 from jax.scipy import stats
-import utils
+from . import utils
 
 """A collection of positive definite kernel functions.
 Every kernel takes as input two jax scalars or arrays x, y of shape (d,),

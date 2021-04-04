@@ -3,9 +3,8 @@ import argparse
 from jax import vmap, random
 from tqdm import tqdm
 import optax
+from nvgd.src import models, metrics
 import bnn
-import models
-import metrics
 import dataloader
 import config as cfg
 import pandas as pd

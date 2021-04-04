@@ -10,11 +10,11 @@ cd projects-2020-Neural-SVGD
 pip install -r requirements.txt
 ```
 
-This is a work in progress; when finished, I'll add code to reproduce all experiments and link to the preprint.
+This is a work in progress; when finished, I'll add a link to the preprint.
 
 # Structure
 
-All code is contained in the `learning_particle_gradients` folder. The files are structured as follows:
+The implementation is contained in the `nvgd/src` folder. The files are structured as follows:
 
 * `distributions.py`: a set of classes that bundle together all attributes and methods associated with a probability distribution (e.g. mean, variance, sampling, computing the likelihood and loglikelihood).
 * `flows.py`: implements functions to simulate the particle dynamics, using the models in `models.py`

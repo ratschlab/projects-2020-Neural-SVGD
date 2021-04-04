@@ -1,9 +1,7 @@
 import jax.numpy as np
 from jax import random, vmap, jacfwd, grad
 from jax.scipy import stats
-import utils
-import plot
-import stein
+from nvgd.src import utils, plot, stein
 import warnings
 
 from tensorflow_probability.substrates import jax as tfp

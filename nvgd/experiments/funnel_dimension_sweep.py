@@ -5,10 +5,7 @@ import jax.numpy as jnp
 from jax import jit, random
 import numpy as onp
 
-import distributions
-import flows
-import kernels
-import metrics
+from nvgd.src import distributions, flows, kernels, metrics
 import config as cfg
 
 key = random.PRNGKey(0)
@@ -25,6 +22,8 @@ MAX_DIM = 50  # sweep from 2 to MAX_DIM
 mmd_kernel = kernels.get_rbf_kernel(1.)
 mmd = jit(metrics.get_mmd(mmd_kernel))
 
+raise NotImplementedError("Need to update call to SteinNetwork to match "
+                          "the updated argument signature in flows.py")
 
 def get_mmds(particle_list, ys):
     mmds = []
@@ -45,6 +44,7 @@ def sample(d, key, n_particles):
     return (neural_particles, svgd_particles, sgld_particles), (neural_learner, svgd_gradient, sgld_gradient)
 
 
+print("SWEEPING DIMENSIONS...")
 mmd_sweep = []
 for d in tqdm(range(2, 40), disable=on_cluster):
     print(d)

@@ -12,14 +12,16 @@ from sklearn.model_selection import train_test_split
 
 import config as cfg
 import optax
-import metrics
-import utils
-import models
+
+from nvgd.src import metrics, utils, models
 
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
+
+raise NotImplementedError("I need to modify how SteinNetwork is called "
+                          "because this version still passes get_target_logp.")
 
 # Config
 sns.set(style='white')

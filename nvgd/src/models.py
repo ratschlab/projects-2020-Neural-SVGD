@@ -2,21 +2,16 @@ import jax.numpy as np
 import jax.numpy as jnp
 from jax import jit, vmap, random, value_and_grad, grad
 import haiku as hk
-import jax
 import optax
 
 from tqdm import tqdm
 from functools import partial
 import warnings
-
-import utils
-import metrics
-import stein
-import kernels
-import nets
-
 from typing import Mapping
 import os
+
+from . import utils, metrics, stein, kernels, nets
+
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 disable_tqdm = on_cluster
 
