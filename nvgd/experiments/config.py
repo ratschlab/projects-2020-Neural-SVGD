@@ -11,13 +11,13 @@ except KeyError:
 model_size = 'large' if location == "leonhard" else 'small'
 
 if location in ['euler', 'leonhard']:
-    results_path = "/cluster/home/dlauro/projects-2020-Neural-SVGD/nvgd/experiments/results/"
+    results_path = "/cluster/home/dlauro/projects-2020-Neural-SVGD/results/"
     batch_size = 128
-    data_dir = "./data"
+    data_dir = "/cluster/home/dlauro/projects-2020-Neural-SVGD/data/"
 elif location in ['local']:
-    results_path = "/home/lauro/code/msc-thesis/main/nvgd/experiments/results/"
+    results_path = "/home/lauro/code/msc-thesis/main/results/"
     batch_size = 128
-    data_dir = "/tmp/tfds"
+    data_dir = "/tmp/tfds/"
 else:
     raise ValueError
 
