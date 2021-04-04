@@ -1,9 +1,9 @@
 from itertools import cycle
-
-import config as cfg
 from sklearn.model_selection import train_test_split
 import tensorflow_datasets as tfds
 import numpy as onp
+
+from nvgd.experiments import config as cfg
 
 print("Loading data...")
 # Load MNIST

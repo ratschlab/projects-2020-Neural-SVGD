@@ -2,9 +2,9 @@ import jax
 from jax import numpy as jnp
 from jax import jit, vmap, random, value_and_grad
 import haiku as hk
-import config as cfg
-import dataloader
-from nvgd.src import nets
+from nvgd.experiments import config as cfg
+from nvgd.experiments import dataloader
+from nvgd.src import nets  # TODO: implement convnet in nets.py and init here
 
 data = dataloader.data
 NUM_CLASSES = 10
@@ -17,7 +17,8 @@ def make_model(size: str = "large"):
     def model_fn(image):
         """returns logits"""
         n_channels = 8 if size == "small" else 8
-        image = image.astype(jnp.float32)
+#        image = image.astype(jnp.float32)
+        image = image / 78
         convnet = hk.Sequential([
             hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
             jax.nn.relu,

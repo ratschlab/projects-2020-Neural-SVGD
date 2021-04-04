@@ -183,3 +183,43 @@ class StaticHypernet(hk.Module):
                 x=output
             )
         return output
+
+
+NUM_CLASSES = 10
+initializer = hk.initializers.RandomNormal(stddev=1 / 100)
+
+class CNN(hk.Module):
+    def __init__(self, n_channels=8, n_classes=10, depth=2, name: str = None):
+        super().__init__(name=name)
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.depth = depth
+        self.initializer = hk.initializers.RandomNormal(stddev=1 / 100)
+
+    def __call__(self, image): # TODO: output should have length self.n_classes
+#        conv_layers = self.depth * [hk.Conv2D(self.n_channels,
+#                                              kernel_shape=3,
+#                                              w_init=self.initializer,
+#                                              b_init=self.initializer,
+#                                              stride=2),
+#                                    jax.nn.relu]
+#        convnet = hk.Sequential(conv_layers + [hk.Flatten()])
+
+        convnet = hk.Sequential([
+            hk.Conv2D(self.n_channels,
+                      kernel_shape=3,
+                      w_init=self.initializer,
+                      b_init=self.initializer,
+                      stride=2),
+            jax.nn.relu,
+
+            hk.Conv2D(self.n_channels,
+                      kernel_shape=3,
+                      w_init=self.initializer,
+                      b_init=self.initializer,
+                      stride=2),
+            jax.nn.relu,
+
+            hk.Flatten(),
+        ])
+        return convnet(image)
