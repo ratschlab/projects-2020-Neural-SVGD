@@ -8,9 +8,10 @@ from nvgd.src import nets  # TODO: implement convnet in nets.py and init here
 
 data = dataloader.data
 NUM_CLASSES = 10
+INIT_STDDEV = 1
 
 # Initialize all weights and biases the same way
-initializer = hk.initializers.RandomNormal(stddev=1 / 100)
+initializer = hk.initializers.RandomNormal(stddev=INIT_STDDEV)
 
 
 def make_model(size: str = "large"):
@@ -152,7 +153,7 @@ def log_prior(params):
     """Gaussian prior used to regularize weights (same as initialization).
     unscaled."""
     params_flat, _ = jax.flatten_util.ravel_pytree(params)
-    return - jnp.sum(params_flat**2) * 100**2 / 2
+    return - jnp.sum(params_flat**2) / INIT_STDDEV**2 / 2
 
 
 def loss(params, images, labels):
