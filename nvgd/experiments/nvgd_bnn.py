@@ -3,11 +3,11 @@ import argparse
 from jax import vmap, random, jit, grad, value_and_grad
 from tqdm import tqdm
 import optax
-from nvgd.src import models, metrics
-import bnn
-import dataloader
-import config as cfg
 import pandas as pd
+
+from nvgd.src import models, metrics
+from nvgd.experiments import bnn, dataloader
+from nvgd.experiments import config as cfg
 
 data = dataloader.data
 on_cluster = not os.getenv("HOME") == "/home/lauro"
