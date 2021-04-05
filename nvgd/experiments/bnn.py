@@ -1,14 +1,18 @@
-import jax
 from jax import numpy as jnp
 from jax import jit, vmap, random, value_and_grad
+import jax
+import jax.numpy as jnp
 import haiku as hk
 from nvgd.experiments import config as cfg
 from nvgd.experiments import dataloader
 from nvgd.src import nets  # TODO: implement convnet in nets.py and init here
 
 data = dataloader.data
+data_mean = jnp.mean(data.train_images)
+data_stddev = jnp.std(data.train_images)
 NUM_CLASSES = 10
-INIT_STDDEV = 1
+INIT_STDDEV = 0.15
+#INIT_STDDEV = 1
 
 # Initialize all weights and biases the same way
 initializer = hk.initializers.RandomNormal(stddev=INIT_STDDEV)
@@ -19,7 +23,7 @@ def make_model(size: str = "large"):
         """returns logits"""
         n_channels = 8 if size == "small" else 8
 #        image = image.astype(jnp.float32)
-        image = (image - 33) / 78
+        image = (image - data_mean) / data_stddev
         convnet = hk.Sequential([
             hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
             jax.nn.relu,

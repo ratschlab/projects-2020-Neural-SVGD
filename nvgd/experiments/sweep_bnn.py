@@ -28,7 +28,7 @@ if DEBUG:
     n_lrs = 1
 else:
     NUM_STEPS = args.steps
-    n_lrs = 10
+    n_lrs = 15
 
 OVERWRITE_FILE = True
 EVALUATE_EVERY = -1  # never
@@ -41,9 +41,9 @@ dumpfile = "/dev/null"
 final_accs = []
 
 if args.opt == "sgd":
-    vgd_stepsizes = onp.logspace(start=-7, stop=-3, num=n_lrs)
+    vgd_stepsizes = onp.logspace(start=-8, stop=-3, num=n_lrs)
 else:
-    vgd_stepsizes = onp.logspace(start=-5, stop=-1, num=n_lrs)
+    vgd_stepsizes = onp.logspace(start=-5, stop=1, num=n_lrs)
 
 
 sgld_stepsizes = onp.logspace(start=-9, stop=-5, num=n_lrs)
