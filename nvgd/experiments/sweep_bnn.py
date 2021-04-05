@@ -56,7 +56,7 @@ if not os.path.isfile(sweep_results_file) or OVERWRITE_FILE:
 
 
 def save_single_run(name, accuracy, step_size):
-    file = results_path + name + ".csv"
+    file = results_path + name + "_runs.csv"
     if not os.path.isfile(file):
         with open(file, "w") as f:
             f.write("stepsize,accuracy\n")
