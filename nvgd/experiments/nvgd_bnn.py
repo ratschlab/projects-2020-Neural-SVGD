@@ -5,7 +5,7 @@ from tqdm import tqdm
 import optax
 import pandas as pd
 
-from nvgd.src import models, metrics
+from nvgd.src import models, metrics, nets
 from nvgd.experiments import bnn, dataloader
 from nvgd.experiments import config as cfg
 
@@ -38,7 +38,8 @@ def train(key,
           overwrite_file: bool = False,
           early_stopping: bool = True,
           optimizer: str = "sgd",
-          hidden_sizes=[DEFAULT_LAYER_SIZE]*3):
+          hidden_sizes=[DEFAULT_LAYER_SIZE]*3,
+          use_hypernetwork: bool = False):
     """
     Initialize model; warmup; training; evaluation.
     Returns a dictionary of metrics.
@@ -52,6 +53,8 @@ def train(key,
         patience: early stopping criterion
         dropout: use dropout during training of the Stein network
         write_results_to_file: whether to save accuracy in csv file
+        use_hypernetwork: whether to use net-to-net hypernetwork to model
+            the witness function
     """
 #    csv_string = f"{meta_lr},{particle_stepsize}," \
 #                 f"{patience},{max_train_steps_per_iter},"
@@ -65,7 +68,7 @@ def train(key,
     elif optimizer == "adam":
         opt = optax.adam(particle_stepsize)
     else:
-        raise ValueEror("optimizer must be sgd or adam")
+        raise ValueError("optimizer must be sgd or adam")
 
     key, subkey1, subkey2 = random.split(key, 3)
     neural_grad = models.SteinNetwork(target_dim=init_particles.shape[1],
@@ -76,7 +79,9 @@ def train(key,
                                    use_hutchinson=True,
                                    lambda_reg=LAMBDA_REG,
                                    patience=patience,
-                                   dropout=dropout)
+                                   dropout=dropout,
+                                   particle_unravel=nets.cnn_unravel,
+                                   hypernet=use_hypernetwork)
 
     particles = models.Particles(key=subkey2,
                                  gradient=neural_grad.gradient,
@@ -145,6 +150,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--steps", type=int, default=200)
     parser.add_argument("--opt", type=str, default="sgd")
+    parser.add_argument("--use_hypernetwork", action='store_true')
     args = parser.parse_args()
 
     print("Loading optimal step size")
@@ -161,4 +167,5 @@ if __name__ == "__main__":
     train(key=rngkey,
           particle_stepsize=stepsize,
           n_iter=args.steps,
-          optimizer=args.opt)
+          optimizer=args.opt,
+          use_hypernetwork=args.use_hypernetwork)

@@ -18,6 +18,8 @@ parser.add_argument("--results_folder", type=str,
 parser.add_argument("--steps", type=int, default=200)
 parser.add_argument("--opt", type=str, default="sgd")
 parser.add_argument("--hidden_sizes", nargs="*", type=int, default=[256]*3)
+parser.add_argument("--use_hypernetwork", action='store_true')
+parser.add_argument("--results_path", type=str, default=cfg.results_path)
 args = parser.parse_args()
 
 
@@ -35,7 +37,7 @@ EVALUATE_EVERY = -1  # never
 
 key = random.PRNGKey(0)
 key, subkey = random.split(key)
-results_path = cfg.results_path + args.results_folder + "/"
+results_path = args.results_path + args.results_folder + "/"
 sweep_results_file = results_path + "best-stepsizes.csv"  # best LR / acc goes here
 dumpfile = "/dev/null"
 final_accs = []
@@ -89,14 +91,17 @@ def sweep_nvgd():
     print("Sweeping NVGD...")
     final_accs = []
     for particle_stepsize in vgd_stepsizes:
-        final_acc, nvgd_rundata = nvgd_bnn.train(key=subkey,
-                                                 particle_stepsize=particle_stepsize,
-                                                 n_iter=NUM_STEPS,
-                                                 evaluate_every=EVALUATE_EVERY,
-                                                 overwrite_file=OVERWRITE_FILE,
-                                                 results_file=dumpfile,
-                                                 optimizer=args.opt,
-                                                 hidden_sizes=args.hidden_sizes)
+        final_acc, nvgd_rundata = nvgd_bnn.train(
+            key=subkey,
+            particle_stepsize=particle_stepsize,
+            n_iter=NUM_STEPS,
+            evaluate_every=EVALUATE_EVERY,
+            overwrite_file=OVERWRITE_FILE,
+            results_file=dumpfile,
+            optimizer=args.opt,
+            hidden_sizes=args.hidden_sizes,
+            use_hypernetwork=args.use_hypernetwork
+            )
 
         save_single_run("nvgd", final_acc, particle_stepsize)
         final_accs.append((final_acc, particle_stepsize))
