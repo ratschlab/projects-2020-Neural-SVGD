@@ -248,7 +248,7 @@ class VectorFieldMixin:
             def field(x, aux, dropout: bool = False):
                 h = nets.StaticHypernet(sizes=[64, 64])
                 params = self.particle_unravel(x)
-                return h(params, dropout)
+                return utils.ravel(h(params, dropout))
         else:
             def field(x, aux, dropout: bool = False):
                 mlp = nets.MLP(self.sizes)
