@@ -191,7 +191,7 @@ def hypernet_shape_utilities(conv_dict, misc_dict):
 
 class StaticHypernet(hk.Module):
     def __init__(self,
-                 sizes: list = [256, 256],
+                 sizes: list = [256, 256, 256],
                  embedding_size: int = 64,
                  name: str = None):
         """
@@ -242,7 +242,7 @@ class StaticHypernet(hk.Module):
                           activate_final=False,
                           name="mlp_conv")
 
-        f_misc = hk.nets.MLP(output_sizes= [32, 32, len(misc_params)],
+        f_misc = hk.nets.MLP(output_sizes= [128, 128, 128, len(misc_params)],
                           w_init=hk.initializers.VarianceScaling(scale=2.0),
                           activation=jax.nn.swish,
                           activate_final=False,
