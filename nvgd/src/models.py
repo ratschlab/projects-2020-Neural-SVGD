@@ -212,7 +212,7 @@ class Particles:
 
 
 class VectorFieldMixin:
-    """Methods for init of vector field MLP"""
+    """Define the architecture of the witness function and initialize it."""
     def __init__(self,
                  target_dim: int,
                  key=random.PRNGKey(42),
@@ -220,11 +220,14 @@ class VectorFieldMixin:
                  aux=False,
                  normalize_inputs=False,
                  extra_term: callable = lambda x: 0,
+                 hypernet: bool = False,
+                 particle_unravel: callable = None,
                  **kwargs):
         """
         args:
             aux: bool; whether to add mean and std as auxiliary input to MLP.
             normalize_inputs: whether to normalize particles
+            hypernet: if true, use a hypernet architecture (for BNN inference.)
         """
         self.aux = aux
         self.d = target_dim
@@ -237,13 +240,21 @@ class VectorFieldMixin:
         self.threadkey, subkey = random.split(key)
         self.normalize_inputs = normalize_inputs
         self.extra_term = extra_term
+        self.hypernet = hypernet
+        self.particle_unravel = particle_unravel
 
         # net and optimizer
-        def field(x, aux, dropout: bool = False):
-            mlp = nets.MLP(self.sizes)
-            scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args))
-            mlp_input = np.concatenate([x, aux]) if self.aux else x
-            return scale * mlp(mlp_input, dropout)
+        if hypernet:
+            def field(x, aux, dropout: bool = False):
+                h = nets.StaticHypernet(sizes=[64, 64])
+                params = self.particle_unravel(x)
+                return h(params, dropout)
+        else:
+            def field(x, aux, dropout: bool = False):
+                mlp = nets.MLP(self.sizes)
+                scale = hk.get_parameter("scale", (), init=lambda *args: np.ones(*args))
+                mlp_input = np.concatenate([x, aux]) if self.aux else x
+                return scale * mlp(mlp_input, dropout)
         self.field = hk.transform(field)
         self.params = self.init_params()
         super().__init__(**kwargs)
@@ -510,7 +521,9 @@ class SteinNetwork(VectorFieldMixin, TrainingMixin):
                  dropout=False,
                  normalize_inputs=False,
                  extra_term: callable = lambda x: 0,
-                 l1_weight: float = None):
+                 l1_weight: float = None,
+                 hypernet: bool = False,
+                 particle_unravel: callable = None):
         """
         args:
             aux: bool, whether to concatenate particle dist info onto
@@ -522,7 +535,8 @@ class SteinNetwork(VectorFieldMixin, TrainingMixin):
         super().__init__(target_dim, key=key, sizes=sizes,
                          learning_rate=learning_rate, patience=patience,
                          aux=aux, dropout=dropout, normalize_inputs=normalize_inputs, 
-                         extra_term=extra_term)
+                         extra_term=extra_term, hypernet=hypernet,
+                         particle_unravel=particle_unravel)
         self.lambda_reg = lambda_reg
         self.scale = 1.  # scaling of self.field
         self.use_hutchinson = use_hutchinson

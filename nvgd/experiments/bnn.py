@@ -5,53 +5,14 @@ import jax.numpy as jnp
 import haiku as hk
 from nvgd.experiments import config as cfg
 from nvgd.experiments import dataloader
-from nvgd.src import nets  # TODO: implement convnet in nets.py and init here
+from nvgd.src import nets, utils
 
 data = dataloader.data
-data_mean = jnp.mean(data.train_images)
-data_stddev = jnp.std(data.train_images)
-NUM_CLASSES = 10
-INIT_STDDEV = 0.15
-#INIT_STDDEV = 1
-
-# Initialize all weights and biases the same way
-initializer = hk.initializers.RandomNormal(stddev=INIT_STDDEV)
-
-
-def make_model(size: str = "large"):
-    def model_fn(image):
-        """returns logits"""
-        n_channels = 8 if size == "small" else 8
-#        image = image.astype(jnp.float32)
-        image = (image - data_mean) / data_stddev
-        convnet = hk.Sequential([
-            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
-            jax.nn.relu,
-
-            hk.Conv2D(n_channels, kernel_shape=3, w_init=initializer, b_init=initializer, stride=2),
-            jax.nn.relu,
-
-            hk.Flatten(),
-            hk.Linear(NUM_CLASSES, w_init=initializer, b_init=initializer),
-        ])
-        return convnet(image)
-    return hk.without_apply_rng(hk.transform(model_fn))
-
-
-model = make_model(cfg.model_size)
-
-# utility functions for dealing with parameter shapes
-params_tree = model.init(random.PRNGKey(0), data.train_images[:2])
-_, unravel = jax.flatten_util.ravel_pytree(params_tree)
-del params_tree
-
-
-def ravel(tree):
-    return jax.flatten_util.ravel_pytree(tree)[0]
+model = nets.cnn
 
 
 def init_flat_params(key):
-    return ravel(model.init(key, data.train_images[:2]))
+    return utils.ravel(model.init(key, data.train_images[:2]))
 
 
 # Accuracy
@@ -93,7 +54,7 @@ def compute_acc(param_set):
 
 
 def compute_acc_from_flat(param_set_flat):
-    param_set = vmap(unravel)(param_set_flat)
+    param_set = vmap(nets.cnn_unravel)(param_set_flat)
     return compute_acc(param_set)
 
 
@@ -157,7 +118,7 @@ def log_prior(params):
     """Gaussian prior used to regularize weights (same as initialization).
     unscaled."""
     params_flat, _ = jax.flatten_util.ravel_pytree(params)
-    return - jnp.sum(params_flat**2) / INIT_STDDEV**2 / 2
+    return - jnp.sum(params_flat**2) / nets.INIT_STDDEV_CNN**2 / 2
 
 
 def loss(params, images, labels):
@@ -178,12 +139,12 @@ def get_minibatch_logp(batch):
     """
     @jit
     def minibatch_logp(params_flat):
-        return -loss(unravel(params_flat), *batch)
+        return -loss(nets.cnn_unravel(params_flat), *batch)
     return minibatch_logp
 
 
 def minibatch_logp(params_flat, batch):
-    return -loss(unravel(params_flat), *batch)
+    return -loss(nets.cnn_unravel(params_flat), *batch)
 
 
 @jit

@@ -5,6 +5,8 @@ import numpy as onp
 
 from nvgd.experiments import config as cfg
 
+
+
 print("Loading data...")
 # Load MNIST
 def load_data(dataset="mnist"):
@@ -12,15 +14,25 @@ def load_data(dataset="mnist"):
     dataset will be passed to tfds
     """
     data, info = tfds.load(name=dataset,
-                                 batch_size=-1,
-                                 data_dir=cfg.data_dir,
-                                 with_info=True)
+                           batch_size=-1,
+                           data_dir=cfg.data_dir,
+                           with_info=True)
     data = tfds.as_numpy(data)
     train_data, test_data = data['train'], data['test']
 
     # Full train and test set
     train_images, train_labels = train_data['image'], train_data['label']
     test_images, test_labels = test_data['image'], test_data['label']
+
+    def normalize(images):
+        """normalize according to training set statistics"""
+        data_mean = onp.mean(train_images)
+        data_stddev = onp.std(train_images)
+        return (images - data_mean) / data_stddev
+
+    # Normalize
+    train_images = normalize(train_images)
+    test_images = normalize(test_images)
 
     # Split off the validation set
     train_images, val_images, train_labels, val_labels = train_test_split(

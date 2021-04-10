@@ -728,3 +728,8 @@ def vmean(fun):
     def compute_mean(*args, **kwargs):
         return np.mean(vmap(fun)(*args, **kwargs), axis=-1)
     return compute_mean
+
+
+def ravel(tree):
+    """just ravel"""
+    return jax.flatten_util.ravel_pytree(tree)[0]
