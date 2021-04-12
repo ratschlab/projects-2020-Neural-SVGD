@@ -72,16 +72,16 @@ def train(key,
 
     key, subkey1, subkey2 = random.split(key, 3)
     neural_grad = models.SteinNetwork(target_dim=init_particles.shape[1],
-                                   learning_rate=meta_lr,
-                                   key=subkey1,
-                                   sizes=hidden_sizes + [init_particles.shape[1]],
-                                   aux=False,
-                                   use_hutchinson=True,
-                                   lambda_reg=LAMBDA_REG,
-                                   patience=patience,
-                                   dropout=dropout,
-                                   particle_unravel=nets.cnn_unravel,
-                                   hypernet=use_hypernetwork)
+                                      learning_rate=meta_lr,
+                                      key=subkey1,
+                                      sizes=hidden_sizes + [init_particles.shape[1]],
+                                      aux=False,
+                                      use_hutchinson=True,
+                                      lambda_reg=LAMBDA_REG,
+                                      patience=patience,
+                                      dropout=dropout,
+                                      particle_unravel=nets.cnn_unravel,
+                                      hypernet=use_hypernetwork)
 
     particles = models.Particles(key=subkey2,
                                  gradient=neural_grad.gradient,
