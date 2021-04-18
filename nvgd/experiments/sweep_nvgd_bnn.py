@@ -18,6 +18,7 @@ parser.add_argument("--steps", type=int, default=300)
 parser.add_argument("--opt", type=str, default="adam")
 parser.add_argument("--use_hypernetwork", action='store_true')
 parser.add_argument("--search_method", type=str, default="random")
+parser.add_argument("--num_sweep_iter", type=int, default=10)
 args = parser.parse_args()
 
 
@@ -59,11 +60,11 @@ elif args.search_method == "random":
             "optimizer": args.opt,
         }
 
-    def generate_sweep_kwargs(num=10):
+    def generate_sweep_kwargs(num):
         for i in range(num):
             yield sample_kwargs()
 
-    sweep_kwargs = generate_sweep_kwargs()
+    sweep_kwargs = generate_sweep_kwargs(num=args.num_sweep_iter)
 else:
     raise ValueError
 
@@ -82,24 +83,25 @@ for param_setting in sweep_kwargs:
     filename = args.results_path + f"log/acc_{final_acc}_at_{time.time()}.json"
 
     print()
-    print("Accuracy:", final_acc)
-    print(f"Saving to {filename}")
+    print("Training with setting:")
+    print(json.dumps(param_setting, allow_nan=True, indent=4))
+    print("...done. Accuracy:", final_acc)
+    print(f"Saving results to {filename}")
     json.dump(param_setting, filename, allow_nan=True, indent=4)
-    print("Setting:")
-    print(json.dumps(param_setting), allow_nan=True, indent=4)
     print("---------------------------------------")
 
-argmax_idx = onp.array(par['accuracy'] for par in outcomes).argmax()
+argmax_idx = onp.array([par['accuracy'] for par in outcomes]).argmax()
 max_accuracy = outcomes[argmax_idx]['accuracy']
 print()
-print("--------------------")
 print("SWEEP DONE")
-print("--------------------")
+print("---------------------------------------")
+
 print(f"Max accuracy of {max_accuracy} achieved using setting")
 print(json.dumps(outcomes[argmax_idx], indent=4))
 print()
 
 
 all_results_file = args.results_path + "all_sweep_results.json"
-print("Saving all results to {all_results_file}")
-json.dump(outcomes, all_results_file, allow_nan=True, indent=4)
+print(f"Saving all results to {all_results_file}")
+json.dump(utils.dict_concatenate(outcomes), all_results_file, allow_nan=True, indent=4)
+

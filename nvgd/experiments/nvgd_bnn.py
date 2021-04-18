@@ -143,7 +143,7 @@ def train(key,
     particles.done()
 
     final_eval = evaluate(-1, particles.particles, split_particles[0])
-    return final_eval['accuracy'], particles.rundata
+    return round(float(final_eval['accuracy']), 4), particles.rundata
 
 
 if __name__ == "__main__":

@@ -243,14 +243,14 @@ def cartesian_product(*arrays):
     return arr.reshape(-1, la)
 
 
-def dict_concatenate(dict_list):
+def dict_concatenate(dict_list, np_array=False):
     """
     Arguments:
     * dict_list: a list of dictionaries with the same keys. All values must be numeric or a nested dict.
 
     Returns:
-    * a dictionary with the same keys as the input dictionaries. The values are np
-    arrays consisting of the concatenation of the values in the input dictionaries.
+    * a dictionary with the same keys as the input dictionaries. The values are lists
+    consisting of the concatenation of the values in the input dictionaries.
     """
     for d in dict_list:
         if not isinstance(d, collections.Mapping):
@@ -261,11 +261,16 @@ def dict_concatenate(dict_list):
     keys = dict_list[0].keys()
     out = {key: [d[key] for d in dict_list] for key in keys}
 
-    for k, v in out.items():
-        try:
-            out[k] = np.asarray(v)
-        except TypeError:
-            out[k] = dict_concatenate(v)
+    if np_array:
+        for k, v in out.items():
+            try:
+                out[k] = np.asarray(v)
+            except TypeError:
+                out[k] = dict_concatenate(v)
+    else:
+        for k, v in out.items():
+            if isinstance(v[0], collections.Mapping):
+                out[k] = dict_concatenate(v)
     return out
 
 
@@ -632,7 +637,7 @@ def init_scale(fun):
     """fun : R^d --> R^d"""
     stein_discrepancy = stein.stein_discrepancy(
         particles, target_logp, fun, aux=False)
-    l2_f_sq = utils.l2_norm_squared(particles, fun)
+    l2_f_sq = l2_norm_squared(particles, fun)
     return l2_norm_squared / stein_discrepancy
 
 
