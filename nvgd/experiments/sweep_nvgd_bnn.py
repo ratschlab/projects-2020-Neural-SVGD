@@ -18,7 +18,7 @@ parser.add_argument("--steps", type=int, default=300)
 parser.add_argument("--opt", type=str, default="adam")
 parser.add_argument("--use_hypernetwork", action='store_true')
 parser.add_argument("--search_method", type=str, default="random")
-parser.add_argument("--num_sweep_iter", type=int, default=10)
+parser.add_argument("--num_sweep_iter", type=int, default=100)
 args = parser.parse_args()
 
 
@@ -49,11 +49,11 @@ if args.search_method == "grid":
 elif args.search_method == "random":
     def sample_kwargs():
         return {
-            "meta_lr": 10**onp.random.uniform(-5, 0),
-            "particle_stepsize": 10**onp.random.uniform(-5, 0),
-            "patience": onp.random.choice(50), # default 5
-            "max_train_steps_per_iter": onp.random.choice(100),
-            "particle_steps_per_iter": onp.random.choice([1, 5]),
+            "meta_lr": 10**onp.random.uniform(-8, -1), # (-5, 0)
+            "particle_stepsize": 10**onp.random.uniform(-5, -2),
+            "patience": onp.random.choice(50)+1, # default 5
+            "max_train_steps_per_iter": onp.random.choice(range(10, 100)),
+            "particle_steps_per_iter": onp.random.choice(10)+1,
             "use_hypernetwork": args.use_hypernetwork,
             "early_stopping": True,
             "dropout": onp.random.choice([True, False]),
@@ -69,9 +69,17 @@ else:
     raise ValueError
 
 
+if args.search_method == "random":
+    print(f'Running sweep for {args.num_sweep_iter} steps.')
+    print()
+
 outcomes = []
 key, subkey = random.split(key)
 for param_setting in sweep_kwargs:
+    print()
+    print("Training with setting:")
+    print(json.dumps(param_setting, allow_nan=True, indent=4))
+
     final_acc, _ = nvgd_bnn.train(key=subkey,
                                   n_iter=NUM_STEPS,
                                   evaluate_every=EVALUATE_EVERY,
@@ -82,9 +90,6 @@ for param_setting in sweep_kwargs:
     outcomes.append(param_setting)
     filename = args.results_path + f"log/acc_{final_acc}_at_{time.time()}.json"
 
-    print()
-    print("Training with setting:")
-    print(json.dumps(param_setting, allow_nan=True, indent=4))
     print("...done. Accuracy:", final_acc)
     print(f"Saving results to {filename}")
     json.dump(param_setting, filename, allow_nan=True, indent=4)
