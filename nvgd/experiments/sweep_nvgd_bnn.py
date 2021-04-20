@@ -97,16 +97,10 @@ for param_setting in sweep_kwargs:
 
 argmax_idx = onp.array([par['accuracy'] for par in outcomes]).argmax()
 max_accuracy = outcomes[argmax_idx]['accuracy']
+
+print("---------------------------------------")
 print()
 print("SWEEP DONE")
-print("---------------------------------------")
-
+print()
 print(f"Max accuracy of {max_accuracy} achieved using setting")
 print(json.dumps(outcomes[argmax_idx], indent=4))
-print()
-
-
-all_results_file = args.results_path + "all_sweep_results.json"
-print(f"Saving all results to {all_results_file}")
-json.dump(utils.dict_concatenate(outcomes), all_results_file, allow_nan=True, indent=4)
-
