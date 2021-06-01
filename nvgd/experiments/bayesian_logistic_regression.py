@@ -417,6 +417,7 @@ def get_run_avg(key, lr, sampler):
         'stddev': accs.std(axis=0).tolist()
         }
 
+key, subkey = random.split(key)
 sgld_final = get_run_avg(subkey, sgld_lr, run_sgld)
 svgd_final = get_run_avg(subkey, svgd_lr, run_svgd)
 ngf_final  = get_run_avg(subkey, nsvgd_lr, run_neural_svgd)
