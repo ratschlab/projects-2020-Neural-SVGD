@@ -1,14 +1,18 @@
 import os
+import argparse
+import csv
 import jax.numpy as np
+from pathlib import Path
 from jax.scipy import stats, special
-from jax import jit, vmap, random, value_and_grad
+from jax import jit, vmap, random, value_and_grad, grad
 
 import json_tricks as json
 import numpy as onp
 import scipy.io
-import seaborn as sns
+#import seaborn as sns
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
+import pandas as pd
 
 import config as cfg
 import optax
@@ -20,14 +24,16 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 tfpk = tfp.math.psd_kernels
 
-raise NotImplementedError("I need to modify how SteinNetwork is called "
-                          "because this version still passes get_target_logp.")
+parser = argparse.ArgumentParser()
+parser.add_argument('--seed', type=int, default=0, help='random seed')
+parser.add_argument('--debug', action='store_true')
+args = parser.parse_args()
 
-# Config
-sns.set(style='white')
+print(f"Using seed {args.seed}")
+
 on_cluster = not os.getenv("HOME") == "/home/lauro"
 disable_tqdm = on_cluster
-key = random.PRNGKey(0)
+key = random.PRNGKey(args.seed)
 a0, b0 = 1, 0.01  # hyper-parameters
 batch_size = 128
 
@@ -87,7 +93,7 @@ def prior_logp(w, log_alpha):
     elif w.ndim == 1:
         logp_w = np.sum(stats.norm.logpdf(w, scale=1/np.sqrt(alpha)))
     else:
-        raise
+        raise ValueError
     return logp_alpha + logp_w
 
 
@@ -184,15 +190,20 @@ def get_minibatch_logp(x, y):
         elif w.ndim == 2:
             mean_loglikelihood = np.mean(vmap(lambda wi: loglikelihood(y, x, wi))(w))
         else:
-            raise
+            raise ValueError
         return log_prior + num_datapoints * mean_loglikelihood  # = grad(log p)(theta) + N/n sum_i grad(log p)(theta | x)
     return logp
 
 
-NUM_EPOCHS = 1
+
 NUM_VALS = 40
-NUM_STEPS = num_batches*NUM_EPOCHS
-n_particles = 100
+if args.debug:
+    NUM_STEPS = 100
+    n_particles = 5
+else:
+    NUM_EPOCHS = 1
+    NUM_STEPS = num_batches*NUM_EPOCHS
+    n_particles = 100
 
 
 def sample_tv(key):
@@ -239,29 +250,39 @@ def run_neural_svgd(key, plr, full_data=False, progress_bar=False):
     nsvgd_opt = optax.sgd(plr)
 
     key1, key2 = random.split(key)
-    neural_grad = models.SteinNetwork(target_dim=init_particles.shape[1],
-                                   get_target_logp=lambda batch: get_minibatch_logp(*batch),
-                                   learning_rate=neural_lr,
-                                   key=key1,
-                                   aux=False,
-                                   lambda_reg=lambda_reg)
+    neural_grad = models.SteinNetwork(
+        target_dim=init_particles.shape[1],
+        #get_target_logp=lambda batch: get_minibatch_logp(*batch),
+        learning_rate=neural_lr,
+        key=key1,
+        aux=False,
+        lambda_reg=lambda_reg)
     particles = models.Particles(key2, neural_grad.gradient, init_particles, custom_optimizer=nsvgd_opt)
 
     # Warmup on first batch
-    key, subkey = random.split(key)
-    neural_grad.warmup(key=subkey,
-                       sample_split_particles=sample_tv,
-                       next_data=lambda: next(get_batches(x_train, y_train, n_steps=100+1)),
-                       n_iter=3)
+#    key, subkey = random.split(key)
+#    neural_grad.warmup(key=subkey,
+#                       sample_split_particles=sample_tv,
+#                       next_data=lambda: next(get_batches(x_train, y_train, n_steps=100+1)),
+#                       n_iter=3)
 
     test_batches = get_batches(x_test, y_test, 2*NUM_VALS) if full_data else get_batches(x_val, y_val, 2*NUM_VALS)
     train_batches = get_batches(xx, yy, NUM_STEPS+1) if full_data else get_batches(x_train, y_train, NUM_STEPS+1)
 
+
+    @jit
+    def v_dlogp(particles, batch):
+        logp = get_minibatch_logp(*batch)
+        return vmap(grad(logp))(particles)
+
     for i, data_batch in tqdm(enumerate(train_batches), total=NUM_STEPS, disable=not progress_bar):
         key, subkey = random.split(key)
-        neural_grad.train(particles.next_batch(subkey),
-                          n_steps=10,
-                          data=data_batch)
+        split_particles = particles.next_batch(subkey)
+        split_dlogp = [v_dlogp(x, data_batch) for x in split_particles]
+
+        neural_grad.train(split_particles,
+                          split_dlogp,
+                          n_steps=10)
         particles.step(neural_grad.get_params())
         if i % (NUM_STEPS//NUM_VALS) == 0:
             test_logp = get_minibatch_logp(*next(test_batches))
@@ -329,27 +350,51 @@ def run_sweep(lrs, sampler):
     return accs, lrs[np.argmax(accs)]
 
 
-# Sweep
-key, subkey = random.split(key)
-lrs = np.logspace(-9, -4, 10)
-svgd_lrs = np.logspace(-12, -6, 10)
-nsvgd_lrs = np.logspace(-5, -1, 10)
+# Try to load the optimal step-sizes
+# if not available, run sweep to determine best stepsizes
+if args.debug:
+    results_path = Path(cfg.results_path) / "debug" / "covertype-regression" 
+else:
+    results_path = Path(cfg.results_path) / "covertype-regression" 
 
-print("Sweeping NSVGD step sizes...")
-nsvgd_acc_sweep, nsvgd_lr = run_sweep(nsvgd_lrs, run_neural_svgd)
-print("Sweeping SGLD step sizes...")
-sgld_acc_sweep, sgld_lr = run_sweep(lrs, run_sgld)
-print("Sweeping SVGD step sizes...")
-svgd_acc_sweep, svgd_lr = run_sweep(lrs, run_svgd)
+results_path.mkdir(parents=True, exist_ok=True)
 
-print(nsvgd_lr)
-print(sgld_lr)
-print(svgd_lr)
+try:
+    stepsizes = pd.read_csv(str(results_path / "stepsizes.csv"))
+    print("Using stored stepsizes.")
+except FileNotFoundError:
+    # Sweep
+    key, subkey = random.split(key)
+    lrs = np.logspace(-9, -4, 10)
+    svgd_lrs = np.logspace(-12, -6, 10)
+    nsvgd_lrs = np.logspace(-5, -1, 10)
+
+    print("Sweeping NSVGD step sizes...")
+    nsvgd_acc_sweep, nsvgd_lr = run_sweep(nsvgd_lrs, run_neural_svgd)
+    print("Sweeping SGLD step sizes...")
+    sgld_acc_sweep, sgld_lr = run_sweep(lrs, run_sgld)
+    print("Sweeping SVGD step sizes...")
+    svgd_acc_sweep, svgd_lr = run_sweep(lrs, run_svgd)
+
+    print(nsvgd_lr)
+    print(sgld_lr)
+    print(svgd_lr)
+
+    stepsizes = {
+        "nvgd": nsvgd_lr,
+        "sgld": sgld_lr,
+        "svgd": svgd_lr
+        }
+
+    with open(results_path / "stepsizes.csv", "w") as f:
+        w = csv.DictWriter(f, stepsizes.keys())
+        w.writeheader()
+        w.writerow(stepsizes)
+
 
 # run 10 times on full data with validated learning rate
 print("Now run again on full data with validated learning rate.")
 print("Take average of 10 runs...")
-
 
 def get_run(key, lr, sampler):
     """sampler is one of run_sgld, run_svgd, run_neural_svgd"""
@@ -367,20 +412,25 @@ def get_run_avg(key, lr, sampler):
         key, subkey = random.split(key)
         accs.append(get_run(subkey, lr, sampler))
     accs = onp.array(accs)
-    return accs.mean(axis=0)
-
+    return {
+        'mean': accs.mean(axis=0).tolist(), 
+        'stddev': accs.std(axis=0).tolist()
+        }
 
 sgld_final = get_run_avg(subkey, sgld_lr, run_sgld)
 svgd_final = get_run_avg(subkey, svgd_lr, run_svgd)
 ngf_final  = get_run_avg(subkey, nsvgd_lr, run_neural_svgd)
 
 results = {
-    "SGLD": sgld_final.tolist(),
-    "SVGD": svgd_final.tolist(),
-    "NGF": ngf_final.tolist(),
+    "SGLD": sgld_final,
+    "SVGD": svgd_final,
+    "NGF": ngf_final,
 }
 
 
 print("Saving results...")
-with open(cfg.results_path + "covertype-regression.json", "w") as f:
+
+filename = results_path / "covertype-regression.json"
+
+with open(results_path / filename, "w") as f:
     json.dump(results, f, indent=4, sort_keys=True)
