@@ -7,8 +7,9 @@ default_num_particles = 50
 default_num_steps = 100
 # default_particle_lr = 1e-1
 # default_learner_lr = 1e-2
-disable_tqdm = False
 NUM_WARMUP_STEPS = 500
+on_cluster = not os.getenv("HOME") == "/home/lauro"
+disable_tqdm = on_cluster
 
 #raise NotImplementedError("Need to update call to SteinNetwork to match "
 #                          "the updated argument signature in flows.py")
