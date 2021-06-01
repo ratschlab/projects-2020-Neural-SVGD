@@ -711,7 +711,7 @@ def scaled_sgld(key: np.ndarray, schedule_fn: callable = optax.constant_schedule
 optimizer_mapping = {
     "sgd": optax.sgd,
     "adam": optax.adam,
-    "sgld": sgld,
+#    "sgld": sgld,
 }
 
 

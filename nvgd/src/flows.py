@@ -1,7 +1,7 @@
 from jax import random, jit, vmap, grad
 import warnings
 from tqdm import tqdm
-from nvgd.src import metrics, kernels, models
+from nvgd.src import metrics, kernels, models, utils
 
 default_num_particles = 50
 default_num_steps = 100
@@ -10,8 +10,8 @@ default_num_steps = 100
 disable_tqdm = False
 NUM_WARMUP_STEPS = 500
 
-raise NotImplementedError("Need to update call to SteinNetwork to match "
-                          "the updated argument signature in flows.py")
+#raise NotImplementedError("Need to update call to SteinNetwork to match "
+#                          "the updated argument signature in flows.py")
 
 def neural_svgd_flow(key,
                      setup,
@@ -29,8 +29,8 @@ def neural_svgd_flow(key,
     key, keya, keyb, keyc = random.split(key, 4)
     target, proposal = setup.get()
     learner = models.SteinNetwork(key=keya,
-                               target_dim=target.d,
-                               **learner_kwargs)
+                                  target_dim=target.d,
+                                  **learner_kwargs)
 
     if compute_metrics is None:
         compute_metrics = metrics.get_mmd_tracer(target.sample(500, keyc))
@@ -71,7 +71,6 @@ def svgd_flow(key,
               n_steps=default_num_steps,
               particle_lr=1e-1,
               lambda_reg=1/2,
-              noise_level=None,
               particle_optimizer="sgd",
               scaled=True,
               bandwidth=1.,
@@ -115,22 +114,24 @@ def sgld_flow(key,
               n_steps=default_num_steps,
               particle_lr=1e-2,
               lambda_reg=1/2,
-              noise_level=None,
-              particle_optimizer="sgld",
+              custom_optimizer=None,
               compute_metrics=None,
               catch_exceptions: bool = True):
     keya, keyb, keyc = random.split(key, 3)
     target, proposal = setup.get()
-    energy_gradient = models.EnergyGradient(target.logpdf, keya, lambda_reg=lambda_reg)
+    energy_gradient = models.EnergyGradient(target.logpdf, lambda_reg=lambda_reg)
+    if custom_optimizer is None:
+        seed = keyc[1] # TODO this is an ugly hack
+        custom_optimizer = utils.sgld(particle_lr, seed)
 
     if compute_metrics is None:
-        compute_metrics = metrics.get_mmd_tracer(target.sample(500, keyc))
+        compute_metrics = metrics.get_mmd_tracer(target.sample(500, keya))
     particles = models.Particles(key=keyb,
                                  gradient=energy_gradient.gradient,
                                  init_samples=proposal.sample,
                                  n_particles=n_particles,
                                  learning_rate=particle_lr,
-                                 optimizer=particle_optimizer,
+                                 custom_optimizer=custom_optimizer,
                                  compute_metrics=compute_metrics)
     for _ in tqdm(range(n_steps), disable=disable_tqdm):
         try:

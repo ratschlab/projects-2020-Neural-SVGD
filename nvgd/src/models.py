@@ -692,10 +692,8 @@ class EnergyGradient():
     """Compute pure SGLD gradient grad(log p)(x) (without noise)"""
     def __init__(self,
                  target_logp,
-                 key=random.PRNGKey(42),
                  lambda_reg=1/2):
         self.target_logp = target_logp
-        self.threadkey, subkey = random.split(key)
         self.lambda_reg = lambda_reg
         self.rundata = {}
 
