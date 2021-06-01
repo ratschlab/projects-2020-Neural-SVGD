@@ -362,6 +362,9 @@ results_path.mkdir(parents=True, exist_ok=True)
 try:
     stepsizes = pd.read_csv(str(results_path / "stepsizes.csv"))
     print("Using stored stepsizes.")
+    nsvgd_lr = stepsizes["nvgd"][0]
+    sgld_lr = stepsizes["sgld"][0]
+    svgd_lr = stepsizes["svgd"][0]
 except FileNotFoundError:
     # Sweep
     key, subkey = random.split(key)
