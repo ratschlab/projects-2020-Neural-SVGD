@@ -25,6 +25,7 @@ PARTICLE_STEP_SIZE = 1e-2  # for particle update
 LEARNING_RATE = 1e-4  # for neural network
 NUM_PARTICLES = 200  # 200
 MAX_DIM = 40  # sweep from 2 to MAX_DIM
+PATIENCE = 15
 
 if args.debug:
     NUM_STEPS = 30
@@ -47,7 +48,7 @@ def sample(d, key, n_particles):
     funnel_setup = distributions.Setup(target, proposal)
 
     key, subkey = random.split(key)
-    neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, patience=0, learning_rate=LEARNING_RATE)
+    neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, patience=0, learning_rate=LEARNING_RATE, patience=PATIENCE)
     svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, scaled=True,  bandwidth=None)
     sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE)
     return (neural_particles, svgd_particles, sgld_particles), (neural_learner, svgd_gradient, sgld_gradient)
