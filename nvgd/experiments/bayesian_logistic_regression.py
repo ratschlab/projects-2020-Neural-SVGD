@@ -19,11 +19,6 @@ import optax
 
 from nvgd.src import metrics, utils, models
 
-#from tensorflow_probability.substrates import jax as tfp
-#tfd = tfp.distributions
-#tfb = tfp.bijectors
-#tfpk = tfp.math.psd_kernels
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=0, help='random seed')
 parser.add_argument('--debug', action='store_true')

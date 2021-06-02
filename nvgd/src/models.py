@@ -576,7 +576,7 @@ class SteinNetwork(VectorFieldMixin, TrainingMixin):
                 "sd": sd,
                 "l2": l2,
             }
-            return -sd + l2 / 2, aux
+            return -sd + l2 * self.lambda_reg, aux
         keys = random.split(key, n)
         loss, aux = vmap(h)(particles, dlogp, keys)
         loss = loss.mean()
