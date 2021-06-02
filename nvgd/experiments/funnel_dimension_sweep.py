@@ -48,7 +48,7 @@ def sample(d, key, n_particles):
     funnel_setup = distributions.Setup(target, proposal)
 
     key, subkey = random.split(key)
-    neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, patience=0, learning_rate=LEARNING_RATE, patience=PATIENCE)
+    neural_learner, neural_particles, err1 = flows.neural_svgd_flow(subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, learning_rate=LEARNING_RATE, patience=PATIENCE)
     svgd_gradient, svgd_particles, err2    = flows.svgd_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE, scaled=True,  bandwidth=None)
     sgld_gradient, sgld_particles, err3    = flows.sgld_flow(       subkey, funnel_setup, n_particles=n_particles, n_steps=NUM_STEPS, particle_lr=PARTICLE_STEP_SIZE)
     return (neural_particles, svgd_particles, sgld_particles), (neural_learner, svgd_gradient, sgld_gradient)
@@ -76,6 +76,7 @@ results = {
 
 ##################
 # save json results
+print("SAVING RESULTS...")
 if args.debug:
     results_path = Path(cfg.results_path) / "debug" / "funnel-dimension-sweep" / "runs"
 else:
@@ -88,3 +89,5 @@ if os.path.isfile(results_path / filename):
 
 with open(results_path / filename, "w") as f:
     json.dump(results, f, indent=4, sort_keys=True, allow_nan=True)
+
+print("DONE.")
