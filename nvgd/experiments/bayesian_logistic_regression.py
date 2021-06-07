@@ -202,6 +202,7 @@ else:
 
 
 def sample_tv(key):
+    """sample logistic regression parameters from prior"""
     return ravel(*sample_from_prior(key, num=n_particles)).split(2)
 
 
@@ -253,22 +254,31 @@ def run_neural_svgd(key, plr, full_data=False, progress_bar=False):
         aux=False,
         lambda_reg=lambda_reg)
     particles = models.Particles(key2, neural_grad.gradient, init_particles, custom_optimizer=nsvgd_opt)
-
-    # Warmup on first batch
-#    key, subkey = random.split(key)
-#    neural_grad.warmup(key=subkey,
-#                       sample_split_particles=sample_tv,
-#                       next_data=lambda: next(get_batches(x_train, y_train, n_steps=100+1)),
-#                       n_iter=3)
-
+    
     test_batches = get_batches(x_test, y_test, 2*NUM_VALS) if full_data else get_batches(x_val, y_val, 2*NUM_VALS)
     train_batches = get_batches(xx, yy, NUM_STEPS+1) if full_data else get_batches(x_train, y_train, NUM_STEPS+1)
-
 
     @jit
     def v_dlogp(particles, batch):
         logp = get_minibatch_logp(*batch)
         return vmap(grad(logp))(particles)
+
+
+    # Warmup on first batch
+#    key, subkey = random.split(key)
+#    neural_grad.warmup(key=subkey,
+#                       sample_split_particles=sample_tv,
+#                       next_data=lambda: next(get_batches(x_train, y_train, n_steps=100+1)),  # note: lambda always returns first batch
+#                       n_iter=3)
+    first_batch = next(get_batches(x_train, y_train, n_steps=100+1))
+    for _ in range(3):
+        key, subkey = random.split(key)
+        split_particles = sample_tv(subkey)
+        split_dlogp = [v_dlogp(x, first_batch) for x in split_particles]
+        neural_grad.train(split_particles,
+                          split_dlogp,
+                          n_steps=30,
+                          early_stopping=True)
 
     for i, data_batch in tqdm(enumerate(train_batches), total=NUM_STEPS, disable=not progress_bar):
         key, subkey = random.split(key)
