@@ -329,13 +329,5 @@ class CNN(hk.Module):
 
         return convnet(image)
 
-    
-from nvgd.experiments import dataloader
-key = random.PRNGKey(0)
-
 # base convnet
 cnn = hk.without_apply_rng(hk.transform(lambda image: CNN()(image)))
-base_params = cnn.init(key, dataloader.data.train_images[:2])
-
-_, cnn_unravel = jax.flatten_util.ravel_pytree(base_params)
-del _

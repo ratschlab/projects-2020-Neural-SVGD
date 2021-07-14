@@ -11,6 +11,14 @@ data = dataloader.data
 model = nets.cnn
 
 
+# Get cnn_unravel method to map tensor to dict
+dummy_rngkey = random.PRNGKey(0)
+base_params = model.init(dummy_rngkey, dataloader.data.train_images[:2])
+_, cnn_unravel = jax.flatten_util.ravel_pytree(base_params)
+del _
+
+
+
 def init_flat_params(key):
     return utils.ravel(model.init(key, data.train_images[:2]))
 
@@ -54,7 +62,7 @@ def compute_acc(param_set):
 
 
 def compute_acc_from_flat(param_set_flat):
-    param_set = vmap(nets.cnn_unravel)(param_set_flat)
+    param_set = vmap(cnn_unravel)(param_set_flat)
     return compute_acc(param_set)
 
 
@@ -139,12 +147,12 @@ def get_minibatch_logp(batch):
     """
     @jit
     def minibatch_logp(params_flat):
-        return -loss(nets.cnn_unravel(params_flat), *batch)
+        return -loss(cnn_unravel(params_flat), *batch)
     return minibatch_logp
 
 
 def minibatch_logp(params_flat, batch):
-    return -loss(nets.cnn_unravel(params_flat), *batch)
+    return -loss(cnn_unravel(params_flat), *batch)
 
 
 @jit
