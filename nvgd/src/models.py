@@ -470,28 +470,28 @@ class TrainingMixin:
         self.write_to_log({"train_steps": i+1})
         return
 
-    def warmup(self,
-               key,
-               sample_split_particles: callable,
-               next_data: callable = lambda: None,
-               n_iter: int = 10,
-               n_inner_steps: int = 30,
-               progress_bar: bool = False,
-               early_stopping: bool = True):
-        """resample from particle initializer to stabilize the beginning
-        of the trajectory
-        args:
-            key: prngkey
-            sample_split_particles: produces next x_train, x_val sample
-            next_data: produces next batch of data
-            n_iter: number of iterations (50 training steps each)
-        """
-        for _ in tqdm(range(n_iter), disable=not progress_bar):
-            key, subkey = random.split(key)
-            self.train(sample_split_particles(subkey),
-                       n_steps=n_inner_steps,
-                       data=next_data(),
-                       early_stopping=early_stopping)
+#    def warmup(self,
+#               key,
+#               sample_split_particles: callable,
+#               next_data: callable = lambda: None,
+#               n_iter: int = 10,
+#               n_inner_steps: int = 30,
+#               progress_bar: bool = False,
+#               early_stopping: bool = True):
+#        """resample from particle initializer to stabilize the beginning
+#        of the trajectory
+#        args:
+#            key: prngkey
+#            sample_split_particles: produces next x_train, x_val sample
+#            next_data: produces next batch of data
+#            n_iter: number of iterations (50 training steps each)
+#        """
+#        for _ in tqdm(range(n_iter), disable=not progress_bar):
+#            key, subkey = random.split(key)
+#            self.train(sample_split_particles(subkey),
+#                       n_steps=n_inner_steps,
+#                       data=next_data(),
+#                       early_stopping=early_stopping)
 
     def freeze_state(self):
         """Stores current state as tuple (step_counter, params, rundata)"""
@@ -570,6 +570,7 @@ class SteinNetwork(VectorFieldMixin, TrainingMixin):
             z = random.normal(zkey, (d,))
             zdf = grad(lambda _x: np.vdot(z, f(_x, fkey)))
             div_f = np.vdot(zdf(x), z)
+            #div_f = np.trace(jacfwd(f)(x, fkey))
             sd = np.vdot(f(x, fkey), dlogp_x) + div_f
             l2 = np.vdot(f(x, fkey), f(x, fkey))
             aux = {
