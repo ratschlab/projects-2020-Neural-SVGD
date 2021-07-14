@@ -1,13 +1,16 @@
 # Setup
 
-The main framework used in this project is [JAX](https://github.com/google/jax). The `requirements.txt` file includes the CPU-only version of JAX, which can be installed via pip. To use JAX on GPU or TPU, it needs to be installed separately; see the [installation instructions](https://github.com/google/jax#installation).
+The main framework used in this project is [JAX](https://github.com/google/jax) (version `jax==0.2.7` and `jaxlib==0.1.57`)
+See the [installation instructions](https://github.com/google/jax#installation) to install it with proper accelerator support.
 
-To clone this project and install the CPU-only version (and other dependencies), run
+Optionally (necessary for some of the experiments) install `tensorflow_datasets==4.2.0` and tensorflow 2.0.
+
+To clone this project and install it, run
 
 ```
 git clone git@github.com:ratschlab/projects-2020-Neural-SVGD.git
 cd projects-2020-Neural-SVGD
-pip install -r requirements.txt
+pip install -e .
 ```
 
 This is a work in progress; when finished, I'll add a link to the preprint.
