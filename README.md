@@ -1,4 +1,8 @@
-# Setup
+# Neural Variational Gradient Descent
+
+Code for the paper [Neural Variational Gradient Descent](https://arxiv.org/abs/2107.10731).
+
+## Setup
 
 The main framework used in this project is [JAX](https://github.com/google/jax) (version `jax==0.2.7` and `jaxlib==0.1.57`)
 See the [installation instructions](https://github.com/google/jax#installation) to install it with proper accelerator support.
@@ -13,9 +17,7 @@ cd projects-2020-Neural-SVGD
 pip install -e .
 ```
 
-This is a work in progress; when finished, I'll add a link to the preprint.
-
-# Structure
+## Structure
 
 The implementation is contained in the `nvgd/src` folder. The files are structured as follows:
 
@@ -30,9 +32,7 @@ The implementation is contained in the `nvgd/src` folder. The files are structur
 * `utils.py`: miscellaneous utility functions.
 
 
-# Overview
-
-(Work in progress. Will put arxiv link here once it's out.)
+## Overview
 
 Many standard MCMC methods such as Hamiltonian Monte Carlo don't work well in settings with large data-sets and high-dimensional target posteriors with complicated dependencies. This is why usually simpler methods such as variational inference (VI) or stochastic gradient Langevin dynamics (SGLD) are applied to this type of problem (e.g. training a Bayesian neural network).
 
