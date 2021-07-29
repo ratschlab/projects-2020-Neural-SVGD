@@ -1,21 +1,7 @@
 # Neural Variational Gradient Descent
 
-Code for the paper [Neural Variational Gradient Descent](https://arxiv.org/abs/2107.10731).
+**Note**: This is *not* the 'cleaned up' public repository for the paper [Neural Variational Gradient Descent](https://arxiv.org/abs/2107.10731). That repository is available [here](https://github.com/langosco/neural-variational-gradient-descent).
 
-## Setup
-
-The main framework used in this project is [JAX](https://github.com/google/jax) (version `jax==0.2.7` and `jaxlib==0.1.57`)
-See the [installation instructions](https://github.com/google/jax#installation) to install it with proper accelerator support.
-
-Optionally (necessary for some of the experiments) install `tensorflow_datasets==4.2.0` and tensorflow 2.0.
-
-To clone this project and install it, run
-
-```
-git clone git@github.com:ratschlab/projects-2020-Neural-SVGD.git
-cd projects-2020-Neural-SVGD
-pip install -e .
-```
 
 ## Structure
 
